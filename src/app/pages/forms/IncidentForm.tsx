@@ -184,8 +184,13 @@ export default function IncidentForm({ open, onClose, onSaved, incident, current
       operating_company:    fd.get('operating_company')    || null,
       xc_district:          fd.get('xc_district')          || null,
       well_name:            fd.get('well_name')             || null,
-      'stage#':             fd.get('stage')                || null,
-      'so#':                fd.get('so')                   || null,
+      // BEFORE
+'stage#': fd.get('stage') ?? null,
+'so#':    fd.get('so')    ?? null,
+
+// AFTER
+stage_number: fd.get('stage_number') ?? null,
+so_number:    fd.get('so_number')    ?? null,
       field_visit_id:       fd.get('field_visit_id')       || null,
       failed_component:     fd.get('failed_component')     || null,
       failure_type:         fd.get('failure_type')         || null,
