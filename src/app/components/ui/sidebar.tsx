@@ -16,8 +16,8 @@ import { useAuth } from '../../lib/auth-context';
 import { useTheme } from '../../lib/theme-context';
 import {
   LayoutDashboard, Users, ClipboardList, AlertTriangle,
-  Cpu, TrendingUp, FileBarChart, Upload, Settings,
-  Database, Sun, Moon, LogOut, Map, BarChart2, FileText,
+  Cpu, TrendingUp, FileBarChart,
+  Sun, Moon, LogOut, Map, BarChart2, FileText,
 } from 'lucide-react';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
@@ -45,14 +45,6 @@ const NAV_GROUPS = [
       { path: '/sales',              label: 'Sales',            icon: TrendingUp },
       { path: '/reports',            label: 'Reports',          icon: FileBarChart },
       { path: '/technical-bulletins', label: 'Tech Bulletins',   icon: FileText },
-    ],
-  },
-  {
-    label: 'Tools',
-    items: [
-      { path: '/import',   label: 'Import Data', icon: Upload },
-      { path: '/fix-names',label: 'Fix Names',   icon: Settings },
-      { path: '/schema',   label: 'DB Schema',   icon: Database },
     ],
   },
 ];

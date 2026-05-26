@@ -7,9 +7,6 @@ import IncidentsNew from "./pages/IncidentsNew";
 import PanelsNew from "./pages/PanelsNew";
 import Sales from "./pages/Sales";
 import Reports from "./pages/Reports";
-import Import from "./pages/Import";
-import DataFix from "./pages/DataFix";
-import SchemaViewer from "./pages/SchemaViewer";
 import DiagnosticsPage from "./pages/DiagnosticsPage";
 import Debug from "./pages/Debug";
 import Login from "./pages/Login";
@@ -46,9 +43,6 @@ export const router = createBrowserRouter([
       { path: "technical-bulletins", Component: TechnicalBulletins },
       { path: "technical-bulletin/:id", Component: TechnicalBulletin },
       { path: "technical-bulletin-setup", Component: TechnicalBulletinSetup },
-      { path: "import", Component: Import },
-      { path: "data-fix", Component: DataFix },
-      { path: "schema", Component: SchemaViewer },
       { path: "diagnostics", Component: DiagnosticsPage },
       { path: "debug", Component: Debug },
       { path: "*", Component: NotFound },
