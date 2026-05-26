@@ -217,37 +217,50 @@ async function transferFile(
 }
 
 // ── Lookup table loader ───────────────────────────────────────────────────────
+// Supabase JS client caps a single select at 1000 rows (PostgREST default).
+// We paginate to make sure we load *all* rows from each lookup table.
+async function fetchAll(table: string, columns: string): Promise<any[]> {
+  const PAGE = 1000;
+  let from = 0;
+  const out: any[] = [];
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`${table} fetch: ${error.message}`);
+    if (!data || data.length === 0) break;
+    out.push(...data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
+}
+
 async function loadLookups(): Promise<LookupMaps> {
   console.log('Loading lookup tables (customers, districts, lists, fieldvisits, sqm)...');
-  const [cRes, dRes, lRes, fvRes, sRes] = await Promise.all([
-    supabase.from('customers').select('row_id, customer'),
-    supabase.from('districts').select('row_id, customer_district'),
-    supabase.from('lists').select('row_id, failed_component'),
-    supabase.from('fieldvisits').select('field_visit_id'),
-    supabase.from('sqm').select('sq_manager'),
+  const [cRows, dRows, lRows, fvRows, sRows] = await Promise.all([
+    fetchAll('customers', 'row_id, customer'),
+    fetchAll('districts', 'row_id, customer_district'),
+    fetchAll('lists', 'row_id, failed_component'),
+    fetchAll('fieldvisits', 'field_visit_id'),
+    fetchAll('sqm', 'sq_manager'),
   ]);
-  if (cRes.error) throw new Error(`customers fetch: ${cRes.error.message}`);
-  if (dRes.error) throw new Error(`districts fetch: ${dRes.error.message}`);
-  if (lRes.error) throw new Error(`lists fetch: ${lRes.error.message}`);
-  if (fvRes.error) throw new Error(`fieldvisits fetch: ${fvRes.error.message}`);
-  if (sRes.error) throw new Error(`sqm fetch: ${sRes.error.message}`);
 
   const customer = new Map<string, string>();
-  for (const r of cRes.data || []) if (r.customer && r.row_id) customer.set(r.customer.trim(), r.row_id);
+  for (const r of cRows) if (r.customer && r.row_id) customer.set(r.customer.trim(), r.row_id);
 
   const customer_district = new Map<string, string>();
-  for (const r of dRes.data || [])
-    if (r.customer_district && r.row_id) customer_district.set(r.customer_district.trim(), r.row_id);
+  for (const r of dRows) if (r.customer_district && r.row_id) customer_district.set(r.customer_district.trim(), r.row_id);
 
   const failed_component = new Map<string, string>();
-  for (const r of lRes.data || [])
-    if (r.failed_component && r.row_id) failed_component.set(r.failed_component.trim(), r.row_id);
+  for (const r of lRows) if (r.failed_component && r.row_id) failed_component.set(r.failed_component.trim(), r.row_id);
 
   const field_visit_id = new Set<string>();
-  for (const r of fvRes.data || []) if (r.field_visit_id) field_visit_id.add(String(r.field_visit_id).trim());
+  for (const r of fvRows) if (r.field_visit_id) field_visit_id.add(String(r.field_visit_id).trim());
 
   const xc_rep = new Set<string>();
-  for (const r of sRes.data || []) if (r.sq_manager) xc_rep.add(r.sq_manager.trim());
+  for (const r of sRows) if (r.sq_manager) xc_rep.add(r.sq_manager.trim());
 
   console.log(
     `  customers: ${customer.size} | districts: ${customer_district.size} | lists: ${failed_component.size} | fieldvisits: ${field_visit_id.size} | sqm: ${xc_rep.size}\n`,
@@ -330,16 +343,13 @@ async function main() {
   });
   console.log(`Parsed ${records.length} rows from CSV\n`);
 
-  // Pre-fetch existing incidents to make preserve-edits decisions in-memory
+  // Pre-fetch existing incidents (paginated) to make preserve-edits decisions in-memory
   console.log('Fetching existing incidents from Supabase...');
-  const { data: existingRows, error: fetchErr } = await supabase
-    .from('incidents')
-    .select('*');
-  if (fetchErr) throw fetchErr;
+  const existingRows = await fetchAll('incidents', '*');
   const existingByEventId = new Map(
-    (existingRows || []).map((r: any) => [String(r.event_id), r]),
+    existingRows.map((r: any) => [String(r.event_id), r]),
   );
-  console.log(`Found ${existingRows?.length || 0} existing incidents\n`);
+  console.log(`Found ${existingRows.length} existing incidents\n`);
 
   // Load FK lookup tables
   const lookups = await loadLookups();
