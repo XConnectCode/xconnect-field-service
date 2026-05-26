@@ -109,10 +109,13 @@ export default function IncidentForm({
   const [distId, setDistId] = useState('');
   const [saving, setSaving] = useState(false);
   const [nextEventId, setNextEventId] = useState<string>('');
-  const [image1, setImage1] = useState('');
-  const [image2, setImage2] = useState('');
-  const [uploading1, setUploading1] = useState(false);
-  const [uploading2, setUploading2] = useState(false);
+
+  // Image state — two fixed slots, kept compatible with AppSheet's image1/image2 columns.
+  const [images, setImages] = useState<{ img1: string; img2: string }>({
+    img1: '',
+    img2: '',
+  });
+  const [uploadingSlot, setUploadingSlot] = useState<1 | 2 | null>(null);
 
   // ── Effects ─────────────────────────────────────────────────────────────────
 
@@ -178,23 +181,21 @@ export default function IncidentForm({
     if (incident) {
       setCustId(incident.customer || '');
       setDistId(incident.customer_district || '');
-      setImage1(incident.image1 || '');
-      setImage2(incident.image2 || '');
+      setImages({
+        img1: incident.image1 || '',
+        img2: incident.image2 || '',
+      });
     } else {
       setCustId('');
       setDistId('');
-      setImage1('');
-      setImage2('');
+      setImages({ img1: '', img2: '' });
     }
   }, [incident, open]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handleImageUpload = async (file: File, slot: 1 | 2) => {
-    const setUploading = slot === 1 ? setUploading1 : setUploading2;
-    const setUrl = slot === 1 ? setImage1 : setImage2;
-
-    setUploading(true);
+    setUploadingSlot(slot);
     try {
       if (!file.type.startsWith('image/')) {
         toast.error('Please select an image file');
@@ -220,13 +221,17 @@ export default function IncidentForm({
         data: { publicUrl },
       } = supabase.storage.from('Native Files').getPublicUrl(filePath);
 
-      setUrl(publicUrl);
+      setImages((prev) => ({ ...prev, [`img${slot}`]: publicUrl }));
       toast.success(`Image ${slot} uploaded`);
     } catch (err: any) {
       toast.error(`Upload failed: ${err.message}`);
     } finally {
-      setUploading(false);
+      setUploadingSlot(null);
     }
+  };
+
+  const clearImage = (slot: 1 | 2) => {
+    setImages((prev) => ({ ...prev, [`img${slot}`]: '' }));
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -271,8 +276,8 @@ export default function IncidentForm({
       closed_by: fd.get('closed_by') || null,
       report_version: fd.get('report_version') || null,
       notes: fd.get('notes') || null,
-      image1: image1 || null,
-      image2: image2 || null,
+      image1: images.img1 || null,
+      image2: images.img2 || null,
     };
 
     if (!editing) {
@@ -767,9 +772,8 @@ export default function IncidentForm({
           <Section title="Evidence Images" />
 
           {([1, 2] as const).map((slot) => {
-            const url = slot === 1 ? image1 : image2;
-            const uploading = slot === 1 ? uploading1 : uploading2;
-            const clearUrl = () => (slot === 1 ? setImage1('') : setImage2(''));
+            const url = slot === 1 ? images.img1 : images.img2;
+            const uploading = uploadingSlot === slot;
 
             return (
               <div key={slot}>
@@ -785,7 +789,7 @@ export default function IncidentForm({
                     />
                     <button
                       type="button"
-                      onClick={clearUrl}
+                      onClick={() => clearImage(slot)}
                       className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <X className="w-3.5 h-3.5" />
