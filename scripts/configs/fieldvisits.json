@@ -1,0 +1,38 @@
+{
+  "table": "fieldvisits",
+  "mode": "preserve-edits",
+  "match_on": "field_visit_id",
+  "column_map": {
+    "Field Visit ID": "field_visit_id",
+    "Arrival Date": "arrival_date",
+    "Departure Date": "departure_date",
+    "Purpose for Visit": "visit_purpose",
+    "Field or Facility": "field_or_facility",
+    "Visit Summary": "visit_summary",
+    "LatLong": "lat_long",
+    "Customer Rep/Crew/Fleet": "customer_rep",
+    "Pad Name": "pad_name",
+    "Visit Duration": "visit_duration",
+    "Operating Company": "operating_company",
+    "Customer": "customer",
+    "Customer District": "customer_district",
+    "Communication Panel": "communication_panel",
+    "Digital Shooting Panel": "digital_shooting_panel",
+    "Surface Tester": "surface_tester",
+    "XC Representative": "xc_rep"
+  },
+  "skip_columns": [
+    "Related Incidents",
+    "Related Videos",
+    "Include?",
+    "Visit Duration Hours",
+    "Average Visit Hours"
+  ],
+  "fk_resolution": {
+    "customer": { "table": "customers", "match": "customer", "return": "row_id" },
+    "customer_district": { "table": "districts", "match": "customer_district", "return": "row_id" }
+  },
+  "date_fields": [],
+  "datetime_fields": ["arrival_date", "departure_date"],
+  "enum_normalize": {}
+}

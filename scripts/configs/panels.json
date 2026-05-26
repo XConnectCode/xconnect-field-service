@@ -1,0 +1,45 @@
+{
+  "table": "panels",
+  "mode": "preserve-edits",
+  "match_on": "serial_number",
+  "column_map": {
+    "Panel Type": "panel_type",
+    "Plus Panel": "plus_panel",
+    "Serial #": "serial_number",
+    "Shooting FW": "shootingfw",
+    "WL Control FW": "wl_controlfw",
+    "Logging FW": "loggingfw",
+    "GUI SW": "gui_version",
+    "Surface Check FW": "surfacefw",
+    "Received Date": "received_date",
+    "XC Base": "xc_base",
+    "Panel Status": "panel_status",
+    "Unit#": "unit_number",
+    "Sales Order#": "so#",
+    "Date Updated": "date_updated",
+    "Tracking Info": "tracking_info",
+    "Comments": "comments",
+    "Verified": "verified",
+    "RMA": "rma",
+    "Spare": "is_spare",
+    "Customer District": "customer_district",
+    "Operating Company": "operating_company",
+    "Customer": "customer",
+    "Updated By": "updated_by",
+    "Activity": "activity"
+  },
+  "skip_columns": [
+    "Field View History of Panel ",
+    "Viewed Digital Shooting Panel",
+    "Viewed Surface Tester",
+    "Related Panel Records",
+    "Changes Summary"
+  ],
+  "fk_resolution": {
+    "customer": { "table": "customers", "match": "customer", "return": "row_id" },
+    "customer_district": { "table": "districts", "match": "customer_district", "return": "row_id" }
+  },
+  "date_fields": ["received_date"],
+  "datetime_fields": [],
+  "enum_normalize": {}
+}
