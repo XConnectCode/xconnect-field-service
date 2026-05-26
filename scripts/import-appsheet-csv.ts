@@ -13,16 +13,15 @@
  *   4. Inserts an incident_reports row for each non-empty Incident Report cell.
  *
  * How to run (from your Codespace terminal):
- *   1. Open AppSheet in your browser, log in, then open DevTools → Application →
- *      Cookies → www.appsheet.com. Copy the ENTIRE cookie header value.
- *      (Quickest way: in DevTools Network tab, click any AppSheet request →
- *       Headers → request headers → copy the cookie line.)
- *   2. export APPSHEET_COOKIE='<paste the cookie string here>'
- *   3. export SUPABASE_URL='https://gbllxumuogsncoiaksum.supabase.co'
- *   4. export SUPABASE_SERVICE_KEY='<service_role key from Supabase dashboard>'
- *   5. Place your CSV at scripts/import.csv (or pass --csv=path)
- *   6. Dry run first: pnpm tsx scripts/import-appsheet-csv.ts --dry-run --limit=2
- *   7. Real run:    pnpm tsx scripts/import-appsheet-csv.ts
+ *   1. export SUPABASE_URL='https://gbllxumuogsncoiaksum.supabase.co'
+ *   2. export SUPABASE_SERVICE_KEY='<service_role key from Supabase dashboard>'
+ *   3. Place your CSV at scripts/import.csv (or pass --csv=path)
+ *   4. Dry run first: pnpm tsx scripts/import-appsheet-csv.ts --dry-run --limit=2
+ *   5. Real run:    pnpm tsx scripts/import-appsheet-csv.ts
+ *
+ * Note: APPSHEET_COOKIE is NOT required — AppSheet image/report URLs in the
+ * CSV are pre-signed (signature= query param), so they download with just a
+ * normal browser User-Agent. The cookie is supported as a fallback if needed.
  *
  * Safe to re-run. Files are deterministic per event_id, so re-runs overwrite
  * cleanly. Incidents are upserted with preserve-edits so post-import UI edits
@@ -49,7 +48,10 @@ const csvPath = resolve(csvArg ? csvArg.split('=')[1] : 'scripts/import.csv');
 const startEventIdArg = args.find((a) => a.startsWith('--start='));
 const startEventId = startEventIdArg ? parseInt(startEventIdArg.split('=')[1], 10) : 0;
 
-if (!APPSHEET_COOKIE) throw new Error('Missing APPSHEET_COOKIE env var');
+// APPSHEET_COOKIE is optional — the AppSheet `getimageurl` URLs are pre-signed
+// (signature= param in query string), so they work without a session cookie
+// as long as we send a normal browser User-Agent. If a cookie is provided, we
+// pass it along as a fallback.
 if (!SUPABASE_URL) throw new Error('Missing SUPABASE_URL env var');
 if (!SUPABASE_SERVICE_KEY) throw new Error('Missing SUPABASE_SERVICE_KEY env var');
 if (!existsSync(csvPath)) throw new Error(`CSV not found at ${csvPath}`);
@@ -134,17 +136,21 @@ const cleanValue = (col: string, raw: string): string | null => {
   return v;
 };
 
-// Download a binary from AppSheet using the cookie
+// Download a binary from AppSheet. The getimageurl URLs are pre-signed and
+// redirect (302) to a CDN URL (e.g. googleusercontent.com / S3). fetch() in
+// Node 20+ follows redirects by default. We send browser-like headers to
+// avoid being treated as a bot.
 async function downloadAppSheet(url: string): Promise<{ buffer: Buffer; contentType: string }> {
-  const res = await fetch(url, {
-    headers: {
-      Cookie: APPSHEET_COOKIE!,
-      'User-Agent':
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
-      Accept: 'image/*,application/pdf,*/*',
-    },
-  });
-  if (!res.ok) throw new Error(`Download failed ${res.status}: ${url.slice(0, 100)}`);
+  const headers: Record<string, string> = {
+    'User-Agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,application/pdf,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    Referer: 'https://www.appsheet.com/',
+  };
+  if (APPSHEET_COOKIE) headers.Cookie = APPSHEET_COOKIE;
+  const res = await fetch(url, { headers, redirect: 'follow' });
+  if (!res.ok) throw new Error(`Download failed ${res.status}: ${url.slice(0, 120)}`);
   const buffer = Buffer.from(await res.arrayBuffer());
   if (buffer.length < 100) throw new Error(`Suspiciously small file (${buffer.length} bytes)`);
   const contentType = res.headers.get('content-type') || 'application/octet-stream';
