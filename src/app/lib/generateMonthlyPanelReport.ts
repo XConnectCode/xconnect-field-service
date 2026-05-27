@@ -224,7 +224,7 @@ export async function generateMonthlyPanelReport(opts: MonthlyPanelReportOptions
 
   y = sectionHead(doc, 'Leased Panel Ledger', y);
 
-  const ledgerCols = { serial: 32, customer: 70, district: 50, status: CONT_W - 32 - 70 - 50 };
+  const ledgerCols = { serial: 28, type: 42, customer: 54, district: 38, status: CONT_W - 28 - 42 - 54 - 38 };
 
   const drawLedgerHeader = (dy: number) => {
     doc.setFillColor(...XC_GREEN as [number, number, number]);
@@ -233,9 +233,10 @@ export async function generateMonthlyPanelReport(opts: MonthlyPanelReportOptions
     doc.setFontSize(8);
     doc.setTextColor(...WHITE as [number, number, number]);
     doc.text('SERIAL #', MARGIN + 2, dy + 5.5);
-    doc.text('CUSTOMER', MARGIN + ledgerCols.serial + 2, dy + 5.5);
-    doc.text('DISTRICT', MARGIN + ledgerCols.serial + ledgerCols.customer + 2, dy + 5.5);
-    doc.text('STATUS', MARGIN + ledgerCols.serial + ledgerCols.customer + ledgerCols.district + 2, dy + 5.5);
+    doc.text('TYPE', MARGIN + ledgerCols.serial + 2, dy + 5.5);
+    doc.text('CUSTOMER', MARGIN + ledgerCols.serial + ledgerCols.type + 2, dy + 5.5);
+    doc.text('DISTRICT', MARGIN + ledgerCols.serial + ledgerCols.type + ledgerCols.customer + 2, dy + 5.5);
+    doc.text('STATUS', MARGIN + ledgerCols.serial + ledgerCols.type + ledgerCols.customer + ledgerCols.district + 2, dy + 5.5);
     return dy + 8;
   };
 
@@ -267,9 +268,10 @@ export async function generateMonthlyPanelReport(opts: MonthlyPanelReportOptions
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...GRAY_TEXT as [number, number, number]);
     doc.text(getSerial(p), MARGIN + 2, y + 5);
-    doc.text(p.customerName || '—', MARGIN + ledgerCols.serial + 2, y + 5);
-    doc.text(p.districtName || '—', MARGIN + ledgerCols.serial + ledgerCols.customer + 2, y + 5);
-    doc.text(p.panel_status || '—', MARGIN + ledgerCols.serial + ledgerCols.customer + ledgerCols.district + 2, y + 5);
+    doc.text(p.panel_type || '—', MARGIN + ledgerCols.serial + 2, y + 5);
+    doc.text(p.customerName || '—', MARGIN + ledgerCols.serial + ledgerCols.type + 2, y + 5);
+    doc.text(p.districtName || '—', MARGIN + ledgerCols.serial + ledgerCols.type + ledgerCols.customer + 2, y + 5);
+    doc.text(p.panel_status || '—', MARGIN + ledgerCols.serial + ledgerCols.type + ledgerCols.customer + ledgerCols.district + 2, y + 5);
 
     y += 7.5;
     rowIdx++;
