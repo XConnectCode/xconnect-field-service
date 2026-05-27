@@ -8,3 +8,7 @@ dist/
 .drive-backup/
 .drive-backup/
 .drive-backup/
+
+# Supabase CLI artifacts
+supabase/.temp/
+supabase/config.toml.bak
