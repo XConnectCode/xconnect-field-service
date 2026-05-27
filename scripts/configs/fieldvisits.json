@@ -1,7 +1,8 @@
 {
   "table": "fieldvisits",
+  "appsheet_table": "Field Visits",
   "mode": "preserve-edits",
-  "match_on": "field_visit_id",
+  "match_on": "row_id",
   "column_map": {
     "Field Visit ID": "field_visit_id",
     "Arrival Date": "arrival_date",
@@ -21,16 +22,9 @@
     "Surface Tester": "surface_tester",
     "XC Representative": "xc_rep"
   },
-  "skip_columns": [
-    "Related Incidents",
-    "Related Videos",
-    "Include?",
-    "Visit Duration Hours",
-    "Average Visit Hours"
-  ],
   "fk_resolution": {
-    "customer": { "table": "customers", "match": "customer", "return": "row_id" },
-    "customer_district": { "table": "districts", "match": "customer_district", "return": "row_id" }
+    "customer": { "table": "customers", "match": "row_id", "return": "row_id" },
+    "customer_district": { "table": "districts", "match": "customer_district_id", "return": "row_id" }
   },
   "date_fields": [],
   "datetime_fields": ["arrival_date", "departure_date"],

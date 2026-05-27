@@ -1,7 +1,8 @@
 {
   "table": "panels",
+  "appsheet_table": "Panels",
   "mode": "preserve-edits",
-  "match_on": "serial_number",
+  "match_on": "row_id",
   "column_map": {
     "Panel Type": "panel_type",
     "Plus Panel": "plus_panel",
@@ -28,18 +29,11 @@
     "Updated By": "updated_by",
     "Activity": "activity"
   },
-  "skip_columns": [
-    "Field View History of Panel ",
-    "Viewed Digital Shooting Panel",
-    "Viewed Surface Tester",
-    "Related Panel Records",
-    "Changes Summary"
-  ],
   "fk_resolution": {
-    "customer": { "table": "customers", "match": "customer", "return": "row_id" },
-    "customer_district": { "table": "districts", "match": "customer_district", "return": "row_id" }
+    "customer": { "table": "customers", "match": "row_id", "return": "row_id" },
+    "customer_district": { "table": "districts", "match": "customer_district_id", "return": "row_id" }
   },
-  "date_fields": ["received_date"],
+  "date_fields": ["received_date", "date_updated"],
   "datetime_fields": [],
   "enum_normalize": {}
 }
