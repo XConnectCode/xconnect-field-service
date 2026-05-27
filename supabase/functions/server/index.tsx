@@ -330,5 +330,11 @@ initializeIncidentImagesBucket().then(() => {
   console.error('⚠️ Failed to initialize incident images bucket:', error);
 });
 
-// Start the server
-Deno.serve(app.fetch);
+// Start the server when run directly (local dev). When imported as a module
+// for an Edge Function deployment we should not call Deno.serve automatically.
+if (import.meta.main) {
+  Deno.serve(app.fetch);
+}
+
+// Export the app for use by function wrappers or tests
+export default app;

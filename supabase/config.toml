@@ -1,6 +1,3 @@
-[project]
-project_id = "gbllxumuogsncoiaksum"
-
 [api]
 enabled = true
 port = 54321
@@ -9,10 +6,3 @@ max_rows = 1000
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
-
-[edge_functions]
-enabled = true
-
-[[edge_functions.functions]]
-name = "make-server"
-verify_jwt = false
