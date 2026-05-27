@@ -1,6 +1,5 @@
-// Wrapper entrypoint for Supabase Edge Function deployment.
-// Imports the Hono app (without starting a server) and exports its fetch
-// handler as the function entrypoint.
-import app from "../server/index.tsx";
+// Entrypoint for Supabase Edge Function deployment.
+// Imports the Hono app from the same folder and starts the server.
+import app from "./index.tsx";
 
-export default app.fetch;
+Deno.serve(app.fetch);
