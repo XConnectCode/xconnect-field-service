@@ -22,6 +22,7 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
+import { getSerial } from '../../lib/serialUtils';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
@@ -172,7 +173,6 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
 
   // Panel options grouped by type
   const panelsByType = (type: string) => allPanels.filter(p => p.panel_type === type);
-  const getSerial = (p: any) => p?.['serial#'] || p?.serial_number || p?.serial || '';
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>

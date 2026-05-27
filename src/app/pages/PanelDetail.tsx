@@ -8,6 +8,7 @@ import { Badge } from '../components/ui/badge';
 import { ArrowLeft, Monitor, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
+import { getSerial } from '../lib/serialUtils';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 export default function PanelDetail() {
@@ -16,7 +17,6 @@ export default function PanelDetail() {
   const { accessToken } = useAuth();
   const [panel, setPanel] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const getSerial = (p: any) => p?.['serial#'] || p?.serial_number || p?.serial || '';
 
   useEffect(() => {
     loadPanel();

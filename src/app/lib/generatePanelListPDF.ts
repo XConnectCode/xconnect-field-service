@@ -3,6 +3,7 @@ import {
   XC_GREEN, XC_DARK, XC_BORDER, WHITE, GRAY_TEXT, LIGHT_GREEN,
   MARGIN, CONT_W, PAGE_H, PAGE_W,
 } from './pdfUtils';
+import { getSerial } from './serialUtils';
 
 export interface PanelRow {
   'serial#': string;
@@ -34,8 +35,6 @@ const STATUS_COLORS: Record<string, [number, number, number]> = {
   'Loaned':      [168, 85, 247],
   'Sold':        [220, 38, 38],
 };
-
-const getSerial = (p: PanelRow) => p?.['serial#'] || (p as any)?.serial_number || (p as any)?.serial || '—';
 
 export async function generatePanelListPDF(opts: PanelListOptions): Promise<void> {
   const { panels, customerName, districtName, logoUrl } = opts;

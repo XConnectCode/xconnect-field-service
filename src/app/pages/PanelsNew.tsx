@@ -10,6 +10,7 @@ import { Badge } from '../components/ui/badge';
 import { Plus, Edit, ExternalLink, X, Download, FileText } from 'lucide-react';
 import { generatePanelListPDF } from '../lib/generatePanelListPDF';
 import { generateMonthlyPanelReport } from '../lib/generateMonthlyPanelReport';
+import { getSerial } from '../lib/serialUtils';
 import PanelForm from './forms/PanelForm';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
@@ -55,7 +56,6 @@ export default function PanelsNew() {
   const reportCustomerName = searchParams.get('customerName');
   const reportDistrictName = searchParams.get('districtName');
   const fromReport = !!(reportCustomerName || reportDistrictName);
-  const getSerial = (p: any) => p?.['serial#'] || p?.serial_number || p?.serial || '';
 
   useEffect(() => {
     if (accessToken) loadData();
