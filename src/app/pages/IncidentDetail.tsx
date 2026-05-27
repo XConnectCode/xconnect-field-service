@@ -8,7 +8,7 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
   ArrowLeft, Edit, FileText, Download, Send, CheckCircle2,
-  RefreshCw, Eye, X, ImageOff, ExternalLink, Clock, Plus,
+  RefreshCw, Eye, X, ExternalLink, Clock, Plus,
 } from 'lucide-react';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
@@ -18,6 +18,7 @@ import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { supabase } from '../lib/supabase';
 import { generateIncidentReportPDF } from '../lib/generateIncidentReportPDF';
 import IncidentForm from './forms/IncidentForm';
+import ImageUpload from '../components/ImageUpload';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function safeFmtDate(val: any, fmt: string): string {
@@ -111,7 +112,6 @@ export default function IncidentDetail() {
   const [linkedVisitRowId, setLinkedVisitRowId] = useState<string | null>(null);
   const [updates,     setUpdates]     = useState<any[]>([]);
   const [updatesLoading, setUpdatesLoading] = useState(false);
-  const [evidenceImages, setEvidenceImages] = useState<{ url: string; broken: boolean; source: string }[]>([]);
   const [storedReports, setStoredReports] = useState<any[]>([]);
 
   // Add Update dialog
@@ -173,58 +173,8 @@ export default function IncidentDetail() {
         setUpdates([]);
       }
 
-      // Load evidence images:
-      //   1) New polymorphic 'images' table (Supabase Storage signed URLs) — primary going forward
-      //   2) Legacy 'images_legacy' (path-only, broken) — still shown until Drive backfill finishes
-      //   3) incidents.image1/image2 columns (AppSheet relative paths — also broken until backfill)
-      const collected: { url: string; broken: boolean; source: string }[] = [];
-
-      // New polymorphic images table
-      if (incidentData?.row_id) {
-        const { data: newImgs } = await supabase
-          .from('images')
-          .select('id, public_url, storage_path, caption')
-          .eq('parent_table', 'incidents')
-          .eq('parent_row_id', incidentData.row_id)
-          .order('created_at', { ascending: true });
-        for (const r of newImgs || []) {
-          const url = r.public_url || r.storage_path;
-          if (!url) continue;
-          collected.push({ url, broken: !url.startsWith('http'), source: 'images' });
-        }
-      }
-
-      // Embedded image1/image2 (legacy AppSheet paths — broken until backfill)
-      if (incidentData?.image1) collected.push({ url: incidentData.image1, broken: !String(incidentData.image1).startsWith('http'), source: 'incidents.image1' });
-      if (incidentData?.image2) collected.push({ url: incidentData.image2, broken: !String(incidentData.image2).startsWith('http'), source: 'incidents.image2' });
-
-      // Legacy images_legacy (renamed from old 'images')
-      if (incidentData?.event_id || incidentData?.row_id) {
-        const { data: imgRows } = await supabase
-          .from('images_legacy')
-          .select('row_id, pictures, event_id')
-          .or(`event_id.eq.${incidentData.event_id},event_id.eq.${incidentData.row_id}`);
-        for (const r of imgRows || []) {
-          if (!r.pictures) continue;
-          const isHttp = r.pictures.startsWith('http');
-          const isJunk = r.pictures.includes('Unable to load image data');
-          if (isJunk) continue;
-          collected.push({
-            url: r.pictures,
-            broken: !isHttp,
-            source: 'images_legacy',
-          });
-        }
-      }
-
-      // Dedupe by URL
-      const seen = new Set<string>();
-      const deduped = collected.filter((c) => {
-        if (seen.has(c.url)) return false;
-        seen.add(c.url);
-        return true;
-      });
-      setEvidenceImages(deduped);
+      // Evidence images are now rendered by <RecordImages /> which fetches
+      // signed URLs from the Edge Function (GET /images/incidents/:row_id).
 
       // Load stored reports (AppSheet originals + future server-stored generated reports)
       if (incidentData?.event_id) {
@@ -625,53 +575,21 @@ export default function IncidentDetail() {
             </Card>
           )}
 
-          {/* ── Evidence Images ── */}
-          {evidenceImages.length > 0 && (
+          {/* ── Evidence Images (polymorphic) ── */}
+          {incident?.row_id && (
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  Evidence Images
-                  <Badge variant="secondary" className="ml-1">{evidenceImages.length}</Badge>
-                </CardTitle>
+                <CardTitle>Evidence Images</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {evidenceImages.map((img, idx) => (
-                    <div key={idx} className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
-                      {img.broken ? (
-                        <div className="flex flex-col items-center justify-center py-12 text-gray-400 gap-2 px-3">
-                          <ImageOff className="w-8 h-8" />
-                          <span className="text-xs text-center">
-                            Image not migrated from AppSheet
-                          </span>
-                          <span className="text-[10px] text-gray-300 truncate max-w-full">
-                            {img.url}
-                          </span>
-                        </div>
-                      ) : (
-                        <a href={img.url} target="_blank" rel="noopener noreferrer" className="block group">
-                          <img
-                            src={img.url}
-                            alt={`Evidence image ${idx + 1}`}
-                            className="w-full object-cover max-h-80 group-hover:opacity-90 transition-opacity"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                              (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-                            }}
-                          />
-                          <div className="hidden flex-col items-center justify-center py-12 text-gray-400 gap-2">
-                            <ImageOff className="w-8 h-8" />
-                            <span className="text-sm">Image unavailable</span>
-                          </div>
-                          <div className="px-3 py-2 bg-white border-t border-gray-100 flex items-center justify-between">
-                            <span className="text-xs text-gray-500 truncate">Image {idx + 1}</span>
-                            <Eye className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                          </div>
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <ImageUpload
+                  parentTable="incidents"
+                  parentRowId={incident.row_id}
+                  baseUrl={`https://${projectId}.supabase.co/functions/v1/make-server-64775d98`}
+                  publicAnonKey={publicAnonKey}
+                  autoLoad
+                  maxImages={20}
+                />
               </CardContent>
             </Card>
           )}

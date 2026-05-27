@@ -1,6 +1,6 @@
 import { Hono } from "npm:hono";
 import { createClient } from "npm:@supabase/supabase-js@2.49.2";
-import { uploadIncidentImage, listIncidentImages, deleteIncidentImage } from './upload-handler.tsx';
+import { uploadIncidentImage, listIncidentImages, deleteIncidentImage, uploadImage, listImagesForRecord, deleteImageById } from './upload-handler.tsx';
 import { generateIncidentReportPDF } from './pdf-generator.tsx';
 
 const supabase = createClient(
@@ -1045,6 +1045,84 @@ apiRoutes.delete("/incidents/images", async (c) => {
     return c.json({ success: true });
   } catch (error) {
     console.error('Error in delete image endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// ============ POLYMORPHIC IMAGE ROUTES ============
+// Upload an image for any parent record (incidents, panels, panel_history, customers, districts, fieldvisits, components)
+apiRoutes.post("/images/:parentTable/:parentRowId", async (c) => {
+  try {
+    const parentTable = c.req.param('parentTable');
+    const parentRowId = c.req.param('parentRowId');
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    const fieldName = (formData.get('fieldName') as string) || undefined;
+    const caption = (formData.get('caption') as string) || undefined;
+    const source = ((formData.get('source') as string) || 'user') as 'user' | 'appsheet' | 'system';
+
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
+    }
+
+    const result = await uploadImage(file, parentTable, parentRowId, {
+      fieldName,
+      caption,
+      source,
+    });
+
+    if (result.error) {
+      return c.json({ error: result.error }, 500);
+    }
+
+    return c.json({
+      id: result.id,
+      url: result.url,
+      storagePath: result.storagePath,
+    });
+  } catch (error) {
+    console.error('Error in polymorphic upload endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// List images for any parent record (returns signed URLs)
+apiRoutes.get("/images/:parentTable/:parentRowId", async (c) => {
+  try {
+    const parentTable = c.req.param('parentTable');
+    const parentRowId = c.req.param('parentRowId');
+
+    const result = await listImagesForRecord(parentTable, parentRowId);
+
+    if (result.error) {
+      return c.json({ error: result.error }, 500);
+    }
+
+    return c.json({ files: result.files });
+  } catch (error) {
+    console.error('Error in polymorphic list images endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Delete an image by its id (removes storage object + DB row)
+apiRoutes.delete("/images/:imageId", async (c) => {
+  try {
+    const imageId = c.req.param('imageId');
+
+    if (!imageId) {
+      return c.json({ error: 'No image id provided' }, 400);
+    }
+
+    const result = await deleteImageById(imageId);
+
+    if (result.error) {
+      return c.json({ error: result.error }, 500);
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error in delete image-by-id endpoint:', error);
     return c.json({ error: String(error) }, 500);
   }
 });

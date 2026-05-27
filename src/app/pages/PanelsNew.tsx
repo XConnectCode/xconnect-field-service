@@ -7,7 +7,7 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Plus, Edit, Trash, ExternalLink, X, Download, FileText } from 'lucide-react';
+import { Plus, Edit, Trash, ExternalLink, X, Download, FileText, Eye } from 'lucide-react';
 import { generatePanelListPDF } from '../lib/generatePanelListPDF';
 import { generateMonthlyPanelReport } from '../lib/generateMonthlyPanelReport';
 import { getSerial } from '../lib/serialUtils';
@@ -50,6 +50,10 @@ export default function PanelsNew() {
 
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [editingPanel, setEditingPanel] = useState<any>(null);
+
+  // Quick view dialog state
+  const [quickOpen,  setQuickOpen]  = useState(false);
+  const [quickPanel, setQuickPanel] = useState<any>(null);
 
   const reportCustomerName = searchParams.get('customerName');
   const reportDistrictName = searchParams.get('districtName');
@@ -381,6 +385,14 @@ export default function PanelsNew() {
                       <TableCell className="text-sm">{panel.date_updated}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            title="Quick view"
+                            onClick={() => { setQuickPanel(panel); setQuickOpen(true); }}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
                           <Button size="sm" variant="outline" onClick={() => openEdit(panel)}>
                             <Edit className="w-4 h-4" />
                           </Button>

@@ -8,7 +8,6 @@ import { Badge } from '../components/ui/badge';
 import { ArrowLeft, Monitor, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
-import { getSerial } from '../lib/serialUtils';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 export default function PanelDetail() {
@@ -75,7 +74,7 @@ export default function PanelDetail() {
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Panel Details</h1>
-              <p className="text-gray-600 mt-2">{getSerial(panel) || 'N/A'}</p>
+              <p className="text-gray-600 mt-2">{panel['serial#'] || 'N/A'}</p>
             </div>
             <Badge className={getStatusColor(panel.panel_status)}>
               {panel.panel_status || 'Unknown'}
@@ -149,6 +148,23 @@ export default function PanelDetail() {
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <pre className="whitespace-pre-wrap text-sm text-gray-900 font-sans">{panel.comments}</pre>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Panel Images (polymorphic) ── */}
+          {panel?.row_id && (
+            <Card>
+              <CardHeader><CardTitle>Images</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <ImageUpload
+                  parentTable="panels"
+                  parentRowId={panel.row_id}
+                  baseUrl={`https://${projectId}.supabase.co/functions/v1/make-server-64775d98`}
+                  publicAnonKey={publicAnonKey}
+                  autoLoad
+                  maxImages={10}
+                />
               </CardContent>
             </Card>
           )}
