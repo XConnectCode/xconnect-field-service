@@ -165,11 +165,24 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
           </F>
 
           <F label="Panel Type" required>
-            <select name="panel_type" defaultValue={panel?.panel_type || ''}
-              className="w-full border border-gray-300 rounded-md p-2 text-sm" required>
-              <option value="">— Select type —</option>
-              {PANEL_TYPE_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
+            {editing ? (
+              <>
+                <div
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm bg-gray-50 cursor-not-allowed text-gray-700"
+                  title="Panel type is locked after creation"
+                >
+                  {panel?.panel_type || '—'}
+                </div>
+                {/* Hidden field so the value is included in form submission */}
+                <input type="hidden" name="panel_type" value={panel?.panel_type || ''} />
+              </>
+            ) : (
+              <select name="panel_type" defaultValue={panel?.panel_type || ''}
+                className="w-full border border-gray-300 rounded-md p-2 text-sm" required>
+                <option value="">— Select type —</option>
+                {PANEL_TYPE_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            )}
           </F>
 
           <F label="Plus Panel?">

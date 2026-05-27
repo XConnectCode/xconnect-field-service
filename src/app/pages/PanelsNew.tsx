@@ -7,7 +7,7 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Plus, Edit, Trash, ExternalLink, X, Download, FileText, Eye } from 'lucide-react';
+import { Plus, Edit, ExternalLink, X, Download, FileText, Eye } from 'lucide-react';
 import { generatePanelListPDF } from '../lib/generatePanelListPDF';
 import { generateMonthlyPanelReport } from '../lib/generateMonthlyPanelReport';
 import { getSerial } from '../lib/serialUtils';
@@ -130,17 +130,8 @@ export default function PanelsNew() {
     loaned:     panels.filter(p => p.panel_status === 'Loaned').length,
   }), [panels]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this panel?')) return;
-    try {
-      const res = await fetch(`${baseUrl}/panels/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` },
-      });
-      if (res.ok) { toast.success('Panel deleted'); loadData(); }
-      else toast.error('Failed to delete panel');
-    } catch { toast.error('Failed to delete panel'); }
-  };
+  // Note: panel deletion intentionally not exposed in UI to prevent accidental loss.
+  // To remove a panel, change its status (e.g. "Sold") or use a direct DB action.
 
   const handleExportPDF = async () => {
     try {
@@ -395,9 +386,6 @@ export default function PanelsNew() {
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => openEdit(panel)}>
                             <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => handleDelete(panel.row_id)}>
-                            <Trash className="w-4 h-4" />
                           </Button>
                         </div>
                       </TableCell>
