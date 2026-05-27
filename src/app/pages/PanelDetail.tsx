@@ -7,6 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { ArrowLeft, Monitor, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
+import ImageUpload from '../components/ImageUpload';
+import { getSerial } from '../lib/serialUtils';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 export default function PanelDetail() {
   const { id } = useParams();
@@ -72,7 +75,7 @@ export default function PanelDetail() {
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Panel Details</h1>
-              <p className="text-gray-600 mt-2">{panel['serial#'] || 'N/A'}</p>
+              <p className="text-gray-600 mt-2">{getSerial(panel) || 'N/A'}</p>
             </div>
             <Badge className={getStatusColor(panel.panel_status)}>
               {panel.panel_status || 'Unknown'}

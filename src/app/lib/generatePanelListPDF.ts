@@ -3,6 +3,7 @@ import {
   XC_GREEN, XC_DARK, XC_BORDER, WHITE, GRAY_TEXT, LIGHT_GREEN,
   MARGIN, CONT_W, PAGE_H, PAGE_W,
 } from './pdfUtils';
+import { getSerial } from './serialUtils';
 
 export interface PanelRow {
   'serial#': string;
@@ -151,7 +152,7 @@ export async function generatePanelListPDF(opts: PanelListOptions): Promise<void
       }
 
       const row = {
-        serial:       p['serial#'] || '—',
+        serial:       getSerial(p),
         status:       p.panel_status || '—',
         base:         p.xc_base || '—',
         fw:           p.shootingfw || '—',

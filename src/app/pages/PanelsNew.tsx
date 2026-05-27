@@ -10,6 +10,8 @@ import { Badge } from '../components/ui/badge';
 import { Plus, Edit, Trash, ExternalLink, X, Download, FileText } from 'lucide-react';
 import { generatePanelListPDF } from '../lib/generatePanelListPDF';
 import { generateMonthlyPanelReport } from '../lib/generateMonthlyPanelReport';
+import { getSerial } from '../lib/serialUtils';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import PanelForm from './forms/PanelForm';
 import { toast } from 'sonner';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
@@ -354,7 +356,7 @@ export default function PanelsNew() {
                           to={`/panels/${panel.row_id}`}
                           className="flex items-center gap-1 text-blue-600 hover:underline"
                         >
-                          {panel['serial#']}
+                          {getSerial(panel)}
                           <ExternalLink className="w-3 h-3" />
                         </Link>
                       </TableCell>
@@ -394,6 +396,24 @@ export default function PanelsNew() {
             </Table>
           </CardContent>
         </Card>
+
+        {/* Quick view dialog for row click */}
+        <Dialog open={quickOpen} onOpenChange={(open) => { setQuickOpen(open); if (!open) setQuickPanel(null); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Panel {getSerial(quickPanel) || ''}</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-3 mt-2 text-sm">
+              <div><strong>Type:</strong> {quickPanel?.panel_type || '-'}</div>
+              <div><strong>Status:</strong> <StatusBadge status={quickPanel?.panel_status} /></div>
+              <div><strong>XC Base:</strong> {quickPanel?.xc_base || '-'}</div>
+              <div><strong>Customer:</strong> {quickPanel?.customerName || 'Not assigned'}</div>
+              <div><strong>District:</strong> {quickPanel?.districtName || '-'}</div>
+              <div><strong>FW Version:</strong> {quickPanel?.shootingfw || '-'}</div>
+              <div><strong>Last Updated:</strong> {quickPanel?.date_updated || '-'}</div>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Add / Edit Dialog */}
         <PanelForm

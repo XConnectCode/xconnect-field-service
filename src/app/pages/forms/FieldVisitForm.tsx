@@ -22,6 +22,7 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
+import { getSerial } from '../../lib/serialUtils';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
@@ -325,7 +326,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
               className="w-full border border-gray-300 rounded-md p-2 text-sm">
               <option value="">— None —</option>
               {panelsByType('Digital Shooting Panel').map(p => (
-                <option key={p['serial#']} value={p['serial#']}>{p['serial#']}</option>
+                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
               ))}
             </select>
           </F>
@@ -335,7 +336,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
               className="w-full border border-gray-300 rounded-md p-2 text-sm">
               <option value="">— None —</option>
               {panelsByType('Communication Panel').map(p => (
-                <option key={p['serial#']} value={p['serial#']}>{p['serial#']}</option>
+                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
               ))}
             </select>
           </F>
@@ -345,7 +346,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
               className="w-full border border-gray-300 rounded-md p-2 text-sm">
               <option value="">— None —</option>
               {panelsByType('Surface Tester').map(p => (
-                <option key={p['serial#']} value={p['serial#']}>{p['serial#']}</option>
+                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
               ))}
             </select>
           </F>
