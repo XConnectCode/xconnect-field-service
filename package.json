@@ -7,7 +7,9 @@
     "dev": "vite dev --host 0.0.0.0 --port 5173",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "tsx ./src/app/lib/serialUtils.test.ts"
+    "test": "tsx ./src/app/lib/serialUtils.test.ts",
+    "edge:sync": "node scripts/sync-edge-function.mjs",
+    "edge:deploy": "pnpm edge:sync && supabase functions deploy make-server-64775d98 --project-ref gbllxumuogsncoiaksum"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
