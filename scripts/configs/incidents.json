@@ -38,7 +38,7 @@
   "fk_resolution": {
     "customer": { "table": "customers", "match": "row_id", "return": "row_id" },
     "customer_district": { "table": "districts", "match": "customer_district_id", "return": "row_id" },
-    "failed_component": { "table": "lists", "match": "row_id", "return": "row_id" }
+    "failed_component": { "table": "components", "match": "row_id", "return": "row_id" }
   },
   "date_fields": ["date_incident", "action_due_date", "closed_date"],
   "datetime_fields": [],
