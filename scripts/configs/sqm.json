@@ -1,0 +1,14 @@
+{
+  "table": "sqm",
+  "appsheet_table": "XC Representatives",
+  "mode": "preserve-edits",
+  "match_on": "sq_manager",
+  "column_map": {
+    "SQ Manager": "sq_manager",
+    "Email": "email"
+  },
+  "fk_resolution": {},
+  "date_fields": [],
+  "datetime_fields": [],
+  "enum_normalize": {}
+}
