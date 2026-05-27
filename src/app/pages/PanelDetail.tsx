@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { ArrowLeft, Monitor, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
+import ImageUpload from '../components/ImageUpload';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 export default function PanelDetail() {
   const { id } = useParams();
@@ -146,6 +148,23 @@ export default function PanelDetail() {
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <pre className="whitespace-pre-wrap text-sm text-gray-900 font-sans">{panel.comments}</pre>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Panel Images (polymorphic) ── */}
+          {panel?.row_id && (
+            <Card>
+              <CardHeader><CardTitle>Images</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <ImageUpload
+                  parentTable="panels"
+                  parentRowId={panel.row_id}
+                  baseUrl={`https://${projectId}.supabase.co/functions/v1/make-server-64775d98`}
+                  publicAnonKey={publicAnonKey}
+                  autoLoad
+                  maxImages={10}
+                />
               </CardContent>
             </Card>
           )}
