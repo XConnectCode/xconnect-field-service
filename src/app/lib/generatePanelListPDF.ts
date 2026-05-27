@@ -35,6 +35,8 @@ const STATUS_COLORS: Record<string, [number, number, number]> = {
   'Sold':        [220, 38, 38],
 };
 
+const getSerial = (p: PanelRow) => p?.['serial#'] || (p as any)?.serial_number || (p as any)?.serial || '—';
+
 export async function generatePanelListPDF(opts: PanelListOptions): Promise<void> {
   const { panels, customerName, districtName, logoUrl } = opts;
   const doc = await loadJsPDF();
@@ -151,7 +153,7 @@ export async function generatePanelListPDF(opts: PanelListOptions): Promise<void
       }
 
       const row = {
-        serial:       p['serial#'] || '—',
+        serial:       getSerial(p),
         status:       p.panel_status || '—',
         base:         p.xc_base || '—',
         fw:           p.shootingfw || '—',

@@ -26,6 +26,8 @@ function fmt$(n: number) {
   return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 }
 
+const getSerial = (p: any) => p?.['serial#'] || p?.serial_number || p?.serial || '—';
+
 function sectionHead(doc: any, text: string, y: number): number {
   doc.setFillColor(...XC_DARK as [number, number, number]);
   doc.rect(MARGIN, y, CONT_W, 9, 'F');
@@ -285,7 +287,7 @@ export async function generateMonthlyPanelReport(opts: MonthlyPanelReportOptions
 
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(...GRAY_TEXT as [number, number, number]);
-      doc.text(p['serial#'] || '—', MARGIN + ledgerCols.type + 2,                                       y + 5);
+      doc.text(getSerial(p), MARGIN + ledgerCols.type + 2,                                       y + 5);
       doc.text(p['unit#']   || '—', MARGIN + ledgerCols.type + ledgerCols.serial + 2,                   y + 5);
       doc.text(p.shootingfw || '—', MARGIN + ledgerCols.type + ledgerCols.serial + ledgerCols.unit + 2, y + 5);
 
