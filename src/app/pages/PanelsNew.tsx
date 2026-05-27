@@ -55,6 +55,7 @@ export default function PanelsNew() {
   const reportCustomerName = searchParams.get('customerName');
   const reportDistrictName = searchParams.get('districtName');
   const fromReport = !!(reportCustomerName || reportDistrictName);
+  const getSerial = (p: any) => p?.['serial#'] || p?.serial_number || p?.serial || '';
 
   useEffect(() => {
     if (accessToken) loadData();
@@ -362,7 +363,7 @@ export default function PanelsNew() {
                           className="flex items-center gap-1 text-blue-600 hover:underline"
                           onClick={e => e.stopPropagation()}
                         >
-                          {panel['serial#']}
+                          {getSerial(panel)}
                           <ExternalLink className="w-3 h-3" />
                         </Link>
                       </TableCell>
@@ -404,7 +405,7 @@ export default function PanelsNew() {
         <Dialog open={quickOpen} onOpenChange={(open) => { setQuickOpen(open); if (!open) setQuickPanel(null); }}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Panel {quickPanel?.['serial#'] || ''}</DialogTitle>
+              <DialogTitle>Panel {getSerial(quickPanel) || ''}</DialogTitle>
             </DialogHeader>
             <div className="grid gap-3 mt-2 text-sm">
               <div><strong>Type:</strong> {quickPanel?.panel_type || '-'}</div>

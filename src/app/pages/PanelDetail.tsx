@@ -16,6 +16,7 @@ export default function PanelDetail() {
   const { accessToken } = useAuth();
   const [panel, setPanel] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const getSerial = (p: any) => p?.['serial#'] || p?.serial_number || p?.serial || '';
 
   useEffect(() => {
     loadPanel();
@@ -74,7 +75,7 @@ export default function PanelDetail() {
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Panel Details</h1>
-              <p className="text-gray-600 mt-2">{panel['serial#'] || 'N/A'}</p>
+              <p className="text-gray-600 mt-2">{getSerial(panel) || 'N/A'}</p>
             </div>
             <Badge className={getStatusColor(panel.panel_status)}>
               {panel.panel_status || 'Unknown'}

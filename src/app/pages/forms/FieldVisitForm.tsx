@@ -172,6 +172,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
 
   // Panel options grouped by type
   const panelsByType = (type: string) => allPanels.filter(p => p.panel_type === type);
+  const getSerial = (p: any) => p?.['serial#'] || p?.serial_number || p?.serial || '';
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
@@ -325,7 +326,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
               className="w-full border border-gray-300 rounded-md p-2 text-sm">
               <option value="">— None —</option>
               {panelsByType('Digital Shooting Panel').map(p => (
-                <option key={p['serial#']} value={p['serial#']}>{p['serial#']}</option>
+                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
               ))}
             </select>
           </F>
@@ -335,7 +336,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
               className="w-full border border-gray-300 rounded-md p-2 text-sm">
               <option value="">— None —</option>
               {panelsByType('Communication Panel').map(p => (
-                <option key={p['serial#']} value={p['serial#']}>{p['serial#']}</option>
+                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
               ))}
             </select>
           </F>
@@ -345,7 +346,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
               className="w-full border border-gray-300 rounded-md p-2 text-sm">
               <option value="">— None —</option>
               {panelsByType('Surface Tester').map(p => (
-                <option key={p['serial#']} value={p['serial#']}>{p['serial#']}</option>
+                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
               ))}
             </select>
           </F>
