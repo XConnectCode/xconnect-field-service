@@ -104,6 +104,7 @@ export default function IncidentForm({
   const [listItems, setListItems] = useState<any[]>([]);
   const [epCompanies, setEpCompanies] = useState<string[]>([]);
   const [fieldVisits, setFieldVisits] = useState<any[]>([]);
+  const [components, setComponents] = useState<any[]>([]);
 
   // Form state
   const [custId, setCustId] = useState('');
@@ -148,7 +149,8 @@ export default function IncidentForm({
       supabase.from('vendors').select('row_id,vendor').order('vendor'),
       supabase.from('lists').select('*'),
       supabase.from('ep').select('operating_company').order('operating_company'),
-    ]).then(([c, s, v, l, e]) => {
+      supabase.from('components').select('row_id,failed_component,vendor').order('failed_component'),
+    ]).then(([c, s, v, l, e, comp]) => {
       setCustomers(c.data || []);
       setSqmReps(
         (s.data || [])
@@ -158,6 +160,7 @@ export default function IncidentForm({
       setVendors(v.data || []);
       setListItems(l.data || []);
       setEpCompanies((e.data || []).map((r: any) => r.operating_company as string));
+      setComponents((comp.data || []).filter((r: any) => r.failed_component));
     });
   }, [open]);
 
@@ -619,18 +622,16 @@ export default function IncidentForm({
 
           <F label="Failed Component">
             <Sel
-              key={`fc-${incident?.row_id}-${listItems.length}`}
+              key={`fc-${incident?.row_id}-${components.length}`}
               name="failed_component"
               defaultValue={incident?.failed_component || ''}
             >
               <option value="">— Select —</option>
-              {listItems
-                .filter((l: any) => l.failed_component)
-                .map((l: any) => (
-                  <option key={l.row_id} value={l.row_id}>
-                    {l.failed_component}
-                  </option>
-                ))}
+              {components.map((c: any) => (
+                <option key={c.row_id} value={c.row_id}>
+                  {c.failed_component}
+                </option>
+              ))}
             </Sel>
           </F>
 
