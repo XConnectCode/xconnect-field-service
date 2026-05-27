@@ -1,7 +1,8 @@
 {
   "table": "districts",
+  "appsheet_table": "Customer Districts",
   "mode": "full-overwrite",
-  "match_on": "customer_district_id",
+  "match_on": "row_id",
   "column_map": {
     "Customer District ID": "customer_district_id",
     "Customer District": "customer_district",
@@ -12,16 +13,8 @@
     "Customer": "customer",
     "Customer Logo": "customer_logo"
   },
-  "skip_columns": [
-    "District Field Visit Records",
-    "District Panel Records",
-    "District Incident Records",
-    "District Mobile Support Records",
-    "Related Dashboard Filters",
-    "Related Barrels Solds"
-  ],
   "fk_resolution": {
-    "customer": { "table": "customers", "match": "customer", "return": "row_id" }
+    "customer": { "table": "customers", "match": "row_id", "return": "row_id" }
   },
   "date_fields": [],
   "datetime_fields": [],
