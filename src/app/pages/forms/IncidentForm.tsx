@@ -2,6 +2,16 @@
  * IncidentForm.tsx
  * Full create/edit dialog for the incidents table.
  * Schema-synced with live Supabase incidents table.
+ *
+ * Layout: grouped section cards in workflow order
+ *   1. General Info       2. Customer/Location    3. Personnel
+ *   4. Job Details        5. Classification        6. Investigation
+ *   7. Corrective/Preventive  8. Closure  9. Evidence  10. Notes
+ *
+ * Evidence images use the polymorphic ImageUpload component (drag/drop + browse)
+ * backed by the Edge Function (`/images/incidents/:row_id`) — the same path the
+ * incident detail page uses. The legacy `image1` / `image2` columns are still
+ * preserved for already-saved rows and continue to surface in PDF picker fallbacks.
  */
 
 import { useState, useEffect } from 'react';
@@ -12,13 +22,15 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
-import { Upload, X, Loader2 } from 'lucide-react';
+import { Info } from 'lucide-react';
 import {
   normalizeStatus,
   validateForStatus,
   statusOptionsForRole,
   canSetStatus,
 } from '../../lib/incidentWorkflow';
+import ImageUpload from '../../components/ImageUpload';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,13 +54,36 @@ function F({
   );
 }
 
-function Section({ title }: { title: string }) {
+/**
+ * Section card — replaces the previous flat <Section /> divider so that each
+ * group of fields is visually scoped, easier to scan, and gives the modal a
+ * workflow-oriented feel without converting it into a full multi-step wizard.
+ */
+function SectionCard({
+  title,
+  description,
+  children,
+  cols = 2,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  cols?: 1 | 2 | 3;
+}) {
+  const colClass =
+    cols === 1 ? 'grid-cols-1' : cols === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2';
   return (
-    <div className="col-span-2 pt-2 pb-1 border-b border-gray-100">
-      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-        {title}
-      </span>
-    </div>
+    <section className="rounded-lg border border-gray-200 bg-white">
+      <header className="px-4 pt-3 pb-2 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+        {description && (
+          <p className="text-xs text-gray-500 mt-0.5">{description}</p>
+        )}
+      </header>
+      <div className={`grid grid-cols-1 ${colClass} gap-x-6 gap-y-4 p-4`}>
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -117,13 +152,6 @@ export default function IncidentForm({
   const [distId, setDistId] = useState('');
   const [saving, setSaving] = useState(false);
   const [nextEventId, setNextEventId] = useState<string>('');
-
-  // Image state — two fixed slots, kept compatible with AppSheet's image1/image2 columns.
-  const [images, setImages] = useState<{ img1: string; img2: string }>({
-    img1: '',
-    img2: '',
-  });
-  const [uploadingSlot, setUploadingSlot] = useState<1 | 2 | null>(null);
 
   // ── Effects ─────────────────────────────────────────────────────────────────
 
@@ -207,58 +235,13 @@ export default function IncidentForm({
     if (incident) {
       setCustId(incident.customer || '');
       setDistId(incident.customer_district || '');
-      setImages({
-        img1: incident.image1 || '',
-        img2: incident.image2 || '',
-      });
     } else {
       setCustId('');
       setDistId('');
-      setImages({ img1: '', img2: '' });
     }
   }, [incident, open]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-
-  const handleImageUpload = async (file: File, slot: 1 | 2) => {
-    setUploadingSlot(slot);
-    try {
-      if (!file.type.startsWith('image/')) {
-        toast.error('Please select an image file');
-        return;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error('Image must be less than 10MB');
-        return;
-      }
-
-      const ext = file.name.split('.').pop();
-      const filePath = `incidents/img-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}.${ext}`;
-
-      const { error } = await supabase.storage
-        .from('Native Files')
-        .upload(filePath, file);
-
-      if (error) throw error;
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from('Native Files').getPublicUrl(filePath);
-
-      setImages((prev) => ({ ...prev, [`img${slot}`]: publicUrl }));
-      toast.success(`Image ${slot} uploaded`);
-    } catch (err: any) {
-      toast.error(`Upload failed: ${err.message}`);
-    } finally {
-      setUploadingSlot(null);
-    }
-  };
-
-  const clearImage = (slot: 1 | 2) => {
-    setImages((prev) => ({ ...prev, [`img${slot}`]: '' }));
-  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -333,8 +316,6 @@ export default function IncidentForm({
       closed_by: fd.get('closed_by') || null,
       report_version: fd.get('report_version') || null,
       notes: fd.get('notes') || null,
-      image1: images.img1 || null,
-      image2: images.img2 || null,
     };
 
     if (!editing) {
@@ -369,6 +350,8 @@ export default function IncidentForm({
     ).values(),
   ];
 
+  const edgeBaseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -378,8 +361,8 @@ export default function IncidentForm({
         if (!v) onClose();
       }}
     >
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0">
+        <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
           <DialogTitle>
             {editing
               ? `Edit Incident #${incident.event_id}`
@@ -388,347 +371,346 @@ export default function IncidentForm({
         </DialogHeader>
 
         <form
+          id="incident-form"
           onSubmit={handleSubmit}
-          className="grid grid-cols-2 gap-x-6 gap-y-4 mt-2"
+          className="flex-1 overflow-y-auto px-6 py-5 space-y-5"
         >
-          {/* ── Incident Info ── */}
-          <Section title="Incident Info" />
+          {/* 1. General Info */}
+          <SectionCard title="General Info">
+            {!editing && (
+              <F label="Event ID" required>
+                <Input
+                  name="event_id"
+                  required
+                  value={nextEventId}
+                  readOnly
+                  className="font-mono bg-gray-50 cursor-not-allowed"
+                  title="Auto-assigned. Cannot be edited."
+                />
+              </F>
+            )}
 
-          {!editing && (
-            <F label="Event ID" required>
+            <F label="Incident Date" required>
               <Input
-                name="event_id"
+                name="date_incident"
+                type="date"
+                defaultValue={incident?.date_incident || ''}
                 required
-                value={nextEventId}
-                readOnly
-                className="font-mono bg-gray-50 cursor-not-allowed"
-                title="Auto-assigned. Cannot be edited."
               />
             </F>
-          )}
 
-          <F label="Incident Date" required>
-            <Input
-              name="date_incident"
-              type="date"
-              defaultValue={incident?.date_incident || ''}
-              required
-            />
-          </F>
-
-          <F label="Status">
-            <Sel
-              name="incident_status"
-              defaultValue={normalizeStatus(incident?.incident_status) || 'New'}
-            >
-              <option value="">— Select —</option>
-              {statusOptionsForRole(currentUser?.role).map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-              {/* Always allow keeping the current value, even if it's not in the
-                  role-allowed list (e.g. Closed for SQMs viewing a closed record). */}
-              {incident?.incident_status &&
-                !statusOptionsForRole(currentUser?.role).includes(normalizeStatus(incident.incident_status) as any) &&
-                normalizeStatus(incident.incident_status) && (
-                  <option value={normalizeStatus(incident.incident_status) as string}>
-                    {normalizeStatus(incident.incident_status)} (current)
+            <F label="Status">
+              <Sel
+                name="incident_status"
+                defaultValue={normalizeStatus(incident?.incident_status) || 'New'}
+              >
+                <option value="">— Select —</option>
+                {statusOptionsForRole(currentUser?.role).map((o) => (
+                  <option key={o} value={o}>
+                    {o}
                   </option>
-                )}
-            </Sel>
-          </F>
+                ))}
+                {/* Always allow keeping the current value, even if it's not in the
+                    role-allowed list (e.g. Closed for SQMs viewing a closed record). */}
+                {incident?.incident_status &&
+                  !statusOptionsForRole(currentUser?.role).includes(normalizeStatus(incident.incident_status) as any) &&
+                  normalizeStatus(incident.incident_status) && (
+                    <option value={normalizeStatus(incident.incident_status) as string}>
+                      {normalizeStatus(incident.incident_status)} (current)
+                    </option>
+                  )}
+              </Sel>
+            </F>
 
-          <F label="Severity">
-            <Sel
-              name="incident_severity"
-              defaultValue={incident?.incident_severity || ''}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'incident_severity').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          <F label="XC Caused">
-            <Sel name="xc_caused" defaultValue={incident?.xc_caused || ''}>
-              <option value="">— Select —</option>
-              {opts(listItems, 'xc_caused').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          <F label="Event Category">
-            <Sel
-              name="event_category"
-              defaultValue={incident?.event_category || ''}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'event_category').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          <F label="Field or Facility">
-            <Sel
-              name="field_facility"
-              defaultValue={incident?.field_facility || 'Field'}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'field_facility').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          <F label="Report Version">
-            <Sel
-              name="report_version"
-              defaultValue={incident?.report_version || 'Preliminary'}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'report_version').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          {/* ── Customer / District ── */}
-          <Section title="Customer" />
-
-          <F label="Customer" required>
-            <select
-              value={custId}
-              onChange={(e) => {
-                setCustId(e.target.value);
-                setDistId('');
-              }}
-              className="w-full border border-gray-300 rounded-md p-2 text-sm"
-              required
-            >
-              <option value="">— Select customer —</option>
-              {customers.map((c: any) => (
-                <option key={c.row_id} value={c.row_id}>
-                  {c.customer}
-                </option>
-              ))}
-            </select>
-          </F>
-
-          <F label="District">
-            <select
-              value={distId}
-              onChange={(e) => setDistId(e.target.value)}
-              disabled={!custId}
-              className="w-full border border-gray-300 rounded-md p-2 text-sm"
-            >
-              <option value="">— All districts —</option>
-              {districts.map((d: any) => (
-                <option key={d.row_id} value={d.row_id}>
-                  {d.customer_district}
-                </option>
-              ))}
-            </select>
-          </F>
-
-          <F label="Operating Company">
-            <Sel
-              key={`op-${incident?.row_id}-${epCompanies.length}`}
-              name="operating_company"
-              defaultValue={incident?.operating_company || ''}
-            >
-              <option value="">— Select —</option>
-              {epCompanies.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          {/* ── Personnel ── */}
-          <Section title="Personnel" />
-
-          <F label="XC Rep">
-            <Sel
-              key={`xcrep-${incident?.row_id}-${sqmReps.length}`}
-              name="xc_rep"
-              defaultValue={incident?.xc_rep || currentUser?.name || ''}
-            >
-              <option value="">— Select —</option>
-              {sqmReps.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          <F label="XC District">
-            <Input
-              name="xc_district"
-              defaultValue={incident?.xc_district || ''}
-              placeholder="e.g. Permian Basin"
-            />
-          </F>
-
-          <F label="Customer Rep">
-            <Input name="customer_rep" defaultValue={incident?.customer_rep || ''} />
-          </F>
-
-          <F label="EP Rep">
-            <Input name="ep_rep" defaultValue={incident?.ep_rep || ''} />
-          </F>
-
-          {/* ── Job Details ── */}
-          <Section title="Job Details" />
-
-          <F label="Well Name">
-            <Input name="well_name" defaultValue={incident?.well_name || ''} />
-          </F>
-
-          <F label="Stage #">
-            <Input
-              name="stage_number"
-              defaultValue={incident?.stage_number || ''}
-            />
-          </F>
-
-          <F label="SO #">
-            <Input name="so_number" defaultValue={incident?.so_number || ''} />
-          </F>
-
-          <F label="Field Visit">
-            <Sel
-              key={`fv-${incident?.row_id}-${fieldVisits.length}`}
-              name="field_visit_id"
-              defaultValue={incident?.field_visit_id || ''}
-            >
-              <option value="">— None / Not linked —</option>
-              {/* Fallback: if editing an incident whose saved visit isn't in the latest-50 list,
-                  still show it so the link isn't silently dropped on save. */}
-              {incident?.field_visit_id &&
-                !fieldVisits.some((v: any) => v.field_visit_id === incident.field_visit_id) && (
-                  <option value={incident.field_visit_id}>
-                    {incident.field_visit_id} (previously linked)
+            <F label="Severity">
+              <Sel
+                name="incident_severity"
+                defaultValue={incident?.incident_severity || ''}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'incident_severity').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
                   </option>
-                )}
-              {fieldVisits.map((v: any) => (
-                <option key={v.row_id} value={v.field_visit_id}>
-                  {v.field_visit_id} — {v.pad_name || 'No pad'} (
-                  {v.arrival_date?.slice(0, 10) || 'No date'})
-                </option>
-              ))}
-            </Sel>
-          </F>
+                ))}
+              </Sel>
+            </F>
 
-          {/* ── Technical Details ── */}
-          <Section title="Technical Details" />
+            <F label="Report Version">
+              <Sel
+                name="report_version"
+                defaultValue={incident?.report_version || 'Preliminary'}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'report_version').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
 
-          <F label="Product Line">
-            <Sel
-              name="product_line"
-              defaultValue={incident?.product_line || ''}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'xc_products').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
+            <F label="Field or Facility">
+              <Sel
+                name="field_facility"
+                defaultValue={incident?.field_facility || 'Field'}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'field_facility').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+          </SectionCard>
 
-          <F label="Firing System">
-            <Sel
-              name="firing_system"
-              defaultValue={incident?.firing_system || ''}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'firing_system').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
+          {/* 2. Customer / Location */}
+          <SectionCard title="Customer & Location">
+            <F label="Customer" required>
+              <select
+                value={custId}
+                onChange={(e) => {
+                  setCustId(e.target.value);
+                  setDistId('');
+                }}
+                className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                required
+              >
+                <option value="">— Select customer —</option>
+                {customers.map((c: any) => (
+                  <option key={c.row_id} value={c.row_id}>
+                    {c.customer}
+                  </option>
+                ))}
+              </select>
+            </F>
 
-          <F label="Failed Component">
-            <Sel
-              key={`fc-${incident?.row_id}-${components.length}`}
-              name="failed_component"
-              defaultValue={incident?.failed_component || ''}
-            >
-              <option value="">— Select —</option>
-              {components.map((c: any) => (
-                <option key={c.row_id} value={c.row_id}>
-                  {c.failed_component}
-                </option>
-              ))}
-            </Sel>
-          </F>
+            <F label="District">
+              <select
+                value={distId}
+                onChange={(e) => setDistId(e.target.value)}
+                disabled={!custId}
+                className="w-full border border-gray-300 rounded-md p-2 text-sm"
+              >
+                <option value="">— All districts —</option>
+                {districts.map((d: any) => (
+                  <option key={d.row_id} value={d.row_id}>
+                    {d.customer_district}
+                  </option>
+                ))}
+              </select>
+            </F>
 
-          <F label="Failure Type">
-            <Sel
-              key={`ft-${incident?.row_id}-${listItems.length}`}
-              name="failure_type"
-              defaultValue={incident?.failure_type || ''}
-            >
-              <option value="">— Select —</option>
-              {uniqueFailureTypes.map((l: any) => (
-                <option key={l.row_id} value={l.row_id}>
-                  {l.failure_type}
-                </option>
-              ))}
-            </Sel>
-          </F>
+            <F label="Operating Company">
+              <Sel
+                key={`op-${incident?.row_id}-${epCompanies.length}`}
+                name="operating_company"
+                defaultValue={incident?.operating_company || ''}
+              >
+                <option value="">— Select —</option>
+                {epCompanies.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+          </SectionCard>
 
-          <F label="Vendor">
-            <Sel
-              key={`vnd-${incident?.row_id}-${vendors.length}`}
-              name="vendor"
-              defaultValue={incident?.vendor || ''}
-            >
-              <option value="">— Select —</option>
-              {vendors.map((v: any) => (
-                <option key={v.row_id} value={v.row_id}>
-                  {v.vendor}
-                </option>
-              ))}
-            </Sel>
-          </F>
+          {/* 3. Personnel */}
+          <SectionCard title="Personnel">
+            <F label="XC Rep">
+              <Sel
+                key={`xcrep-${incident?.row_id}-${sqmReps.length}`}
+                name="xc_rep"
+                defaultValue={incident?.xc_rep || currentUser?.name || ''}
+              >
+                <option value="">— Select —</option>
+                {sqmReps.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </Sel>
+            </F>
 
-          <F label="Vendor Caused">
-            <Sel
-              name="vendor_caused"
-              defaultValue={incident?.vendor_caused || ''}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'vendor_caused').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
+            <F label="XC District">
+              <Input
+                name="xc_district"
+                defaultValue={incident?.xc_district || ''}
+                placeholder="e.g. Permian Basin"
+              />
+            </F>
 
-          {/* ── Narrative ── */}
-          <Section title="Narrative" />
+            <F label="Customer Rep">
+              <Input name="customer_rep" defaultValue={incident?.customer_rep || ''} />
+            </F>
 
-          <div className="col-span-2">
+            <F label="EP Rep">
+              <Input name="ep_rep" defaultValue={incident?.ep_rep || ''} />
+            </F>
+          </SectionCard>
+
+          {/* 4. Job Details */}
+          <SectionCard title="Job Details">
+            <F label="Well Name">
+              <Input name="well_name" defaultValue={incident?.well_name || ''} />
+            </F>
+
+            <F label="Stage #">
+              <Input
+                name="stage_number"
+                defaultValue={incident?.stage_number || ''}
+              />
+            </F>
+
+            <F label="SO #">
+              <Input name="so_number" defaultValue={incident?.so_number || ''} />
+            </F>
+
+            <F label="Field Visit">
+              <Sel
+                key={`fv-${incident?.row_id}-${fieldVisits.length}`}
+                name="field_visit_id"
+                defaultValue={incident?.field_visit_id || ''}
+              >
+                <option value="">— None / Not linked —</option>
+                {/* Fallback: if editing an incident whose saved visit isn't in the latest-50 list,
+                    still show it so the link isn't silently dropped on save. */}
+                {incident?.field_visit_id &&
+                  !fieldVisits.some((v: any) => v.field_visit_id === incident.field_visit_id) && (
+                    <option value={incident.field_visit_id}>
+                      {incident.field_visit_id} (previously linked)
+                    </option>
+                  )}
+                {fieldVisits.map((v: any) => (
+                  <option key={v.row_id} value={v.field_visit_id}>
+                    {v.field_visit_id} — {v.pad_name || 'No pad'} (
+                    {v.arrival_date?.slice(0, 10) || 'No date'})
+                  </option>
+                ))}
+              </Sel>
+            </F>
+          </SectionCard>
+
+          {/* 5. Classification */}
+          <SectionCard title="Incident Classification">
+            <F label="XC Caused">
+              <Sel name="xc_caused" defaultValue={incident?.xc_caused || ''}>
+                <option value="">— Select —</option>
+                {opts(listItems, 'xc_caused').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Event Category">
+              <Sel
+                name="event_category"
+                defaultValue={incident?.event_category || ''}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'event_category').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Product Line">
+              <Sel
+                name="product_line"
+                defaultValue={incident?.product_line || ''}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'xc_products').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Firing System">
+              <Sel
+                name="firing_system"
+                defaultValue={incident?.firing_system || ''}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'firing_system').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Failed Component">
+              <Sel
+                key={`fc-${incident?.row_id}-${components.length}`}
+                name="failed_component"
+                defaultValue={incident?.failed_component || ''}
+              >
+                <option value="">— Select —</option>
+                {components.map((c: any) => (
+                  <option key={c.row_id} value={c.row_id}>
+                    {c.failed_component}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Failure Type">
+              <Sel
+                key={`ft-${incident?.row_id}-${listItems.length}`}
+                name="failure_type"
+                defaultValue={incident?.failure_type || ''}
+              >
+                <option value="">— Select —</option>
+                {uniqueFailureTypes.map((l: any) => (
+                  <option key={l.row_id} value={l.row_id}>
+                    {l.failure_type}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Vendor">
+              <Sel
+                key={`vnd-${incident?.row_id}-${vendors.length}`}
+                name="vendor"
+                defaultValue={incident?.vendor || ''}
+              >
+                <option value="">— Select —</option>
+                {vendors.map((v: any) => (
+                  <option key={v.row_id} value={v.row_id}>
+                    {v.vendor}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Vendor Caused">
+              <Sel
+                name="vendor_caused"
+                defaultValue={incident?.vendor_caused || ''}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'vendor_caused').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+          </SectionCard>
+
+          {/* 6. Investigation / Root Cause */}
+          <SectionCard title="Investigation & Root Cause" cols={1}>
             <F label="Incident Description">
               <Textarea
                 name="incident_description"
@@ -737,9 +719,7 @@ export default function IncidentForm({
                 placeholder="What happened?"
               />
             </F>
-          </div>
 
-          <div className="col-span-2">
             <F label="Investigation">
               <Textarea
                 name="investigation"
@@ -748,9 +728,7 @@ export default function IncidentForm({
                 placeholder="What was found during investigation?"
               />
             </F>
-          </div>
 
-          <div className="col-span-2">
             <F label="Root Cause">
               <Textarea
                 name="root_cause"
@@ -759,176 +737,145 @@ export default function IncidentForm({
                 placeholder="Root cause analysis"
               />
             </F>
-          </div>
+          </SectionCard>
 
-          {/* ── Corrective / Preventive Actions ── */}
-          <Section title="Corrective & Preventive Actions" />
+          {/* 7. Corrective / Preventive Actions */}
+          <SectionCard
+            title="Corrective & Preventive Actions"
+            description="Required to move beyond Investigating status."
+          >
+            <div className="md:col-span-2">
+              <F label="Corrective Action">
+                <Textarea
+                  name="corrective_action"
+                  rows={3}
+                  defaultValue={incident?.corrective_action || ''}
+                  placeholder="Actions taken to correct the issue"
+                />
+              </F>
+            </div>
 
-          <div className="col-span-2">
-            <F label="Corrective Action">
-              <Textarea
-                name="corrective_action"
-                rows={3}
-                defaultValue={incident?.corrective_action || ''}
-                placeholder="Actions taken to correct the issue"
+            <div className="md:col-span-2">
+              <F label="Preventive Action">
+                <Textarea
+                  name="preventive_action"
+                  rows={3}
+                  defaultValue={incident?.preventive_action || ''}
+                  placeholder="Actions taken to prevent recurrence"
+                />
+              </F>
+            </div>
+
+            <F label="Action Assigned To">
+              <Sel
+                key={`aa-${incident?.row_id}-${sqmReps.length}`}
+                name="action_assigned_to"
+                defaultValue={incident?.action_assigned_to || ''}
+              >
+                <option value="">— Select —</option>
+                {sqmReps.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Action Due Date">
+              <Input
+                name="action_due_date"
+                type="date"
+                defaultValue={incident?.action_due_date || ''}
               />
             </F>
-          </div>
 
-          <div className="col-span-2">
-            <F label="Preventive Action">
-              <Textarea
-                name="preventive_action"
-                rows={3}
-                defaultValue={incident?.preventive_action || ''}
-                placeholder="Actions taken to prevent recurrence"
+            <F label="Action Status">
+              <Sel
+                name="action_status"
+                defaultValue={incident?.action_status || ''}
+              >
+                <option value="">— Select —</option>
+                {opts(listItems, 'action_status').map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+          </SectionCard>
+
+          {/* 8. Closure */}
+          <SectionCard title="Closure">
+            <F label="Closed Date">
+              <Input
+                name="closed_date"
+                type="date"
+                defaultValue={incident?.closed_date || ''}
               />
             </F>
-          </div>
 
-          <F label="Action Assigned To">
-            <Sel
-              key={`aa-${incident?.row_id}-${sqmReps.length}`}
-              name="action_assigned_to"
-              defaultValue={incident?.action_assigned_to || ''}
-            >
-              <option value="">— Select —</option>
-              {sqmReps.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Sel>
-          </F>
+            <F label="Closed By">
+              <Sel
+                key={`cb-${incident?.row_id}-${sqmReps.length}`}
+                name="closed_by"
+                defaultValue={incident?.closed_by || ''}
+              >
+                <option value="">— Select —</option>
+                {sqmReps.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+          </SectionCard>
 
-          <F label="Action Due Date">
-            <Input
-              name="action_due_date"
-              type="date"
-              defaultValue={incident?.action_due_date || ''}
-            />
-          </F>
-
-          <F label="Action Status">
-            <Sel
-              name="action_status"
-              defaultValue={incident?.action_status || ''}
-            >
-              <option value="">— Select —</option>
-              {opts(listItems, 'action_status').map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          {/* ── Closure ── */}
-          <Section title="Closure" />
-
-          <F label="Closed Date">
-            <Input
-              name="closed_date"
-              type="date"
-              defaultValue={incident?.closed_date || ''}
-            />
-          </F>
-
-          <F label="Closed By">
-            <Sel
-              key={`cb-${incident?.row_id}-${sqmReps.length}`}
-              name="closed_by"
-              defaultValue={incident?.closed_by || ''}
-            >
-              <option value="">— Select —</option>
-              {sqmReps.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Sel>
-          </F>
-
-          {/* ── Evidence Images ── */}
-          <Section title="Evidence Images" />
-
-          {([1, 2] as const).map((slot) => {
-            const url = slot === 1 ? images.img1 : images.img2;
-            const uploading = uploadingSlot === slot;
-
-            return (
-              <div key={slot}>
-                <Label className="text-xs font-semibold text-gray-600 mb-2 block">
-                  Image {slot}
-                </Label>
-                {url ? (
-                  <div className="relative inline-block group">
-                    <img
-                      src={url}
-                      alt={`Evidence ${slot}`}
-                      className="w-48 h-32 object-cover rounded-lg border border-gray-200"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => clearImage(slot)}
-                      className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-gray-400 transition-colors">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      disabled={uploading}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) handleImageUpload(f, slot);
-                      }}
-                    />
-                    {uploading ? (
-                      <div className="flex flex-col items-center gap-1">
-                        <Loader2 className="w-7 h-7 text-gray-400 animate-spin" />
-                        <span className="text-xs text-gray-500">Uploading…</span>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <Upload className="w-7 h-7 text-gray-400" />
-                        <span className="text-sm text-gray-600">
-                          Click to upload
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          PNG, JPG up to 10MB
-                        </span>
-                      </div>
-                    )}
-                  </label>
-                )}
+          {/* 9. Evidence Images — uses the same Edge-Function-backed uploader as
+                the detail page. For new incidents the row_id doesn't exist yet,
+                so we surface a hint to save first. */}
+          <SectionCard
+            title="Evidence Images"
+            description="Drag and drop or browse — files are attached to this incident."
+            cols={1}
+          >
+            {editing && incident?.row_id ? (
+              <ImageUpload
+                parentTable="incidents"
+                parentRowId={incident.row_id}
+                baseUrl={edgeBaseUrl}
+                publicAnonKey={publicAnonKey}
+                autoLoad
+                maxImages={20}
+              />
+            ) : (
+              <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  Save this incident first to enable evidence image uploads.
+                  Once saved, reopen the incident (Edit or open the detail page)
+                  to drag and drop photos.
+                </div>
               </div>
-            );
-          })}
+            )}
+          </SectionCard>
 
-          {/* ── Notes ── */}
-          <Section title="Notes" />
-
-          <div className="col-span-2">
+          {/* 10. Notes */}
+          <SectionCard title="Notes" cols={1}>
             <F label="Notes">
               <Textarea name="notes" rows={2} defaultValue={incident?.notes || ''} />
             </F>
-          </div>
-
-          {/* ── Actions ── */}
-          <div className="col-span-2 flex justify-end gap-3 pt-4 border-t border-gray-100">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? 'Saving…' : editing ? 'Update Incident' : 'Submit Incident'}
-            </Button>
-          </div>
+          </SectionCard>
         </form>
+
+        {/* Sticky footer actions — always visible regardless of scroll */}
+        <div className="flex justify-end gap-3 px-6 py-3 border-t bg-white shrink-0">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="incident-form" disabled={saving}>
+            {saving ? 'Saving…' : editing ? 'Update Incident' : 'Submit Incident'}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );
