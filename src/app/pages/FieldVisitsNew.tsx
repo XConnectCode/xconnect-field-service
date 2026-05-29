@@ -64,6 +64,14 @@ export default function FieldVisitsNew() {
   const reportTimeFilter   = searchParams.get('timeFilter');
   const fromReport = !!(reportCustomerName || reportDistrictName || reportTimeFilter);
 
+  // ── Open the add dialog when ?new=1 is present (deep-link from SQM dashboard) ─
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setEditingVisit(null);
+      setDialogOpen(true);
+    }
+  }, [searchParams]);
+
   // ── Load all data ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (accessToken) loadData();
@@ -315,9 +323,11 @@ export default function FieldVisitsNew() {
                           <Button size="sm" variant="outline" onClick={() => openEdit(visit)}>
                             <Edit className="w-4 h-4" />
                           </Button>
-                          <Button size="sm" variant="destructive" onClick={() => handleDelete(visit.row_id)}>
-                            <Trash className="w-4 h-4" />
-                          </Button>
+                          {user?.role !== 'sqm' && (
+                            <Button size="sm" variant="destructive" onClick={() => handleDelete(visit.row_id)}>
+                              <Trash className="w-4 h-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

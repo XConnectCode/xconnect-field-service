@@ -1,6 +1,8 @@
 import { createBrowserRouter } from "react-router";
 import Root from "./Root";
 import Dashboard from "./pages/Dashboard";
+import SQMDashboard from "./pages/SQMDashboard";
+import { useAuth } from "./lib/auth-context";
 import Customers from "./pages/Customers";
 import FieldVisitsNew from "./pages/FieldVisitsNew";
 import IncidentsNew from "./pages/IncidentsNew";
@@ -22,12 +24,17 @@ import TechnicalBulletin from './pages/TechnicalBulletin';
 import TechnicalBulletins from './pages/TechnicalBulletins';
 import TechnicalBulletinSetup from './pages/TechnicalBulletinSetup';
 
+function DashboardSwitch() {
+  const { user } = useAuth();
+  return user?.role === 'sqm' ? <SQMDashboard /> : <Dashboard />;
+}
+
 export const router = createBrowserRouter([
   {
     path: "/",
     Component: Root,
     children: [
-      { index: true, Component: Dashboard },
+      { index: true, Component: DashboardSwitch },
       { path: "customers", Component: Customers },
       { path: "customers/:id", Component: CustomerDetail },
       { path: "districts/:id", Component: DistrictDetail },
