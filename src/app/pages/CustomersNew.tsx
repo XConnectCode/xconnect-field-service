@@ -156,7 +156,7 @@ export default function CustomersNew() {
     try {
       const response = await fetch(`${baseUrl}/customers/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+        headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
       });
 
       if (response.ok) {
@@ -277,7 +277,7 @@ export default function CustomersNew() {
     try {
       const response = await fetch(`${baseUrl}/districts/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+        headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
       });
 
       if (response.ok) {

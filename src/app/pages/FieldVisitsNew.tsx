@@ -176,7 +176,7 @@ export default function FieldVisitsNew() {
     try {
       const res = await fetch(`${baseUrl}/fieldvisits/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` },
+        headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` },
       });
       if (res.ok) { toast.success('Field visit deleted'); loadData(); }
       else toast.error('Failed to delete field visit');

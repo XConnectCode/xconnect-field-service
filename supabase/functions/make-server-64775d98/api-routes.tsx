@@ -2,6 +2,7 @@ import { Hono } from "npm:hono";
 import { createClient } from "npm:@supabase/supabase-js@2.49.2";
 import { uploadIncidentImage, listIncidentImages, deleteIncidentImage, uploadImage, listImagesForRecord, deleteImageById } from './upload-handler.tsx';
 import { generateIncidentReportPDF } from './pdf-generator.tsx';
+import { requireAdmin } from './auth-helpers.tsx';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -89,7 +90,7 @@ apiRoutes.put("/customers/:id", async (c) => {
   }
 });
 
-apiRoutes.delete("/customers/:id", async (c) => {
+apiRoutes.delete("/customers/:id", requireAdmin, async (c) => {
   try {
     const id = c.req.param('id');
     
@@ -263,7 +264,7 @@ apiRoutes.put("/districts/:id", async (c) => {
   }
 });
 
-apiRoutes.delete("/districts/:id", async (c) => {
+apiRoutes.delete("/districts/:id", requireAdmin, async (c) => {
   try {
     const id = c.req.param('id');
     
@@ -417,7 +418,7 @@ apiRoutes.put("/fieldvisits/:id", async (c) => {
   }
 });
 
-apiRoutes.delete("/fieldvisits/:id", async (c) => {
+apiRoutes.delete("/fieldvisits/:id", requireAdmin, async (c) => {
   try {
     const id = c.req.param('id');
     
@@ -635,7 +636,7 @@ apiRoutes.put("/incidents/:id", async (c) => {
   }
 });
 
-apiRoutes.delete("/incidents/:id", async (c) => {
+apiRoutes.delete("/incidents/:id", requireAdmin, async (c) => {
   try {
     const id = c.req.param('id');
     
@@ -962,7 +963,7 @@ apiRoutes.put("/panels/:id", async (c) => {
   }
 });
 
-apiRoutes.delete("/panels/:id", async (c) => {
+apiRoutes.delete("/panels/:id", requireAdmin, async (c) => {
   try {
     const id = c.req.param('id');
     
@@ -1027,7 +1028,7 @@ apiRoutes.get("/incidents/:incidentId/images", async (c) => {
 });
 
 // Delete incident image
-apiRoutes.delete("/incidents/images", async (c) => {
+apiRoutes.delete("/incidents/images", requireAdmin, async (c) => {
   try {
     const body = await c.req.json();
     const { filePath } = body;
@@ -1106,7 +1107,7 @@ apiRoutes.get("/images/:parentTable/:parentRowId", async (c) => {
 });
 
 // Delete an image by its id (removes storage object + DB row)
-apiRoutes.delete("/images/:imageId", async (c) => {
+apiRoutes.delete("/images/:imageId", requireAdmin, async (c) => {
   try {
     const imageId = c.req.param('imageId');
 
@@ -1826,7 +1827,7 @@ apiRoutes.get("/districts/:id/details", async (c) => {
 
 // ============ DEBUG: ROW COUNTS ============
 
-apiRoutes.get("/debug/row-counts", async (c) => {
+apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
   try {
     // Get exact row counts using head: true (doesn't fetch data, just counts)
     const { count: stagesCount } = await supabase

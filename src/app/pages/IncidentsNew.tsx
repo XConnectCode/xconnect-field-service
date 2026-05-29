@@ -307,7 +307,7 @@ export default function IncidentsNew() {
     try {
       const res = await fetch(`${baseUrl}/incidents/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` },
+        headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` },
       });
       if (res.ok) { toast.success('Incident deleted'); loadData(); }
       else toast.error('Failed to delete incident');
