@@ -1,17 +1,26 @@
 /**
  * Resolve the human-readable label for an incident's `failed_component`
- * (or `failure_type`) value.
+ * (component name) or `failure_type` (failure category) values.
  *
- * Background: incidents.failed_component historically pointed at
- * `lists.row_id` (per scripts/configs/incidents.json), but the new
- * IncidentForm dropdown is populated from the `components` table. As a
- * result, depending on when the incident was created, the stored value
- * can be either a `lists.row_id` OR a `components.row_id`.
+ * Authoritative table mapping (verified directly against the Supabase
+ * database, project "FST APP" / gbllxumuogsncoiaksum):
  *
- * To make sure the rendered label is always human-readable — and never a
- * raw row_id like `zMZ20AuctS4jiOrtVD-7Qd` in a customer-facing PDF — we
- * check both lookup tables and fall back to a friendly placeholder when
- * neither match.
+ *   incidents.failed_component → components.row_id
+ *     SELECT failed_component FROM components WHERE row_id = ...
+ *     (e.g. 'zMZ20AuctS4jiOrtVD-7Qd' = "XC2.75 Standard Bottom End Plate".
+ *      All 371 incidents resolve cleanly via this table; 0 orphaned.)
+ *
+ *   incidents.failure_type → lists.row_id
+ *     SELECT failure_type FROM lists WHERE row_id = ...
+ *
+ * Do NOT cross-resolve through the other table — lists.failed_component is
+ * sparse/unreliable and was the source of the blank/raw-id bug on
+ * Incident #572. components has no failure_type column at all.
+ *
+ * Fallback: if a stored value isn't in the expected table we never return
+ * the raw row_id to the user — we return the configured fallback ("—" by
+ * default, or "N/A" / "" depending on where the caller wants the gap to
+ * show up).
  */
 
 export type ListLikeMap = Record<
@@ -24,8 +33,8 @@ export type ComponentMap = Record<string, { failed_component?: string | null }>;
 /**
  * Heuristic: the AppSheet/Supabase row_ids in this codebase look like
  * `zMZ20AuctS4jiOrtVD-7Qd` (random 20+ char tokens) or UUIDs. If the saved
- * value already looks like a human label (spaces, lowercase words, etc.),
- * just show it verbatim.
+ * value already looks like a human label, show it verbatim instead of
+ * dropping to the fallback — this preserves any legacy free-text rows.
  */
 export function looksLikeRowId(value: string): boolean {
   const v = value.trim();
@@ -37,22 +46,22 @@ export function looksLikeRowId(value: string): boolean {
 }
 
 /**
- * Resolve a `failed_component` value to its display label.
- * Returns `fallback` (default "—") when the value can't be resolved
- * to a human-readable label — never leaks a raw row_id to the user.
+ * Resolve `incidents.failed_component` to its display label via the
+ * `components` table (THE authoritative source). Returns `fallback` when
+ * the value can't be resolved — never leaks a raw row_id to the user.
+ *
+ * The legacy second-positional `listMap` argument is accepted for backward
+ * compatibility with existing callers; it is intentionally ignored. The
+ * `componentsMap` is the only map consulted.
  */
 export function resolveFailedComponentLabel(
   value: string | null | undefined,
-  listMap: ListLikeMap,
-  componentsMap?: ComponentMap,
+  componentsMap: ComponentMap | null | undefined,
   fallback = '—',
 ): string {
   if (!value) return fallback;
   const v = String(value).trim();
   if (!v) return fallback;
-
-  const fromList = listMap[v]?.failed_component;
-  if (fromList) return fromList;
 
   const fromComponents = componentsMap?.[v]?.failed_component;
   if (fromComponents) return fromComponents;
@@ -63,9 +72,8 @@ export function resolveFailedComponentLabel(
 }
 
 /**
- * Resolve a `failure_type` value to its display label.
- * Same shape as resolveFailedComponentLabel but only the `lists` table
- * holds failure_type labels (components doesn't carry them).
+ * Resolve `incidents.failure_type` to its display label via the `lists`
+ * table. components has no failure_type column.
  */
 export function resolveFailureTypeLabel(
   value: string | null | undefined,

@@ -178,17 +178,19 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident
 }
 
 // ── Full incident popup modal ─────────────────────────────────────────────────
-function IncidentModal({ incident, listMap, vendorMap, onClose, onUpdated, role }: {
-  incident: any; listMap: Record<string, any>; vendorMap: Record<string, string>;
-  onClose: () => void; onUpdated: (rowId: string, field: string, value: string) => void;
+function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, onUpdated, role }: {
+  incident: any;
+  listMap: Record<string, any>;
+  componentsMap: Record<string, { failed_component: string }>;
+  vendorMap: Record<string, string>;
+  onClose: () => void;
+  onUpdated: (rowId: string, field: string, value: string) => void;
   role?: 'admin' | 'sqm';
 }) {
   const r = incident;
-  // Use the shared resolver so we never leak a raw row_id into the popup.
-  // Dashboard only loads the `lists` map (the components map isn't fetched
-  // here yet), so pass an empty componentsMap — the resolver will still
-  // return null/fallback rather than the raw id.
-  const failedComp  = resolveFailedComponentLabel(r.failed_component, listMap, {}, '') || null;
+  // Authoritative mapping (verified in DB): failed_component → components,
+  // failure_type → lists. Never leaks a raw row_id into the popup.
+  const failedComp  = resolveFailedComponentLabel(r.failed_component, componentsMap, '') || null;
   const failureType = resolveFailureTypeLabel(r.failure_type, listMap, '') || null;
   const vendorName  = vendorMap[r.vendor] || r.vendor || null;
 
@@ -364,6 +366,7 @@ export default function Dashboard() {
   const [customerMap,    setCustomerMap]    = useState<Record<string, string>>({});
   const [districtMap,    setDistrictMap]    = useState<Record<string, string>>({});
   const [listMap,        setListMap]        = useState<Record<string, any>>({});
+  const [componentsMap,  setComponentsMap]  = useState<Record<string, { failed_component: string }>>({});
   const [vendorMap,      setVendorMap]      = useState<Record<string, string>>({});
 
   // Modal
@@ -396,11 +399,13 @@ export default function Dashboard() {
         { data: dists },
         { data: lists },
         { data: vends },
+        { data: comps },
       ] = await Promise.all([
         supabase.from("customers").select("row_id,customer"),
         supabase.from("districts").select("row_id,customer_district"),
         supabase.from("lists").select("row_id,failed_component,failure_type"),
         supabase.from("vendors").select("row_id,vendor"),
+        supabase.from("components").select("row_id,failed_component"),
       ]);
       const cm: Record<string, string> = {};
       (custs || []).forEach((c: any) => { cm[c.row_id] = c.customer; });
@@ -411,6 +416,11 @@ export default function Dashboard() {
       const lm: Record<string, any> = {};
       (lists || []).forEach((l: any) => { lm[l.row_id] = l; });
       setListMap(lm);
+      const cmComp: Record<string, { failed_component: string }> = {};
+      (comps || []).forEach((c: any) => {
+        if (c.row_id) cmComp[c.row_id] = { failed_component: c.failed_component || '' };
+      });
+      setComponentsMap(cmComp);
       const vm: Record<string, string> = {};
       (vends || []).forEach((v: any) => { vm[v.row_id] = v.vendor; });
       setVendorMap(vm);
@@ -629,6 +639,7 @@ export default function Dashboard() {
         <IncidentModal
           incident={enriched.find(i => i.row_id === modalIncident.row_id) ?? modalIncident}
           listMap={listMap}
+          componentsMap={componentsMap}
           vendorMap={vendorMap}
           onClose={() => setModalIncident(null)}
           onUpdated={handleUpdated}

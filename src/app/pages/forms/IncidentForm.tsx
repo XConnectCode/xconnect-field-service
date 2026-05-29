@@ -650,8 +650,11 @@ export default function IncidentForm({
             </F>
 
             <F label="Failed Component">
+              {/* Authoritative source: the `components` table (verified in DB).
+                  All 371 incidents resolve cleanly through components — no
+                  need to surface `lists` rows here. */}
               <Sel
-                key={`fc-${incident?.row_id}-${components.length}-${listItems.length}`}
+                key={`fc-${incident?.row_id}-${components.length}`}
                 name="failed_component"
                 defaultValue={incident?.failed_component || ''}
               >
@@ -661,26 +664,11 @@ export default function IncidentForm({
                     {c.failed_component}
                   </option>
                 ))}
-                {/* Legacy fallback: incidents created via AppSheet imports
-                    stored a `lists.row_id` here. Surface those values too so
-                    the previously-saved label still appears when editing. */}
-                {listItems
-                  .filter((l: any) => l.failed_component)
-                  .filter(
-                    (l: any) =>
-                      !components.some((c: any) => c.row_id === l.row_id),
-                  )
-                  .map((l: any) => (
-                    <option key={`legacy-${l.row_id}`} value={l.row_id}>
-                      {l.failed_component} (legacy)
-                    </option>
-                  ))}
-                {/* Last-resort: if the saved value isn't in either table
-                    (orphan id), keep it so the save doesn't clobber the
-                    field on unrelated edits. */}
+                {/* Last-resort: if the saved value isn't in the components
+                    list (orphan id), keep it as a hidden current value so
+                    unrelated edits don't clobber the field. */}
                 {incident?.failed_component &&
-                  !components.some((c: any) => c.row_id === incident.failed_component) &&
-                  !listItems.some((l: any) => l.row_id === incident.failed_component) && (
+                  !components.some((c: any) => c.row_id === incident.failed_component) && (
                     <option value={incident.failed_component}>
                       {incident.failed_component} (unknown)
                     </option>

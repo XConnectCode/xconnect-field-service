@@ -264,9 +264,11 @@ export default function IncidentDetail() {
   }, [districts]);
 
   // ── Resolved display values ────────────────────────────────────────────────
+  // Authoritative table mapping (verified in DB):
+  //   failed_component → components table only
+  //   failure_type     → lists table only
   const resolvedFailedComponent = resolveFailedComponentLabel(
     incident?.failed_component,
-    listMap,
     componentsMap,
     'N/A',
   );

@@ -8,79 +8,81 @@ import {
 // ── looksLikeRowId ───────────────────────────────────────────────────────────
 assert.strictEqual(looksLikeRowId('zMZ20AuctS4jiOrtVD-7Qd'), true);
 assert.strictEqual(looksLikeRowId('Bottom End Plate'), false);
-assert.strictEqual(looksLikeRowId('Charge Tube'), false);
+assert.strictEqual(looksLikeRowId('XC2.75 Standard Bottom End Plate'), false);
 assert.strictEqual(looksLikeRowId('cb6f3d7e-7c4d-4b8c-9b8a-1234567890ab'), true);
+assert.strictEqual(looksLikeRowId('538cb682-3f7c-47b5-a5d7-3a5c9fc484e0'), true);
 assert.strictEqual(looksLikeRowId(''), false);
 assert.strictEqual(looksLikeRowId('   '), false);
 // short tokens like "N/A" or "TBD" are not row_ids
 assert.strictEqual(looksLikeRowId('TBD'), false);
-// single-word labels still possible if short
 assert.strictEqual(looksLikeRowId('Connector'), false);
 
 // ── resolveFailedComponentLabel ──────────────────────────────────────────────
-const listMap = {
-  'list-row-1': { failed_component: 'Bottom End Plate', failure_type: null },
-  'list-row-2': { failed_component: null, failure_type: 'Mechanical' },
-};
+// Authoritative source: components table only.
 const componentsMap = {
+  // The exact Incident #572 case, verified against the live DB.
+  'zMZ20AuctS4jiOrtVD-7Qd': { failed_component: 'XC2.75 Standard Bottom End Plate' },
   'comp-row-1': { failed_component: 'Charge Tube' },
-  'zMZ20AuctS4jiOrtVD-7Qd': { failed_component: 'Bottom End Plate' },
 };
 
-// Resolves through `lists`
 assert.strictEqual(
-  resolveFailedComponentLabel('list-row-1', listMap, componentsMap),
-  'Bottom End Plate',
+  resolveFailedComponentLabel('zMZ20AuctS4jiOrtVD-7Qd', componentsMap),
+  'XC2.75 Standard Bottom End Plate',
 );
 
-// Falls back to `components` when not in lists
 assert.strictEqual(
-  resolveFailedComponentLabel('comp-row-1', listMap, componentsMap),
+  resolveFailedComponentLabel('comp-row-1', componentsMap),
   'Charge Tube',
 );
 
-// Resolves the exact bug-572 case (components.row_id, not in lists)
+// Unknown row_id-looking value: returns fallback (NEVER the raw id)
 assert.strictEqual(
-  resolveFailedComponentLabel('zMZ20AuctS4jiOrtVD-7Qd', listMap, componentsMap),
-  'Bottom End Plate',
-);
-
-// Unknown row_id-looking value: returns fallback (NOT the raw id)
-assert.strictEqual(
-  resolveFailedComponentLabel('unknownABCDEFGHIJKLMNOP', listMap, componentsMap),
+  resolveFailedComponentLabel('unknownABCDEFGHIJKLMNOP', componentsMap),
   '—',
 );
 
 // Human label passed through verbatim (legacy free-text)
 assert.strictEqual(
-  resolveFailedComponentLabel('Some Loose Wire', listMap, componentsMap),
+  resolveFailedComponentLabel('Some Loose Wire', componentsMap),
   'Some Loose Wire',
 );
 
 // Null/empty input
-assert.strictEqual(resolveFailedComponentLabel(null, listMap, componentsMap), '—');
-assert.strictEqual(resolveFailedComponentLabel('', listMap, componentsMap), '—');
-assert.strictEqual(resolveFailedComponentLabel('   ', listMap, componentsMap), '—');
+assert.strictEqual(resolveFailedComponentLabel(null, componentsMap), '—');
+assert.strictEqual(resolveFailedComponentLabel('', componentsMap), '—');
+assert.strictEqual(resolveFailedComponentLabel('   ', componentsMap), '—');
 
 // Custom fallback honored
 assert.strictEqual(
-  resolveFailedComponentLabel(null, listMap, componentsMap, 'N/A'),
+  resolveFailedComponentLabel(null, componentsMap, 'N/A'),
   'N/A',
 );
 
-// Works without componentsMap
+// Missing/empty componentsMap still returns fallback rather than the raw id
 assert.strictEqual(
-  resolveFailedComponentLabel('list-row-1', listMap),
-  'Bottom End Plate',
+  resolveFailedComponentLabel('zMZ20AuctS4jiOrtVD-7Qd', {}),
+  '—',
+);
+assert.strictEqual(
+  resolveFailedComponentLabel('zMZ20AuctS4jiOrtVD-7Qd', null),
+  '—',
 );
 
 // ── resolveFailureTypeLabel ──────────────────────────────────────────────────
+// Authoritative source: lists table only.
+const listMap = {
+  '538cb682-3f7c-47b5-a5d7-3a5c9fc484e0': {
+    failed_component: null,
+    failure_type: 'Mechanical',
+  },
+};
+
 assert.strictEqual(
-  resolveFailureTypeLabel('list-row-2', listMap),
+  resolveFailureTypeLabel('538cb682-3f7c-47b5-a5d7-3a5c9fc484e0', listMap),
   'Mechanical',
 );
 
-// Unknown id-looking value: fallback, NOT raw id
+// Unknown id-looking value: fallback, NEVER the raw id
 assert.strictEqual(
   resolveFailureTypeLabel('zMZ20AuctS4jiOrtVD-7Qd', listMap),
   '—',

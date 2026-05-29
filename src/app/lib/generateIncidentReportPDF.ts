@@ -137,7 +137,7 @@ export async function generateIncidentReportPDF(opts: IncidentReportOptions): Pr
     ? (customerMap[r.customer] as any).name
     : (customerMap[r.customer] || r.customerName || r.customer || '—');
   const districtName = districtMap[r.customer_district] || r.districtName || r.customer_district || '—';
-  const failedComponent = resolveFailedComponentLabel(r.failed_component, listMap, componentsMap);
+  const failedComponent = resolveFailedComponentLabel(r.failed_component, componentsMap);
   const failureType     = resolveFailureTypeLabel(r.failure_type, listMap);
   const vendorName      = vendorMap[r.vendor] || r.vendor || '—';
   // Single source of truth for status across cover/subsections so they can't

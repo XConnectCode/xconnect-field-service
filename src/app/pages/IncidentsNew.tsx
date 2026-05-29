@@ -307,7 +307,7 @@ export default function IncidentsNew() {
         catch { /* skip */ }
       }
       if (q) {
-        const failedComponent = resolveFailedComponentLabel(inc.failed_component, listLookupMap, componentsMap, '');
+        const failedComponent = resolveFailedComponentLabel(inc.failed_component, componentsMap, '');
         const failureType     = resolveFailureTypeLabel(inc.failure_type, listLookupMap, '');
         const vendorName      = vendorLookupMap[inc.vendor] || inc.vendor;
         const haystack = [
@@ -749,7 +749,7 @@ export default function IncidentsNew() {
             <div className="overflow-y-auto flex-1 pr-1">
               {viewingIncident && (() => {
                 const r = viewingIncident;
-                const fComp = resolveFailedComponentLabel(r.failed_component, listLookupMap, componentsMap, '');
+                const fComp = resolveFailedComponentLabel(r.failed_component, componentsMap, '');
                 const fType = resolveFailureTypeLabel(r.failure_type, listLookupMap, '');
                 const vName = vendorLookupMap[r.vendor] || r.vendor;
                 return (
