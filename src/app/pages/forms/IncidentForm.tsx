@@ -14,15 +14,20 @@
  * preserved for already-saved rows and continue to surface in PDF picker fallbacks.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
-import { Info } from 'lucide-react';
+import { Info, Sparkles } from 'lucide-react';
+import IncidentAIAssistant, { type IncidentSnapshot } from '../../components/IncidentAIAssistant';
+import type { AssistantField } from '../../lib/aiAssistantCore';
+import {
+  resolveFailedComponentLabel,
+  resolveFailureTypeLabel,
+} from '../../lib/failedComponent';
 import {
   normalizeStatus,
   normalizeActionStatus,
@@ -93,6 +98,57 @@ function SectionCard({
 }
 
 /**
+ * Textarea field with an inline "AI" trigger that opens the assistant panel
+ * preselected to this field. Uses a ref so the assistant can read the
+ * current value and write accepted suggestions back without converting the
+ * surrounding form away from its uncontrolled FormData submit pattern.
+ */
+function AssistField({
+  field,
+  label,
+  refObj,
+  defaultValue,
+  placeholder,
+  rows = 3,
+  onAiOpen,
+}: {
+  field: AssistantField;
+  label: string;
+  refObj: React.RefObject<HTMLTextAreaElement>;
+  defaultValue: string;
+  placeholder?: string;
+  rows?: number;
+  onAiOpen: (f: AssistantField) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <Label className="text-xs font-semibold text-gray-600">{label}</Label>
+        <button
+          type="button"
+          onClick={() => onAiOpen(field)}
+          className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 hover:bg-indigo-100"
+          title={`Open AI assistant for ${label}`}
+        >
+          <Sparkles className="h-3 w-3" />
+          AI
+        </button>
+      </div>
+      {/* Native textarea so we can attach a ref. Styled to match the
+          shared <Textarea /> component used elsewhere in this form. */}
+      <textarea
+        ref={refObj}
+        name={field}
+        rows={rows}
+        defaultValue={defaultValue}
+        placeholder={placeholder}
+        className="resize-none border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 flex field-sizing-content min-h-16 w-full rounded-md border bg-input-background px-3 py-2 text-base transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+      />
+    </div>
+  );
+}
+
+/**
  * Extract distinct, sorted option strings from lists table rows.
  */
 function opts(listItems: any[], col: string): string[] {
@@ -157,6 +213,87 @@ export default function IncidentForm({
   const [distId, setDistId] = useState('');
   const [saving, setSaving] = useState(false);
   const [nextEventId, setNextEventId] = useState<string>('');
+
+  // AI assistant side-panel state. The panel reads/writes the six free-text
+  // fields below directly through refs so we don't have to convert the rest
+  // of the form away from its uncontrolled FormData submission pattern.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiField, setAiField] = useState<AssistantField>('incident_description');
+  const formRef = useRef<HTMLFormElement>(null);
+  const textareaRefs: Record<AssistantField, React.RefObject<HTMLTextAreaElement>> = {
+    incident_description: useRef<HTMLTextAreaElement>(null),
+    investigation: useRef<HTMLTextAreaElement>(null),
+    root_cause: useRef<HTMLTextAreaElement>(null),
+    corrective_action: useRef<HTMLTextAreaElement>(null),
+    preventive_action: useRef<HTMLTextAreaElement>(null),
+    notes: useRef<HTMLTextAreaElement>(null),
+  };
+
+  const getFieldText = (f: AssistantField): string =>
+    textareaRefs[f].current?.value ?? '';
+
+  const applyAcceptedText = (f: AssistantField, text: string) => {
+    const el = textareaRefs[f].current;
+    if (!el) return;
+    // Mutating .value on an uncontrolled textarea is invisible to React, but
+    // FormData reads the DOM value at submit, so this is enough for save.
+    el.value = text;
+    // Fire an input event so any future controlled wiring still sees it.
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  const focusAssistantField = (f: AssistantField) => {
+    const el = textareaRefs[f].current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.focus();
+  };
+
+  const buildIncidentSnapshot = (): IncidentSnapshot => {
+    const form = formRef.current;
+    const getInput = (name: string): string => {
+      if (!form) return '';
+      const el = form.elements.namedItem(name);
+      if (!el) return '';
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+        return el.value || '';
+      }
+      return '';
+    };
+
+    // The component selects use row_ids; resolve them to human labels so the
+    // review prompt sees readable values instead of opaque IDs.
+    const failedComponentRaw = getInput('failed_component');
+    const componentsMap: Record<string, { failed_component?: string | null }> = {};
+    for (const c of components) {
+      if (c?.row_id) componentsMap[c.row_id as string] = { failed_component: c.failed_component };
+    }
+    const listsMap: Record<string, { failure_type?: string | null }> = {};
+    for (const l of listItems) {
+      if (l?.row_id) listsMap[l.row_id as string] = { failure_type: l.failure_type };
+    }
+
+    return {
+      incident_description: getFieldText('incident_description'),
+      investigation: getFieldText('investigation'),
+      root_cause: getFieldText('root_cause'),
+      corrective_action: getFieldText('corrective_action'),
+      preventive_action: getFieldText('preventive_action'),
+      notes: getFieldText('notes'),
+      incident_status: getInput('incident_status'),
+      action_status: getInput('action_status'),
+      xc_caused: getInput('xc_caused'),
+      vendor_caused: getInput('vendor_caused'),
+      event_category: getInput('event_category'),
+      incident_severity: getInput('incident_severity'),
+      closed_date: getInput('closed_date'),
+      report_sent: incident?.report_sent,
+      failed_component_label: resolveFailedComponentLabel(failedComponentRaw, componentsMap),
+      failure_type_label: resolveFailureTypeLabel(getInput('failure_type'), listsMap),
+      customer_label: customers.find((c) => c.row_id === custId)?.customer || '',
+    };
+  };
+
 
   // ── Effects ─────────────────────────────────────────────────────────────────
 
@@ -378,15 +515,29 @@ export default function IncidentForm({
     >
       <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
-          <DialogTitle>
-            {editing
-              ? `Edit Incident #${incident.event_id}`
-              : 'Report New Incident'}
-          </DialogTitle>
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle>
+              {editing
+                ? `Edit Incident #${incident.event_id}`
+                : 'Report New Incident'}
+            </DialogTitle>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 mr-8"
+              onClick={() => setAiOpen(true)}
+              title="Open the AI writing/review assistant"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+              AI Assistant
+            </Button>
+          </div>
         </DialogHeader>
 
         <form
           id="incident-form"
+          ref={formRef}
           onSubmit={handleSubmit}
           className="flex-1 overflow-y-auto px-6 py-5 space-y-5"
         >
@@ -738,32 +889,24 @@ export default function IncidentForm({
 
           {/* 6. Investigation / Root Cause */}
           <SectionCard title="Investigation & Root Cause" cols={1}>
-            <F label="Incident Description">
-              <Textarea
-                name="incident_description"
-                rows={3}
-                defaultValue={incident?.incident_description || ''}
-                placeholder="What happened?"
-              />
-            </F>
-
-            <F label="Investigation">
-              <Textarea
-                name="investigation"
-                rows={3}
-                defaultValue={incident?.investigation || ''}
-                placeholder="What was found during investigation?"
-              />
-            </F>
-
-            <F label="Root Cause">
-              <Textarea
-                name="root_cause"
-                rows={3}
-                defaultValue={incident?.root_cause || ''}
-                placeholder="Root cause analysis"
-              />
-            </F>
+            <AssistField field="incident_description" label="Incident Description"
+              refObj={textareaRefs.incident_description}
+              defaultValue={incident?.incident_description || ''}
+              placeholder="What happened?"
+              onAiOpen={(f) => { setAiField(f); setAiOpen(true); }}
+            />
+            <AssistField field="investigation" label="Investigation"
+              refObj={textareaRefs.investigation}
+              defaultValue={incident?.investigation || ''}
+              placeholder="What was found during investigation?"
+              onAiOpen={(f) => { setAiField(f); setAiOpen(true); }}
+            />
+            <AssistField field="root_cause" label="Root Cause"
+              refObj={textareaRefs.root_cause}
+              defaultValue={incident?.root_cause || ''}
+              placeholder="Root cause analysis"
+              onAiOpen={(f) => { setAiField(f); setAiOpen(true); }}
+            />
           </SectionCard>
 
           {/* 7. Corrective / Preventive Actions */}
@@ -772,25 +915,21 @@ export default function IncidentForm({
             description="Required to move beyond Investigating status."
           >
             <div className="md:col-span-2">
-              <F label="Corrective Action">
-                <Textarea
-                  name="corrective_action"
-                  rows={3}
-                  defaultValue={incident?.corrective_action || ''}
-                  placeholder="Actions taken to correct the issue"
-                />
-              </F>
+              <AssistField field="corrective_action" label="Corrective Action"
+                refObj={textareaRefs.corrective_action}
+                defaultValue={incident?.corrective_action || ''}
+                placeholder="Actions taken to correct the issue"
+                onAiOpen={(f) => { setAiField(f); setAiOpen(true); }}
+              />
             </div>
 
             <div className="md:col-span-2">
-              <F label="Preventive Action">
-                <Textarea
-                  name="preventive_action"
-                  rows={3}
-                  defaultValue={incident?.preventive_action || ''}
-                  placeholder="Actions taken to prevent recurrence"
-                />
-              </F>
+              <AssistField field="preventive_action" label="Preventive Action"
+                refObj={textareaRefs.preventive_action}
+                defaultValue={incident?.preventive_action || ''}
+                placeholder="Actions taken to prevent recurrence"
+                onAiOpen={(f) => { setAiField(f); setAiOpen(true); }}
+              />
             </div>
 
             <F label="Action Assigned To">
@@ -894,11 +1033,25 @@ export default function IncidentForm({
 
           {/* 10. Notes */}
           <SectionCard title="Notes" cols={1}>
-            <F label="Notes">
-              <Textarea name="notes" rows={2} defaultValue={incident?.notes || ''} />
-            </F>
+            <AssistField field="notes" label="Notes"
+              refObj={textareaRefs.notes}
+              defaultValue={incident?.notes || ''}
+              rows={2}
+              onAiOpen={(f) => { setAiField(f); setAiOpen(true); }}
+            />
           </SectionCard>
         </form>
+
+        <IncidentAIAssistant
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          field={aiField}
+          onFieldChange={setAiField}
+          getFieldText={getFieldText}
+          getIncidentSnapshot={buildIncidentSnapshot}
+          onAccept={applyAcceptedText}
+          onFocusField={focusAssistantField}
+        />
 
         {/* Sticky footer actions — always visible regardless of scroll */}
         <div className="flex justify-end gap-3 px-6 py-3 border-t bg-white shrink-0">

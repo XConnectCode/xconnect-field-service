@@ -4,6 +4,7 @@ import { logger } from "npm:hono/logger";
 import * as kv from "./kv_store.tsx";
 import { createClient } from "npm:@supabase/supabase-js@2.49.2";
 import { apiRoutes } from "./api-routes.tsx";
+import { aiAssistRoutes } from "./ai-assist.tsx";
 import { initializeIncidentImagesBucket } from "./upload-handler.tsx";
 import { adminExists, getUserFromRequest } from "./auth-helpers.tsx";
 
@@ -47,6 +48,9 @@ app.get("/make-server-64775d98/health", (c) => {
 
 // Mount API routes for Supabase tables (routes are prefixed with /make-server-64775d98)
 app.route('/make-server-64775d98', apiRoutes);
+
+// AI incident-assistant proxy (provider/model are env-selected; see ai-assist.tsx)
+app.route('/make-server-64775d98', aiAssistRoutes);
 
 // Get database schema information
 app.get("/make-server-64775d98/schema", async (c) => {
