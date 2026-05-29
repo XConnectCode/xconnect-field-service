@@ -28,7 +28,12 @@ import IncidentForm from './forms/IncidentForm';
 import ImageUpload from '../components/ImageUpload';
 import IncidentPdfImagePicker from '../components/IncidentPdfImagePicker';
 import type { IncidentReportImage } from '../lib/generateIncidentReportPDF';
-import { normalizeStatus, canMarkReportSent } from '../lib/incidentWorkflow';
+import { normalizeStatus, canMarkReportSent, CLOSED_STATUS } from '../lib/incidentWorkflow';
+import {
+  resolveFailedComponentLabel,
+  resolveFailureTypeLabel,
+} from '../lib/failedComponent';
+import { sendIncidentReportToCustomer } from '../lib/sendIncidentReport';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function safeFmtDate(val: any, fmt: string): string {
@@ -118,10 +123,15 @@ export default function IncidentDetail() {
 
   const [incident,    setIncident]    = useState<any>(null);
   const [lists,       setLists]       = useState<any[]>([]);
+  const [components,  setComponents]  = useState<any[]>([]);
   const [vendors,     setVendors]     = useState<any[]>([]);
   const [customers,   setCustomers]   = useState<any[]>([]);
   const [districts,   setDistricts]   = useState<any[]>([]);
   const [loading,     setLoading]     = useState(true);
+  const [sendingReport, setSendingReport] = useState(false);
+  const [sendDialogOpen, setSendDialogOpen] = useState(false);
+  const [sendRecipient, setSendRecipient] = useState('');
+  const [sendMessage, setSendMessage] = useState('');
   const [linkedVisitRowId, setLinkedVisitRowId] = useState<string | null>(null);
   const [updates,     setUpdates]     = useState<any[]>([]);
   const [updatesLoading, setUpdatesLoading] = useState(false);
@@ -157,9 +167,10 @@ export default function IncidentDetail() {
       const restHeaders = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${publicAnonKey}` };
       const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
-      const [incidentData, listsRes, vendorsRes, custRes, distRes] = await Promise.all([
+      const [incidentData, listsRes, compRes, vendorsRes, custRes, distRes] = await Promise.all([
         detailApi.getIncident(id!, accessToken!),
         fetch(`${restBase}/lists?select=row_id,failed_component,failure_type`, { headers: restHeaders }),
+        fetch(`${restBase}/components?select=row_id,failed_component`, { headers: restHeaders }),
         fetch(`${restBase}/vendors?select=row_id,vendor`, { headers: restHeaders }),
         fetch(`${baseUrl}/customers`, { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
         fetch(`${baseUrl}/districts`, { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
@@ -167,6 +178,7 @@ export default function IncidentDetail() {
 
       setIncident(incidentData);
       if (listsRes.ok)   setLists(await listsRes.json()   || []);
+      if (compRes.ok)    setComponents(await compRes.json() || []);
       if (vendorsRes.ok) setVendors(await vendorsRes.json() || []);
       if (custRes.ok)    setCustomers(await custRes.json() || []);
       if (distRes.ok)    setDistricts(await distRes.json() || []);
@@ -217,6 +229,14 @@ export default function IncidentDetail() {
     return map;
   }, [lists]);
 
+  const componentsMap = useMemo(() => {
+    const map: Record<string, { failed_component: string }> = {};
+    components.forEach((c: any) => {
+      if (c.row_id) map[c.row_id] = { failed_component: c.failed_component || '' };
+    });
+    return map;
+  }, [components]);
+
   const vendorMap = useMemo(() => {
     const map: Record<string, string> = {};
     vendors.forEach((v: any) => { if (v.row_id) map[v.row_id] = v.vendor; });
@@ -224,8 +244,16 @@ export default function IncidentDetail() {
   }, [vendors]);
 
   const customerMap = useMemo(() => {
-    const map: Record<string, { name: string; logo: string }> = {};
-    customers.forEach(c => { if (c.row_id) map[c.row_id] = { name: c.customer, logo: c.customer_logo }; });
+    const map: Record<string, { name: string; logo: string; email?: string }> = {};
+    customers.forEach(c => {
+      if (c.row_id) {
+        map[c.row_id] = {
+          name: c.customer,
+          logo: c.customer_logo,
+          email: c.customer_email || undefined,
+        };
+      }
+    });
     return map;
   }, [customers]);
 
@@ -236,13 +264,18 @@ export default function IncidentDetail() {
   }, [districts]);
 
   // ── Resolved display values ────────────────────────────────────────────────
-  const resolvedFailedComponent = incident?.failed_component
-    ? (listMap[incident.failed_component]?.failed_component || incident.failed_component)
-    : 'N/A';
+  const resolvedFailedComponent = resolveFailedComponentLabel(
+    incident?.failed_component,
+    listMap,
+    componentsMap,
+    'N/A',
+  );
 
-  const resolvedFailureType = incident?.failure_type
-    ? (listMap[incident.failure_type]?.failure_type || incident.failure_type)
-    : 'N/A';
+  const resolvedFailureType = resolveFailureTypeLabel(
+    incident?.failure_type,
+    listMap,
+    'N/A',
+  );
 
   const resolvedVendor = incident?.vendor
     ? (vendorMap[incident.vendor] || incident.vendor)
@@ -285,6 +318,7 @@ export default function IncidentDetail() {
       const blob = await generateIncidentReportPDF({
         incident:   incData,
         listMap:    listMap as any,
+        componentsMap: componentsMap,
         vendorMap:  vendorMap,
         customerMap: custMapForPDF,
         districtMap: districtMap,
@@ -400,6 +434,80 @@ export default function IncidentDetail() {
       toast.error(err.message || 'Failed to add update');
     } finally {
       setSavingUpdate(false);
+    }
+  };
+
+  const handleOpenSendDialog = () => {
+    if (!incident) return;
+    if (normalizeStatus(incident.incident_status) !== CLOSED_STATUS) {
+      toast.error('Incident must be Closed (Final/Completed) before sending to the customer.');
+      return;
+    }
+    // Pre-fill from last send if any, or the customer record's email if surfaced.
+    setSendRecipient(incident.report_sent_to || (customerMap[incident.customer] as any)?.email || '');
+    setSendMessage('');
+    setSendDialogOpen(true);
+  };
+
+  const handleSendToCustomer = async () => {
+    if (!incident) return;
+    if (!sendRecipient.trim()) {
+      toast.error('Please provide at least one recipient email address.');
+      return;
+    }
+    if (normalizeStatus(incident.incident_status) !== CLOSED_STATUS) {
+      toast.error('Incident must be Closed (Final/Completed) before sending to the customer.');
+      return;
+    }
+    setSendingReport(true);
+    try {
+      // Re-generate the final PDF on the fly so the customer always gets the
+      // current data, then deliver via the Netlify function. The image picker
+      // is not shown here — we use whatever images are attached and let the
+      // user regenerate from the Reports section first if they need to curate.
+      const incData = { ...incident, report_version: 'Final' };
+      const custMapForPDF: Record<string, any> = {};
+      customers.forEach(c => { if (c.row_id) custMapForPDF[c.row_id] = { name: c.customer }; });
+
+      const blob = await generateIncidentReportPDF({
+        incident:    incData,
+        listMap:     listMap as any,
+        componentsMap,
+        vendorMap,
+        customerMap: custMapForPDF,
+        districtMap,
+        returnBlob:  true,
+      }) as Blob;
+
+      const result = await sendIncidentReportToCustomer({
+        incidentRowId: incident.row_id,
+        eventId: String(incident.event_id || ''),
+        recipients: sendRecipient,
+        message: sendMessage,
+        pdfBlob: blob,
+        senderName: user?.name || (user as any)?.user_metadata?.name || null,
+        senderEmail: user?.email || null,
+      });
+
+      setIncident((prev: any) => ({
+        ...prev,
+        report_sent: result.sentAt,
+        report_sent_to: sendRecipient,
+        report_sent_by: user?.email || user?.name || null,
+        report_sent_message: sendMessage,
+      }));
+
+      setSendDialogOpen(false);
+      if (result.simulated) {
+        toast.success('Report queued (MAIL_PROVIDER=log — no email actually sent). Audit trail updated.');
+      } else {
+        toast.success(`Report sent to ${sendRecipient}`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Failed to send report');
+    } finally {
+      setSendingReport(false);
     }
   };
 
@@ -528,6 +636,25 @@ export default function IncidentDetail() {
                     Sent {safeFmtDate(incident.report_sent, 'M/d/yyyy')}
                   </span>
                 )}
+                {/* Primary: send the final PDF to the customer.
+                    Gated on the incident being Closed (Final/Completed) so
+                    only locked-down reports are emailed out. */}
+                <Button size="sm"
+                  className="gap-1.5"
+                  disabled={
+                    normalizeStatus(incident.incident_status) !== CLOSED_STATUS ||
+                    !canMarkReportSent(user?.role as any)
+                  }
+                  title={
+                    normalizeStatus(incident.incident_status) !== CLOSED_STATUS
+                      ? 'Close the incident (Final/Completed) before sending to the customer'
+                      : !canMarkReportSent(user?.role as any)
+                        ? 'Only admins can send reports to customers'
+                        : undefined
+                  }
+                  onClick={handleOpenSendDialog}>
+                  <Send className="w-3.5 h-3.5" /> Send to Customer
+                </Button>
                 <Button size="sm" variant="outline"
                   disabled={!canMarkReportSent(user?.role as any)}
                   title={!canMarkReportSent(user?.role as any) ? 'Only admins can mark a report as sent' : undefined}
@@ -537,7 +664,7 @@ export default function IncidentDetail() {
                   onClick={handleToggleReportSent}>
                   {incident.report_sent
                     ? <><X className="w-3.5 h-3.5" /> Mark Unsent</>
-                    : <><Send className="w-3.5 h-3.5" /> Mark as Sent</>}
+                    : <><CheckCircle2 className="w-3.5 h-3.5" /> Mark as Sent</>}
                 </Button>
               </div>
             </div>
@@ -989,6 +1116,66 @@ export default function IncidentDetail() {
                 disabled={savingUpdate || !updateNote.trim()}
               >
                 {savingUpdate ? 'Saving…' : 'Add Update'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Send to Customer Dialog ── */}
+      <Dialog open={sendDialogOpen} onOpenChange={setSendDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send Incident Report to Customer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="text-sm text-gray-600">
+              The current final PDF will be re-generated and emailed to the
+              recipients below. The send is recorded on this incident for audit.
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-gray-600 mb-1 block">
+                Recipient email(s) <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="text"
+                value={sendRecipient}
+                onChange={(e) => setSendRecipient(e.target.value)}
+                placeholder="customer@example.com, another@example.com"
+                autoFocus
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Separate multiple addresses with commas.
+              </p>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-gray-600 mb-1 block">
+                Optional message
+              </Label>
+              <Textarea
+                rows={4}
+                value={sendMessage}
+                onChange={(e) => setSendMessage(e.target.value)}
+                placeholder="Optional note to include in the email body."
+              />
+            </div>
+            {incident?.report_sent && (
+              <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-md p-2">
+                Last sent {safeFmtDate(incident.report_sent, 'MMM d, yyyy h:mm a')}
+                {incident.report_sent_to && <> to <span className="font-medium">{incident.report_sent_to}</span></>}
+                {incident.report_sent_by && <> by {incident.report_sent_by}</>}.
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+              <Button type="button" variant="outline"
+                onClick={() => setSendDialogOpen(false)}
+                disabled={sendingReport}>
+                Cancel
+              </Button>
+              <Button type="button"
+                onClick={handleSendToCustomer}
+                disabled={sendingReport || !sendRecipient.trim()}>
+                {sendingReport ? 'Sending…' : 'Send Report'}
               </Button>
             </div>
           </div>

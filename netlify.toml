@@ -28,6 +28,12 @@
   force = true
 
 [[redirects]]
+  from = "/api/send-incident-report"
+  to = "/.netlify/functions/send-incident-report"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
