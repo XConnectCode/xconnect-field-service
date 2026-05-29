@@ -8,7 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
-import { Plus, Edit, Trash2, Eye, AlertTriangle, X, ExternalLink, FileText, Download, Send, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, AlertTriangle, X, ExternalLink, FileText, Download, Send, CheckCircle2, RefreshCw, Search } from 'lucide-react';
+import { Input } from '../components/ui/input';
 import IncidentForm from './forms/IncidentForm';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
@@ -39,6 +40,16 @@ const TIME_FILTER_LABELS: Record<string, string> = {
   this_month: 'This Month', last_month: 'Last Month',
   this_quarter: 'This Quarter', this_year: 'This Year', all_time: 'All Time',
 };
+
+// Compare operational IDs like "EV-001", "EV-100" — numeric suffix wins, fallback to lexicographic.
+function compareIds(a: string, b: string): number {
+  const av = a || '';
+  const bv = b || '';
+  const an = parseInt(String(av).replace(/\D/g, ''), 10);
+  const bn = parseInt(String(bv).replace(/\D/g, ''), 10);
+  if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
+  return av.localeCompare(bv);
+}
 
 // ── Badges ────────────────────────────────────────────────────────────────────
 function SeverityBadge({ severity }: { severity: string }) {
@@ -116,6 +127,7 @@ export default function IncidentsNew() {
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterDistrict, setFilterDistrict] = useState('');
   const [filterTime,     setFilterTime]     = useState('all_time');
+  const [searchTerm,     setSearchTerm]     = useState('');
 
   // ── Dialogs ───────────────────────────────────────────────────────────────
   const [formOpen,        setFormOpen]        = useState(false);
@@ -249,25 +261,45 @@ export default function IncidentsNew() {
 
   const filteredIncidents = useMemo(() => {
     const { start, end } = getDateRange(filterTime);
-    return enrichedIncidents.filter(inc => {
+    const q = searchTerm.trim().toLowerCase();
+    const filtered = enrichedIncidents.filter(inc => {
       if (filterCustomer && inc.customerName !== filterCustomer) return false;
       if (filterDistrict && inc.districtName !== filterDistrict) return false;
       if (start && end && inc.date_incident) {
         try { if (!isWithinInterval(parseISO(inc.date_incident), { start, end })) return false; }
         catch { /* skip */ }
       }
+      if (q) {
+        const failedComponent = listLookupMap[inc.failed_component]?.failed_component || inc.failed_component;
+        const failureType     = listLookupMap[inc.failure_type]?.failure_type || inc.failure_type;
+        const vendorName      = vendorLookupMap[inc.vendor] || inc.vendor;
+        const haystack = [
+          inc.event_id, inc.customerName, inc.districtName, inc.operating_company,
+          inc.event_category, inc.product_line, inc.firing_system,
+          inc.incident_severity, inc.incident_status, inc.xc_caused,
+          inc.xc_rep, inc.customer_rep, inc.ep_rep, inc.field_facility,
+          inc.well_name, inc.field_visit_id, inc.date_incident,
+          inc.incident_description, inc.investigation, inc.root_cause, inc.notes,
+          inc.corrective_action, inc.preventive_action,
+          failedComponent, failureType, vendorName,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
       return true;
     });
-  }, [enrichedIncidents, filterCustomer, filterDistrict, filterTime]);
+    // Default sort: Event ID descending (newer IDs first)
+    return [...filtered].sort((a, b) => compareIds(b.event_id, a.event_id));
+  }, [enrichedIncidents, filterCustomer, filterDistrict, filterTime, searchTerm, listLookupMap, vendorLookupMap]);
 
   const clearFilters = () => {
     setFilterCustomer('');
     setFilterDistrict('');
     setFilterTime('all_time');
+    setSearchTerm('');
     window.history.replaceState({}, '', window.location.pathname);
   };
 
-  const filtersActive = filterCustomer || filterDistrict || filterTime !== 'all_time';
+  const filtersActive = filterCustomer || filterDistrict || filterTime !== 'all_time' || searchTerm;
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
@@ -399,7 +431,31 @@ export default function IncidentsNew() {
 
         {/* Filter bar */}
         <Card className="mb-6">
-          <CardContent className="pt-4">
+          <CardContent className="pt-4 space-y-4">
+            {/* Search */}
+            <div>
+              <Label className="text-xs text-gray-500 mb-1 block">Search</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by Event ID, customer, district, product line, description, vendor…"
+                  className="pl-9 pr-9"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                    aria-label="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-4 items-end">
               <div className="flex-1 min-w-[180px]">
                 <Label className="text-xs text-gray-500 mb-1 block">Customer</Label>
