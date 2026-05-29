@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import Root from "./Root";
 import Dashboard from "./pages/Dashboard";
 import SQMDashboard from "./pages/SQMDashboard";
@@ -29,6 +29,14 @@ function DashboardSwitch() {
   return user?.role === 'sqm' ? <SQMDashboard /> : <Dashboard />;
 }
 
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (user?.role !== 'admin') {
+    return <Navigate to="/technical-bulletins" replace />;
+  }
+  return <>{children}</>;
+}
+
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -48,8 +56,8 @@ export const router = createBrowserRouter([
       { path: "sales", Component: Sales },
       { path: "reports", Component: Reports },
       { path: "technical-bulletins", Component: TechnicalBulletins },
-      { path: "technical-bulletin/:id", Component: TechnicalBulletin },
-      { path: "technical-bulletin-setup", Component: TechnicalBulletinSetup },
+      { path: "technical-bulletin/:id", element: <AdminOnly><TechnicalBulletin /></AdminOnly> },
+      { path: "technical-bulletin-setup", element: <AdminOnly><TechnicalBulletinSetup /></AdminOnly> },
       { path: "diagnostics", Component: DiagnosticsPage },
       { path: "debug", Component: Debug },
       { path: "*", Component: NotFound },

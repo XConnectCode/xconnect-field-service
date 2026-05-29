@@ -45,7 +45,7 @@ const NAV_GROUPS = [
       { path: '/customers',           label: 'Customers',      icon: Users,        roles: ['admin'] as Role[] },
       { path: '/sales',               label: 'Sales',          icon: TrendingUp,   roles: ['admin'] as Role[] },
       { path: '/reports',             label: 'Reports',        icon: FileBarChart, roles: ['admin'] as Role[] },
-      { path: '/technical-bulletins', label: 'Tech Bulletins', icon: FileText,     roles: ['admin'] as Role[] },
+      { path: '/technical-bulletins', label: 'Tech Bulletins', icon: FileText,     roles: ['admin', 'sqm'] as Role[] },
     ],
   },
 ];

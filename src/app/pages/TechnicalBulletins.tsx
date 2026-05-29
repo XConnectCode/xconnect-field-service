@@ -8,6 +8,7 @@ import { FileText, Plus, Search, Eye, Pencil, Trash2, Download, AlertCircle, Dat
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 import { generateTechnicalBulletinPDF } from '../lib/generateTechnicalBulletinPDF';
+import { useAuth } from '../lib/auth-context';
 
 interface TechnicalBulletin {
   id: string;
@@ -31,6 +32,8 @@ interface TechnicalBulletin {
 
 export default function TechnicalBulletins() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [bulletins, setBulletins] = useState<TechnicalBulletin[]>([]);
   const [filteredBulletins, setFilteredBulletins] = useState<TechnicalBulletin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,12 +159,16 @@ export default function TechnicalBulletins() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Technical Bulletins</h1>
-            <p className="text-gray-600 mt-1">Manage and distribute technical bulletins</p>
+            <p className="text-gray-600 mt-1">
+              {isAdmin ? 'Manage and distribute technical bulletins' : 'View technical bulletins'}
+            </p>
           </div>
-          <Button onClick={() => navigate('/technical-bulletin/new')} size="lg">
-            <Plus className="w-5 h-5 mr-2" />
-            Create New Bulletin
-          </Button>
+          {isAdmin && (
+            <Button onClick={() => navigate('/technical-bulletin/new')} size="lg">
+              <Plus className="w-5 h-5 mr-2" />
+              Create New Bulletin
+            </Button>
+          )}
         </div>
 
         {/* RLS Error Banner */}
@@ -204,22 +211,28 @@ export default function TechnicalBulletins() {
                     The <code className="bg-amber-100 px-1.5 py-0.5 rounded">technical_bulletins</code> table doesn't exist in your database yet.
                     You need to create it before you can use this feature.
                   </p>
-                  <div className="flex gap-3">
-                    <Button 
-                      onClick={() => navigate('/technical-bulletin-setup')} 
-                      variant="default"
-                      className="bg-amber-600 hover:bg-amber-700"
-                    >
-                      <Database className="w-4 h-4 mr-2" />
-                      Run Setup Wizard
-                    </Button>
-                    <Button 
-                      onClick={() => window.open('https://supabase.com/dashboard/project/gbllxumuogsncoiaksum/sql/new', '_blank')}
-                      variant="outline"
-                    >
-                      Open Supabase SQL Editor
-                    </Button>
-                  </div>
+                  {isAdmin ? (
+                    <div className="flex gap-3">
+                      <Button
+                        onClick={() => navigate('/technical-bulletin-setup')}
+                        variant="default"
+                        className="bg-amber-600 hover:bg-amber-700"
+                      >
+                        <Database className="w-4 h-4 mr-2" />
+                        Run Setup Wizard
+                      </Button>
+                      <Button
+                        onClick={() => window.open('https://supabase.com/dashboard/project/gbllxumuogsncoiaksum/sql/new', '_blank')}
+                        variant="outline"
+                      >
+                        Open Supabase SQL Editor
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-amber-800 text-sm">
+                      Please contact an administrator to enable technical bulletins.
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -278,10 +291,12 @@ export default function TechnicalBulletins() {
                   ? 'No bulletins match your filters'
                   : 'No technical bulletins yet'}
               </p>
-              <Button onClick={() => navigate('/technical-bulletin/new')} className="mt-4">
-                <Plus className="w-4 h-4 mr-2" />
-                Create Your First Bulletin
-              </Button>
+              {isAdmin && (
+                <Button onClick={() => navigate('/technical-bulletin/new')} className="mt-4">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Your First Bulletin
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -328,14 +343,16 @@ export default function TechnicalBulletins() {
                       >
                         <Eye className="w-4 h-4" />
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => navigate(`/technical-bulletin/${bulletin.id}/edit`)}
-                        title="Edit"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate(`/technical-bulletin/${bulletin.id}/edit`)}
+                          title="Edit"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -344,14 +361,16 @@ export default function TechnicalBulletins() {
                       >
                         <Download className="w-4 h-4" />
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDelete(bulletin.id, bulletin.bulletin_number)}
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4 text-red-600" />
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDelete(bulletin.id, bulletin.bulletin_number)}
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-600" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
