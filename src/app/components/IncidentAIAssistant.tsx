@@ -261,6 +261,12 @@ export default function IncidentAIAssistant({
       onMouseDownCapture={(e) => e.stopPropagation()}
       onFocusCapture={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
+      // CRITICAL: Radix's modal Dialog sets `pointer-events: none` on <body>
+      // while open. This panel is portal'd as a direct child of <body>, so it
+      // INHERITS pointer-events:none and becomes completely unclickable — every
+      // click falls through to the Dialog overlay and dismisses the modal.
+      // Forcing pointer-events:auto here re-enables interaction with the panel.
+      style={{ pointerEvents: 'auto' }}
       className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-2xl"
     >
       <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0">
