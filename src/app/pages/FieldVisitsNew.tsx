@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Plus, Edit, Trash, ExternalLink, X } from 'lucide-react';
+import { Plus, Edit, Trash, ExternalLink, X, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   startOfWeek, endOfWeek, startOfMonth, endOfMonth,
@@ -39,6 +39,16 @@ const TIME_FILTER_LABELS: Record<string, string> = {
   this_quarter: 'This Quarter', this_year: 'This Year', all_time: 'All Time',
 };
 
+// Compare operational IDs like "FV-001", "FV-100" — numeric suffix wins, fallback to lexicographic.
+function compareIds(a: string, b: string): number {
+  const av = a || '';
+  const bv = b || '';
+  const an = parseInt(String(av).replace(/\D/g, ''), 10);
+  const bn = parseInt(String(bv).replace(/\D/g, ''), 10);
+  if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
+  return av.localeCompare(bv);
+}
+
 export default function FieldVisitsNew() {
   const { accessToken, user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -54,6 +64,7 @@ export default function FieldVisitsNew() {
   const [filterCustomer, setFilterCustomer] = useState('');   // customer NAME
   const [filterDistrict, setFilterDistrict] = useState('');   // district NAME
   const [filterTime, setFilterTime] = useState('all_time');
+  const [searchTerm, setSearchTerm] = useState('');
 
   // ── Dialog state ────────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -126,7 +137,8 @@ export default function FieldVisitsNew() {
   // ── Client-side filtering ───────────────────────────────────────────────────
   const filteredVisits = useMemo(() => {
     const { start, end } = getDateRange(filterTime);
-    return visits.filter((v) => {
+    const q = searchTerm.trim().toLowerCase();
+    const filtered = visits.filter((v) => {
       // customerName is resolved by the edge function join
       if (filterCustomer && v.customerName !== filterCustomer) return false;
       if (filterDistrict && v.districtName !== filterDistrict)  return false;
@@ -135,18 +147,29 @@ export default function FieldVisitsNew() {
           if (!isWithinInterval(parseISO(v.arrival_date), { start, end })) return false;
         } catch { /* skip bad dates */ }
       }
+      if (q) {
+        const haystack = [
+          v.field_visit_id, v.customerName, v.districtName, v.operating_company,
+          v.visit_purpose, v.field_or_facility, v.xc_rep, v.arrival_date,
+          v.notes, v.summary, v.visit_summary,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
       return true;
     });
-  }, [visits, filterCustomer, filterDistrict, filterTime]);
+    // Default sort: Field Visit ID descending (newer IDs first)
+    return [...filtered].sort((a, b) => compareIds(b.field_visit_id, a.field_visit_id));
+  }, [visits, filterCustomer, filterDistrict, filterTime, searchTerm]);
 
   const clearFilters = () => {
     setFilterCustomer('');
     setFilterDistrict('');
     setFilterTime('all_time');
+    setSearchTerm('');
     window.history.replaceState({}, '', window.location.pathname);
   };
 
-  const filtersActive = filterCustomer || filterDistrict || filterTime !== 'all_time';
+  const filtersActive = filterCustomer || filterDistrict || filterTime !== 'all_time' || searchTerm;
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this field visit?')) return;
@@ -199,7 +222,31 @@ export default function FieldVisitsNew() {
 
         {/* ── Filter bar ── */}
         <Card className="mb-6">
-          <CardContent className="pt-4">
+          <CardContent className="pt-4 space-y-4">
+            {/* Search */}
+            <div>
+              <Label className="text-xs text-gray-500 mb-1 block">Search</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by Field Visit ID, customer, district, operating company, rep, notes…"
+                  className="pl-9 pr-9"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                    aria-label="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-4 items-end">
               {/* Customer */}
               <div className="flex-1 min-w-[180px]">
