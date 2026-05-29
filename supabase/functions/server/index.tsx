@@ -5,6 +5,7 @@ import * as kv from "./kv_store.tsx";
 import { createClient } from "npm:@supabase/supabase-js@2.49.2";
 import { apiRoutes } from "./api-routes.tsx";
 import { initializeIncidentImagesBucket } from "./upload-handler.tsx";
+import { adminExists, getUserFromRequest } from "./auth-helpers.tsx";
 
 const app = new Hono();
 
@@ -255,15 +256,40 @@ app.post("/make-server-64775d98/signin", async (c) => {
   }
 });
 
-// Sign up new user (Admin only creates SQM users)
+// Sign up new user. Admin role is gated:
+//   - Public callers can create the very first admin (bootstrap).
+//   - After at least one admin exists, only an already-authenticated admin
+//     may create another admin or any other user.
+// Roles are stored on user_metadata.role; this endpoint normalizes any
+// unknown role to "sqm" so the client can't smuggle privileged values.
 app.post("/make-server-64775d98/signup", async (c) => {
   try {
     const { email, password, name, role } = await c.req.json();
-    
+    const requestedRole: 'admin' | 'sqm' = role === 'admin' ? 'admin' : 'sqm';
+
+    const callingUser = await getUserFromRequest(c);
+    const hasAdmin = await adminExists();
+
+    if (requestedRole === 'admin') {
+      // After bootstrap, only an existing admin may mint another admin.
+      if (hasAdmin && callingUser?.role !== 'admin') {
+        return c.json({ error: 'Admin account already exists' }, 403);
+      }
+    } else {
+      // Creating any non-admin user requires an authenticated admin once
+      // setup is complete. Pre-bootstrap, only admin creation is allowed.
+      if (!hasAdmin) {
+        return c.json({ error: 'Initial setup must create an admin' }, 403);
+      }
+      if (callingUser?.role !== 'admin') {
+        return c.json({ error: 'Forbidden' }, 403);
+      }
+    }
+
     const { data, error } = await supabase.auth.admin.createUser({
       email,
       password,
-      user_metadata: { name, role }, // role: 'admin' or 'sqm'
+      user_metadata: { name, role: requestedRole },
       // Automatically confirm the user's email since an email server hasn't been configured.
       email_confirm: true
     });
@@ -277,6 +303,21 @@ app.post("/make-server-64775d98/signup", async (c) => {
   } catch (error) {
     console.log(`Signup error: ${error}`);
     return c.json({ error: 'Failed to create user' }, 500);
+  }
+});
+
+// Public endpoint: does an admin already exist? Used by the UI to decide
+// whether /setup should be reachable. Intentionally returns only a boolean
+// so it leaks no user details.
+app.get("/make-server-64775d98/admin-exists", async (c) => {
+  try {
+    const exists = await adminExists();
+    return c.json({ exists });
+  } catch (error) {
+    console.log(`admin-exists error: ${error}`);
+    // Fail closed for the UI: if we can't determine state, claim an admin
+    // exists so /setup stays locked.
+    return c.json({ exists: true });
   }
 });
 

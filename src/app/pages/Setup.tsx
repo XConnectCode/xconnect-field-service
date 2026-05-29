@@ -1,18 +1,51 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { authApi } from '../lib/api';
+import { projectId, publicAnonKey } from '/utils/supabase/info';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
 
+const ADMIN_EXISTS_URL =
+  `https://${projectId}.supabase.co/functions/v1/make-server-64775d98/admin-exists`;
+
 export default function Setup() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  // Until we hear back from the backend, assume an admin exists so we never
+  // briefly render the bootstrap form on a configured project.
+  const [adminExists, setAdminExists] = useState<boolean | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(ADMIN_EXISTS_URL, {
+          headers: { Authorization: `Bearer ${publicAnonKey}` },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setAdminExists(Boolean(data?.exists));
+      } catch (err) {
+        console.error('admin-exists check failed:', err);
+        // Fail closed: if we can't verify, treat as if an admin exists so
+        // /setup stays locked.
+        if (!cancelled) setAdminExists(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (adminExists === true) {
+      navigate('/login', { replace: true });
+    }
+  }, [adminExists, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +58,7 @@ export default function Setup() {
         name,
         role: 'admin',
       });
-      
+
       toast.success('Admin account created successfully! Please sign in.');
       navigate('/login');
     } catch (error: any) {
@@ -35,6 +68,21 @@ export default function Setup() {
       setLoading(false);
     }
   };
+
+  if (adminExists === null || adminExists === true) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-gray-100 p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>Setup unavailable</CardTitle>
+            <CardDescription>
+              Initial admin setup has already been completed. Redirecting to sign in…
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-gray-100 p-4">
@@ -86,7 +134,7 @@ export default function Setup() {
               {loading ? 'Creating Account...' : 'Create Admin Account'}
             </Button>
           </form>
-          
+
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
               Already have an account?{' '}

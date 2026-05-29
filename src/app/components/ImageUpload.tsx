@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Upload, X, ImageIcon, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../lib/auth-context';
 
 /**
  * Polymorphic image uploader.
@@ -77,6 +78,7 @@ export default function ImageUpload({
   // Resolve effective parent
   const effectiveTable = parentTable ?? (incidentId ? 'incidents' : '');
   const effectiveRowId = parentRowId ?? incidentId ?? '';
+  const { accessToken } = useAuth();
 
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -208,7 +210,7 @@ export default function ImageUpload({
         `${baseUrl}/images/${encodeURIComponent(rec.id)}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
+          headers: { Authorization: `Bearer ${accessToken ?? publicAnonKey}` },
         }
       );
 
