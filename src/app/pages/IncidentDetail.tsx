@@ -17,6 +17,13 @@ import { format, parseISO } from 'date-fns';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { supabase } from '../lib/supabase';
 import { generateIncidentReportPDF } from '../lib/generateIncidentReportPDF';
+import {
+  uploadIncidentReport,
+  getIncidentReportUrl,
+  listIncidentReports,
+  pickReport,
+  type IncidentReportRow,
+} from '../lib/incidentReportStorage';
 import IncidentForm from './forms/IncidentForm';
 import ImageUpload from '../components/ImageUpload';
 
@@ -83,18 +90,18 @@ function TextBlock({ label, value }: { label: string; value?: string }) {
   );
 }
 
-// ── PDF localStorage store ─────────────────────────────────────────────────────
-const LS_KEY = 'xc_incident_pdfs';
+// ── Legacy localStorage PDF cache (read-only fallback) ─────────────────────────
+// Reports are now stored in Supabase Storage / the incident_reports table so
+// every authenticated user/device sees the same PDFs. We still surface any
+// pre-existing local PDFs so users aren't surprised by a missing badge — but
+// new generations always upload to shared storage.
+const LEGACY_LS_KEY = 'xc_incident_pdfs';
 
-const getAllPDFStore = (): Record<string, { preliminary?: string; final?: string }> => {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}'); } catch { return {}; }
+const getLegacyPDFStore = (): Record<string, { preliminary?: string; final?: string }> => {
+  try { return JSON.parse(localStorage.getItem(LEGACY_LS_KEY) || '{}'); } catch { return {}; }
 };
 
-const getPDFs = (rowId: string): { preliminary: string; final: string } => {
-  const store = getAllPDFStore();
-  const entry = store[rowId] || {};
-  return { preliminary: entry.preliminary || '', final: entry.final || '' };
-};
+type PdfSlot = { row?: IncidentReportRow; legacyUrl?: string };
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -112,7 +119,7 @@ export default function IncidentDetail() {
   const [linkedVisitRowId, setLinkedVisitRowId] = useState<string | null>(null);
   const [updates,     setUpdates]     = useState<any[]>([]);
   const [updatesLoading, setUpdatesLoading] = useState(false);
-  const [storedReports, setStoredReports] = useState<any[]>([]);
+  const [storedReports, setStoredReports] = useState<IncidentReportRow[]>([]);
 
   // Add Update dialog
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
@@ -176,14 +183,10 @@ export default function IncidentDetail() {
       // Evidence images are now rendered by <RecordImages /> which fetches
       // signed URLs from the Edge Function (GET /images/incidents/:row_id).
 
-      // Load stored reports (AppSheet originals + future server-stored generated reports)
+      // Load stored reports (AppSheet originals + generated preliminary/final PDFs)
       if (incidentData?.event_id) {
-        const { data: reports } = await supabase
-          .from('incident_reports')
-          .select('*')
-          .eq('event_id', String(incidentData.event_id))
-          .order('generated_at', { ascending: false });
-        setStoredReports(reports || []);
+        const reports = await listIncidentReports(String(incidentData.event_id));
+        setStoredReports(reports);
       } else {
         setStoredReports([]);
       }
@@ -246,6 +249,10 @@ export default function IncidentDetail() {
   // ── PDF helpers ────────────────────────────────────────────────────────────
   const handleGeneratePDF = async (version: 'preliminary' | 'final') => {
     if (!incident) return;
+    if (!incident.event_id) {
+      toast.error('Cannot save report — incident is missing event_id');
+      return;
+    }
     const genKey = `${incident.row_id}-${version}`;
     setGeneratingPDF(genKey);
     try {
@@ -265,19 +272,19 @@ export default function IncidentDetail() {
         returnBlob: true,
       }) as Blob;
 
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error('Failed to encode PDF'));
-        reader.readAsDataURL(blob);
+      const inserted = await uploadIncidentReport({
+        blob,
+        eventId: incident.event_id,
+        version,
+        generatedBy: user?.email || (user as any)?.user_metadata?.name || null,
       });
 
-      const store = getAllPDFStore();
-      store[incident.row_id] = { ...store[incident.row_id], [version]: dataUrl };
-      localStorage.setItem(LS_KEY, JSON.stringify(store));
-
+      setStoredReports(prev => {
+        const filtered = prev.filter(r => r.report_type !== inserted.report_type);
+        return [inserted, ...filtered];
+      });
       setPdfTick(t => t + 1);
-      toast.success(`${version === 'preliminary' ? 'Preliminary' : 'Final'} report ready`);
+      toast.success(`${version === 'preliminary' ? 'Preliminary' : 'Final'} report saved`);
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || 'Failed to generate PDF');
@@ -285,6 +292,39 @@ export default function IncidentDetail() {
       setGeneratingPDF(null);
     }
   };
+
+  const previewReport = async (slot: PdfSlot) => {
+    try {
+      let url = slot.legacyUrl || '';
+      if (slot.row) url = await getIncidentReportUrl(slot.row);
+      if (!url) return;
+      setPdfPreviewUrl(url);
+      setPdfPreviewOpen(true);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Could not load report');
+    }
+  };
+
+  const downloadReport = async (slot: PdfSlot, fileName: string) => {
+    try {
+      let url = slot.legacyUrl || '';
+      if (slot.row) url = await getIncidentReportUrl(slot.row);
+      if (!url) return;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Could not download report');
+    }
+  };
+
 
   const loadUpdates = async (eventId: string) => {
     setUpdatesLoading(true);
@@ -369,7 +409,24 @@ export default function IncidentDetail() {
     );
   }
 
-  const pdfs = getPDFs(incident.row_id);
+  const legacyForIncident = getLegacyPDFStore()[incident.row_id] || {};
+  const pdfs: Record<'preliminary' | 'final', PdfSlot> = {
+    preliminary: {
+      row: pickReport(storedReports, 'preliminary'),
+      legacyUrl: legacyForIncident.preliminary,
+    },
+    final: {
+      row: pickReport(storedReports, 'final'),
+      legacyUrl: legacyForIncident.final,
+    },
+  };
+  // storedReports already drive pdfs; surface anything else (e.g. AppSheet
+  // originals) in the Archive list below.
+  const archiveReports = storedReports.filter(
+    r => r.report_type !== 'Preliminary' && r.report_type !== 'Final',
+  );
+  // Force re-renders on regenerate (pdfPreviewUrl signed URLs are short-lived).
+  void pdfTick;
 
   return (
     <div className="p-8">
@@ -407,32 +464,32 @@ export default function IncidentDetail() {
               </Button>
 
               {(['preliminary', 'final'] as const).map(version => {
-                const url    = pdfs[version];
+                const slot   = pdfs[version];
+                const has    = !!(slot.row || slot.legacyUrl);
                 const label  = version === 'preliminary' ? 'Preliminary' : 'Final';
                 const genKey = `${incident.row_id}-${version}`;
                 return (
                   <div key={version} className="flex items-center gap-1">
-                    {url && (
+                    {has && (
                       <>
                         <Button size="sm" variant="outline" className="gap-1.5"
-                          onClick={() => { setPdfPreviewUrl(url); setPdfPreviewOpen(true); }}>
+                          onClick={() => previewReport(slot)}>
                           <Eye className="w-3.5 h-3.5" /> {label}
                         </Button>
-                        <a href={url} download={`Incident_${incident.event_id}_${label}.pdf`}>
-                          <Button size="sm" variant="outline" className="gap-1.5">
-                            <Download className="w-3.5 h-3.5" />
-                          </Button>
-                        </a>
+                        <Button size="sm" variant="outline" className="gap-1.5"
+                          onClick={() => downloadReport(slot, `Incident_${incident.event_id}_${label}.pdf`)}>
+                          <Download className="w-3.5 h-3.5" />
+                        </Button>
                       </>
                     )}
                     <Button size="sm"
-                      variant={url ? 'outline' : 'default'}
-                      className={!url ? 'bg-gray-900 text-white hover:bg-gray-800 gap-1.5' : 'gap-1.5'}
+                      variant={has ? 'outline' : 'default'}
+                      className={!has ? 'bg-gray-900 text-white hover:bg-gray-800 gap-1.5' : 'gap-1.5'}
                       disabled={generatingPDF === genKey}
                       onClick={() => handleGeneratePDF(version)}>
                       {generatingPDF === genKey
                         ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating…</>
-                        : <><FileText className="w-3.5 h-3.5" />{url ? `Regen ${label}` : `Generate ${label}`}</>}
+                        : <><FileText className="w-3.5 h-3.5" />{has ? `Regen ${label}` : `Generate ${label}`}</>}
                     </Button>
                   </div>
                 );
@@ -660,10 +717,17 @@ export default function IncidentDetail() {
             <CardHeader><CardTitle>Reports</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {(['preliminary', 'final'] as const).map(version => {
-                const url    = pdfs[version];
+                const slot   = pdfs[version];
+                const has    = !!(slot.row || slot.legacyUrl);
+                const isLegacyOnly = !slot.row && !!slot.legacyUrl;
                 const label  = version === 'preliminary' ? 'Preliminary' : 'Final';
                 const genKey = `${incident.row_id}-${version}`;
                 const color  = version === 'preliminary' ? 'amber' : 'blue';
+                const status = !has
+                  ? 'Not yet generated'
+                  : isLegacyOnly
+                    ? 'Local-only — regenerate to share with team'
+                    : 'Saved in shared storage';
                 return (
                   <div key={version} className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-gray-50">
                     <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold shrink-0
@@ -672,44 +736,44 @@ export default function IncidentDetail() {
                     </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-700">{label} Report</p>
-                      <p className="text-xs text-gray-400">{url ? 'Generated' : 'Not yet generated'}</p>
+                      <p className="text-xs text-gray-400">{status}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {url && (
+                      {has && (
                         <>
                           <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1"
-                            onClick={() => { setPdfPreviewUrl(url); setPdfPreviewOpen(true); }}>
+                            onClick={() => previewReport(slot)}>
                             <Eye className="w-3 h-3" /> Preview
                           </Button>
-                          <a href={url} download={`Incident_${incident.event_id}_${label}.pdf`}>
-                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1">
-                              <Download className="w-3 h-3" /> Download
-                            </Button>
-                          </a>
+                          <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1"
+                            onClick={() => downloadReport(slot, `Incident_${incident.event_id}_${label}.pdf`)}>
+                            <Download className="w-3 h-3" /> Download
+                          </Button>
                         </>
                       )}
                       <Button size="sm"
-                        variant={url ? 'outline' : 'default'}
-                        className={`h-7 px-2 text-xs gap-1 ${!url ? 'bg-gray-900 text-white hover:bg-gray-800' : ''}`}
+                        variant={has ? 'outline' : 'default'}
+                        className={`h-7 px-2 text-xs gap-1 ${!has ? 'bg-gray-900 text-white hover:bg-gray-800' : ''}`}
                         disabled={generatingPDF === genKey}
                         onClick={() => handleGeneratePDF(version)}>
                         {generatingPDF === genKey
                           ? <><RefreshCw className="w-3 h-3 animate-spin" /> Generating…</>
-                          : <><FileText className="w-3 h-3" />{url ? 'Regenerate' : 'Generate'}</>}
+                          : <><FileText className="w-3 h-3" />{has ? 'Regenerate' : 'Generate'}</>}
                       </Button>
                     </div>
                   </div>
                 );
               })}
 
-              {/* Stored reports (AppSheet originals + any saved-to-Storage reports) */}
-              {storedReports.length > 0 && (
+              {/* Stored reports (AppSheet originals — generated preliminary/final are
+                  rendered above and excluded here) */}
+              {archiveReports.length > 0 && (
                 <div className="pt-2 mt-2 border-t border-gray-100">
                   <p className="text-xs font-semibold uppercase text-gray-500 mb-2">
-                    Archive ({storedReports.length})
+                    Archive ({archiveReports.length})
                   </p>
                   <div className="space-y-2">
-                    {storedReports.map((r) => {
+                    {archiveReports.map((r) => {
                       const isAppSheet = r.report_type === 'AppSheet Original';
                       return (
                         <div key={r.row_id} className="flex items-center gap-3 px-4 py-2 rounded-lg border bg-white">
@@ -745,23 +809,21 @@ export default function IncidentDetail() {
                               size="sm"
                               variant="outline"
                               className="h-7 px-2 text-xs gap-1"
-                              onClick={() => {
-                                setPdfPreviewUrl(r.file_url);
-                                setPdfPreviewOpen(true);
-                              }}
+                              onClick={() => previewReport({ row: r })}
                             >
                               <Eye className="w-3 h-3" /> Preview
                             </Button>
-                            <a
-                              href={r.file_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              download={r.file_name || `Incident_${incident.event_id}_${r.report_type}.pdf`}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs gap-1"
+                              onClick={() => downloadReport(
+                                { row: r },
+                                r.file_name || `Incident_${incident.event_id}_${r.report_type}.pdf`,
+                              )}
                             >
-                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1">
-                                <Download className="w-3 h-3" /> Download
-                              </Button>
-                            </a>
+                              <Download className="w-3 h-3" /> Download
+                            </Button>
                           </div>
                         </div>
                       );
