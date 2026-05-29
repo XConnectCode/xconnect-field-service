@@ -513,7 +513,29 @@ export default function IncidentForm({
         if (!v) onClose();
       }}
     >
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0">
+      <DialogContent
+        className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0"
+        // The AI Assistant panel is portal'd to <body>, so it lives outside this
+        // Dialog's DOM tree. Without these guards, Radix treats any click/focus
+        // inside the panel as an "outside" interaction and auto-dismisses the
+        // Dialog (closing both the form and the panel). Keep the Dialog open
+        // when the interaction originated inside the AI panel.
+        onPointerDownOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
+            e.preventDefault();
+          }
+        }}
+        onFocusOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-center justify-between gap-3">
             <DialogTitle>

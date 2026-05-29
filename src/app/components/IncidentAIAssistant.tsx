@@ -231,6 +231,7 @@ export default function IncidentAIAssistant({
     <div
       role="dialog"
       aria-label="AI Incident Assistant"
+      data-ai-assistant-panel=""
       className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-2xl"
     >
       <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0">
