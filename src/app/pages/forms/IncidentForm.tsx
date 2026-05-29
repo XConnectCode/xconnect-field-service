@@ -13,6 +13,12 @@ import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import { Upload, X, Loader2 } from 'lucide-react';
+import {
+  normalizeStatus,
+  validateForStatus,
+  statusOptionsForRole,
+  canSetStatus,
+} from '../../lib/incidentWorkflow';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -256,9 +262,40 @@ export default function IncidentForm({
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSaving(true);
 
     const fd = new FormData(e.currentTarget);
+
+    // ── Workflow validation: gate moves to Final Review / Closed ─────────────
+    const targetStatus = String(fd.get('incident_status') || '');
+    if (!canSetStatus(currentUser?.role, targetStatus)) {
+      toast.error(`Only admins can set status to "${targetStatus}".`);
+      return;
+    }
+
+    // Build a candidate record from form + existing values to validate against.
+    const candidate: Record<string, any> = {
+      ...(incident || {}),
+      xc_caused:        fd.get('xc_caused') || incident?.xc_caused,
+      vendor_caused:    fd.get('vendor_caused') || incident?.vendor_caused,
+      vendor:           fd.get('vendor') || incident?.vendor,
+      failed_component: fd.get('failed_component') || incident?.failed_component,
+      event_category:   fd.get('event_category') || incident?.event_category,
+      failure_type:     fd.get('failure_type') || incident?.failure_type,
+      product_line:     fd.get('product_line') || incident?.product_line,
+      root_cause:       fd.get('root_cause') || incident?.root_cause,
+      // report_sent is not on the form — keep the existing value when validating
+      report_sent:      incident?.report_sent,
+    };
+    const missing = validateForStatus(candidate, targetStatus);
+    if (missing.length) {
+      toast.error(
+        `Cannot save with status "${targetStatus}" — missing required fields: ${missing.join(', ')}.`,
+        { duration: 6000 },
+      );
+      return;
+    }
+
+    setSaving(true);
 
     const payload: Record<string, any> = {
       date_incident: fd.get('date_incident') || null,
@@ -382,14 +419,23 @@ export default function IncidentForm({
           <F label="Status">
             <Sel
               name="incident_status"
-              defaultValue={incident?.incident_status || 'Open'}
+              defaultValue={normalizeStatus(incident?.incident_status) || 'New'}
             >
               <option value="">— Select —</option>
-              {opts(listItems, 'incident_status').map((o) => (
+              {statusOptionsForRole(currentUser?.role).map((o) => (
                 <option key={o} value={o}>
                   {o}
                 </option>
               ))}
+              {/* Always allow keeping the current value, even if it's not in the
+                  role-allowed list (e.g. Closed for SQMs viewing a closed record). */}
+              {incident?.incident_status &&
+                !statusOptionsForRole(currentUser?.role).includes(normalizeStatus(incident.incident_status) as any) &&
+                normalizeStatus(incident.incident_status) && (
+                  <option value={normalizeStatus(incident.incident_status) as string}>
+                    {normalizeStatus(incident.incident_status)} (current)
+                  </option>
+                )}
             </Sel>
           </F>
 

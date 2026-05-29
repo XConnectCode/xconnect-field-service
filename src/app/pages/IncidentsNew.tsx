@@ -21,6 +21,7 @@ import {
 } from 'date-fns';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { generateIncidentReportPDF } from '../lib/generateIncidentReportPDF';
+import { normalizeStatus, canMarkReportSent } from '../lib/incidentWorkflow';
 
 // ── Time filter helpers ───────────────────────────────────────────────────────
 function getDateRange(tf: string | null): { start: Date | null; end: Date | null } {
@@ -63,9 +64,13 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   if (!status) return <span className="text-gray-300">-</span>;
-  const s = status.toLowerCase();
-  if (s === 'open')   return <Badge className="bg-gray-900 text-white">Open</Badge>;
-  if (s === 'closed') return <Badge variant="secondary" className="text-gray-500 font-normal">Closed</Badge>;
+  const n = normalizeStatus(status);
+  // Color-coded badges per workflow stage
+  if (n === 'New')               return <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-100">New</Badge>;
+  if (n === 'Investigating')     return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">Investigating</Badge>;
+  if (n === 'Root Cause Needed') return <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100">Root Cause Needed</Badge>;
+  if (n === 'Final Review')      return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Final Review</Badge>;
+  if (n === 'Closed')            return <Badge variant="secondary" className="text-gray-500 font-normal">Closed</Badge>;
   return <Badge variant="outline">{status}</Badge>;
 }
 
@@ -380,6 +385,10 @@ export default function IncidentsNew() {
   };
 
   const handleToggleReportSent = async (inc: any) => {
+    if (!canMarkReportSent(user?.role as any)) {
+      toast.error('Only admins can mark a report as sent.');
+      return;
+    }
     const newValue = inc.report_sent ? null : new Date().toISOString();
     const { error } = await supabase
       .from('incidents')
@@ -777,15 +786,19 @@ export default function IncidentsNew() {
                           );
                         })}
 
-                        {/* Report Sent toggle */}
+                        {/* Report Sent toggle — admin only */}
                         <div className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-gray-50">
                           <div className="flex-1">
                             <p className="text-xs font-semibold text-gray-700">Report Sent to Customer</p>
                             {r.report_sent
                               ? <p className="text-xs text-emerald-600">Sent{safeFmtDate(r.report_sent, ' MMMM d, yyyy')}</p>
-                              : <p className="text-xs text-gray-400">Not yet sent</p>}
+                              : <p className="text-xs text-gray-400">
+                                  Not yet sent{!canMarkReportSent(user?.role as any) && <span className="text-gray-400"> · admin only</span>}
+                                </p>}
                           </div>
                           <Button size="sm" variant="outline"
+                            disabled={!canMarkReportSent(user?.role as any)}
+                            title={!canMarkReportSent(user?.role as any) ? 'Only admins can mark a report as sent' : undefined}
                             className={`h-7 px-3 text-xs ${r.report_sent ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50'}`}
                             onClick={() => handleToggleReportSent(r)}>
                             {r.report_sent

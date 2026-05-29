@@ -19,6 +19,7 @@ import { supabase } from '../lib/supabase';
 import { generateIncidentReportPDF } from '../lib/generateIncidentReportPDF';
 import IncidentForm from './forms/IncidentForm';
 import ImageUpload from '../components/ImageUpload';
+import { normalizeStatus, canMarkReportSent } from '../lib/incidentWorkflow';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function safeFmtDate(val: any, fmt: string): string {
@@ -47,9 +48,12 @@ function SeverityBadge({ severity }: { severity?: string }) {
 
 function StatusBadge({ status }: { status?: string }) {
   if (!status) return null;
-  const s = status.toLowerCase();
-  if (s === 'open')   return <Badge className="bg-gray-900 text-white">Open</Badge>;
-  if (s === 'closed') return <Badge variant="secondary" className="text-gray-500 font-normal">Closed</Badge>;
+  const n = normalizeStatus(status);
+  if (n === 'New')               return <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-100">New</Badge>;
+  if (n === 'Investigating')     return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">Investigating</Badge>;
+  if (n === 'Root Cause Needed') return <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100">Root Cause Needed</Badge>;
+  if (n === 'Final Review')      return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Final Review</Badge>;
+  if (n === 'Closed')            return <Badge variant="secondary" className="text-gray-500 font-normal">Closed</Badge>;
   return <Badge variant="outline">{status}</Badge>;
 }
 
@@ -343,6 +347,10 @@ export default function IncidentDetail() {
 
   const handleToggleReportSent = async () => {
     if (!incident) return;
+    if (!canMarkReportSent(user?.role as any)) {
+      toast.error('Only admins can mark a report as sent.');
+      return;
+    }
     const newValue = incident.report_sent ? null : new Date().toISOString();
     const { error } = await supabase
       .from('incidents')
@@ -446,6 +454,8 @@ export default function IncidentDetail() {
                   </span>
                 )}
                 <Button size="sm" variant="outline"
+                  disabled={!canMarkReportSent(user?.role as any)}
+                  title={!canMarkReportSent(user?.role as any) ? 'Only admins can mark a report as sent' : undefined}
                   className={incident.report_sent
                     ? 'text-red-600 border-red-200 hover:bg-red-50 gap-1.5'
                     : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50 gap-1.5'}
@@ -779,6 +789,8 @@ export default function IncidentDetail() {
                     : <p className="text-xs text-gray-400">Not yet sent</p>}
                 </div>
                 <Button size="sm" variant="outline"
+                  disabled={!canMarkReportSent(user?.role as any)}
+                  title={!canMarkReportSent(user?.role as any) ? 'Only admins can mark a report as sent' : undefined}
                   className={`h-7 px-3 text-xs gap-1 ${incident.report_sent ? 'text-red-600 border-red-200 hover:bg-red-50' : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50'}`}
                   onClick={handleToggleReportSent}>
                   {incident.report_sent

@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth-context";
+import { toast } from "sonner";
+import {
+  INCIDENT_STATUSES,
+  STATUS_COLORS as WORKFLOW_STATUS_COLORS,
+  normalizeStatus,
+  validateForStatus,
+  statusOptionsForRole,
+  isGatedStatus,
+  CLOSED_STATUS,
+} from "../lib/incidentWorkflow";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function fetchAllPages(query: any) {
@@ -61,7 +71,7 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string }> = {
 // ── Quick-edit enums ──────────────────────────────────────────────────────────
 const XC_CAUSED_OPTS   = ["Yes", "No", "Inconclusive"];
 const SEVERITY_OPTS    = ["Low", "Moderate", "Critical"];
-const STATUS_OPTS      = ["Open", "Closed"];
+const STATUS_OPTS      = INCIDENT_STATUSES;
 const VENDOR_CAUSED_OPTS = ["Yes", "No", "Pending Investigation"];
 
 const SEVERITY_COLORS: Record<string, { bg: string; color: string }> = {
@@ -74,28 +84,50 @@ const XC_COLORS: Record<string, { bg: string; color: string }> = {
   No:           { bg: "#f1f5f9", color: "#475569" },
   Inconclusive: { bg: "#f1f5f9", color: "#475569" },
 };
-const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
-  Open:   { bg: "#1e293b", color: "#ffffff" },
-  Closed: { bg: "#f1f5f9", color: "#475569" },
-};
+const STATUS_COLORS: Record<string, { bg: string; color: string }> = WORKFLOW_STATUS_COLORS;
 
 // ── Inline pill button for quick editing ─────────────────────────────────────
-function QuickEdit({ value, options, colorMap, field, rowId, onUpdated }: {
+function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident, role }: {
   value: string; options: string[];
   colorMap: Record<string, { bg: string; color: string }>;
   field: string; rowId: string;
   onUpdated: (rowId: string, field: string, value: string) => void;
+  incident?: Record<string, any>;
+  role?: 'admin' | 'sqm';
 }) {
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const cur = colorMap[value] ?? { bg: "#f1f5f9", color: "#475569" };
 
+  // For the status field, restrict options by role (SQMs can't pick Closed).
+  const effectiveOptions = field === "incident_status"
+    ? statusOptionsForRole(role) as string[]
+    : options;
+
   const handleSelect = async (opt: string) => {
     if (opt === value) { setOpen(false); return; }
+    // Workflow gates: validate before allowing transition to Final Review / Closed.
+    if (field === "incident_status" && incident && isGatedStatus(opt)) {
+      const missing = validateForStatus(incident, opt);
+      if (missing.length) {
+        setOpen(false);
+        toast.error(
+          `Cannot move to "${opt}" — missing required fields: ${missing.join(", ")}.`,
+          { duration: 6000 },
+        );
+        return;
+      }
+      if (opt === CLOSED_STATUS && role !== 'admin') {
+        setOpen(false);
+        toast.error("Only admins can mark an incident Closed.");
+        return;
+      }
+    }
     setSaving(true);
     setOpen(false);
     const { error } = await supabase.from("incidents").update({ [field]: opt }).eq("row_id", rowId);
     if (!error) onUpdated(rowId, field, opt);
+    else toast.error(error.message || "Failed to update");
     setSaving(false);
   };
 
@@ -120,7 +152,7 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated }: {
           background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
           boxShadow: "0 4px 16px rgba(0,0,0,0.12)", minWidth: 140, overflow: "hidden",
         }}>
-          {options.map(opt => {
+          {effectiveOptions.map(opt => {
             const c = colorMap[opt] ?? { bg: "#f8fafc", color: "#475569" };
             return (
               <button key={opt} onClick={() => handleSelect(opt)} style={{
@@ -142,9 +174,10 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated }: {
 }
 
 // ── Full incident popup modal ─────────────────────────────────────────────────
-function IncidentModal({ incident, listMap, vendorMap, onClose, onUpdated }: {
+function IncidentModal({ incident, listMap, vendorMap, onClose, onUpdated, role }: {
   incident: any; listMap: Record<string, any>; vendorMap: Record<string, string>;
   onClose: () => void; onUpdated: (rowId: string, field: string, value: string) => void;
+  role?: 'admin' | 'sqm';
 }) {
   const r = incident;
   const failedComp  = listMap[r.failed_component]?.failed_component || r.failed_component || null;
@@ -175,7 +208,7 @@ function IncidentModal({ incident, listMap, vendorMap, onClose, onUpdated }: {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={modal.qLabel}>Status</span>
-            <QuickEdit value={r.incident_status || "—"} options={STATUS_OPTS} colorMap={STATUS_COLORS} field="incident_status" rowId={r.row_id} onUpdated={onUpdated} />
+            <QuickEdit value={normalizeStatus(r.incident_status) || "—"} options={STATUS_OPTS} colorMap={STATUS_COLORS} field="incident_status" rowId={r.row_id} onUpdated={onUpdated} incident={r} role={role} />
           </div>
           {r.vendor_caused !== null && r.vendor_caused !== undefined && (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -303,6 +336,7 @@ function PanelStatusCard({ status, count, total, loading }: { status: string; co
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { user } = useAuth();
+  const role = user?.role as 'admin' | 'sqm' | undefined;
   const displayName = user?.name && user.name !== "Admin User" ? user.name : null;
   const [timeFilter, setTimeFilter] = useState("all_time");
   const [incStatusFilter, setIncStatusFilter] = useState("all");
@@ -329,7 +363,11 @@ export default function Dashboard() {
 
   // ── Enrich incidents with resolved names ────────────────────────────────────
   const enriched = useMemo(() => incidents
-    .filter(inc => incStatusFilter === "all" || inc.incident_status === incStatusFilter)
+    .filter(inc => {
+      if (incStatusFilter === "all") return true;
+      const n = normalizeStatus(inc.incident_status);
+      return n === incStatusFilter;
+    })
     .map(inc => ({
       ...inc,
       customerName: customerMap[inc.customer]          || inc.customer          || "-",
@@ -490,18 +528,22 @@ export default function Dashboard() {
           Incident Review
           {!loading && <span style={styles.sectionBadge}>{enriched.length} of {incidents.length} incidents</span>}
         </h2>
-        <div style={{ display: "flex", gap: 6 }}>
-          {(["all", "Open", "Closed"] as const).map(opt => (
-            <button key={opt} onClick={() => setIncStatusFilter(opt)} style={{
-              padding: "5px 14px", borderRadius: 20, border: "1px solid",
-              fontSize: 12, fontWeight: 600, cursor: "pointer",
-              borderColor: incStatusFilter === opt ? (opt === "Open" ? "#ef4444" : opt === "Closed" ? "#94a3b8" : "#6366f1") : "#e2e8f0",
-              background: incStatusFilter === opt ? (opt === "Open" ? "#fef2f2" : opt === "Closed" ? "#f8fafc" : "#eef2ff") : "#fff",
-              color: incStatusFilter === opt ? (opt === "Open" ? "#dc2626" : opt === "Closed" ? "#475569" : "#4f46e5") : "#64748b",
-            }}>
-              {opt === "all" ? "All" : opt}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {(["all", ...INCIDENT_STATUSES] as const).map(opt => {
+            const active = incStatusFilter === opt;
+            const c = opt !== "all" ? (STATUS_COLORS[opt] ?? { bg: "#eef2ff", color: "#4f46e5" }) : { bg: "#eef2ff", color: "#4f46e5" };
+            return (
+              <button key={opt} onClick={() => setIncStatusFilter(opt)} style={{
+                padding: "5px 14px", borderRadius: 20, border: "1px solid",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                borderColor: active ? c.color : "#e2e8f0",
+                background:  active ? c.bg    : "#fff",
+                color:       active ? c.color : "#64748b",
+              }}>
+                {opt === "all" ? "All" : opt}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -523,13 +565,14 @@ export default function Dashboard() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14, marginBottom: 28 }}>
           {enriched.map(inc => {
             const sevCfg = SEVERITY_COLORS[inc.incident_severity] ?? { bg: "#f1f5f9", color: "#475569" };
-            const staCfg = STATUS_COLORS[inc.incident_status]    ?? { bg: "#f1f5f9", color: "#475569" };
+            const normStatus = normalizeStatus(inc.incident_status);
+            const staCfg = STATUS_COLORS[normStatus]    ?? { bg: "#f1f5f9", color: "#475569" };
             const preview = inc.notes || inc.incident_description || inc.investigation || null;
-            const isOpen  = (inc.incident_status || "").toLowerCase() === "open";
+            const isClosed = normStatus === CLOSED_STATUS;
             return (
               <div key={inc.row_id} style={{
                 ...styles.card, padding: 0, display: "flex", flexDirection: "column",
-                borderLeft: `4px solid ${isOpen ? "#ef4444" : "#94a3b8"}`,
+                borderLeft: `4px solid ${isClosed ? "#94a3b8" : (staCfg.color || "#ef4444")}`,
               }}>
                 {/* Card header */}
                 <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #f1f5f9", borderRadius: "12px 12px 0 0" }}>
@@ -559,7 +602,7 @@ export default function Dashboard() {
                 {/* Quick-edit footer */}
                 <div style={{ padding: "10px 16px", borderTop: "1px solid #f1f5f9", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <QuickEdit value={inc.incident_severity || "—"} options={SEVERITY_OPTS} colorMap={SEVERITY_COLORS} field="incident_severity" rowId={inc.row_id} onUpdated={handleUpdated} />
-                  <QuickEdit value={inc.incident_status   || "—"} options={STATUS_OPTS}   colorMap={STATUS_COLORS}   field="incident_status"   rowId={inc.row_id} onUpdated={handleUpdated} />
+                  <QuickEdit value={normStatus            || "—"} options={STATUS_OPTS}   colorMap={STATUS_COLORS}   field="incident_status"   rowId={inc.row_id} onUpdated={handleUpdated} incident={inc} role={role} />
                   <button
                     onClick={() => setModalIncident(inc)}
                     style={{ marginLeft: "auto", padding: "3px 10px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 11, color: "#475569", fontWeight: 500 }}
@@ -581,6 +624,7 @@ export default function Dashboard() {
           vendorMap={vendorMap}
           onClose={() => setModalIncident(null)}
           onUpdated={handleUpdated}
+          role={role}
         />
       )}
     </div>
