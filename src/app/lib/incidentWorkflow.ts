@@ -118,6 +118,60 @@ export function validateForStatus(
   return missing;
 }
 
+// ── Action status (corrective/preventive action) ─────────────────────────────
+//
+// The `incidents.action_status` column has a Postgres CHECK constraint:
+//   CHECK (action_status = ANY (ARRAY['Open','In Progress','Complete']))
+// Note: 'Complete', NOT 'Completed' — writing the wrong literal raises
+// `incidents_action_status_check` and the upsert is rejected.
+//
+// All persisted values MUST come from this list. UI labels are friendlier
+// (`ACTION_STATUS_LABELS`) but the value written to Supabase is the literal.
+
+export type ActionStatus = 'Open' | 'In Progress' | 'Complete';
+
+export const ACTION_STATUSES: ActionStatus[] = ['Open', 'In Progress', 'Complete'];
+
+/** "Complete" is the terminal action status — used by the Closed-incident gate. */
+export const ACTION_STATUS_COMPLETE: ActionStatus = 'Complete';
+
+/** Friendly display labels. Keep `Complete` rendered as "Completed" in the UI. */
+export const ACTION_STATUS_LABELS: Record<ActionStatus, string> = {
+  Open: 'Open',
+  'In Progress': 'In Progress',
+  Complete: 'Completed',
+};
+
+/**
+ * Coerce any legacy / free-text `action_status` value to one of the three
+ * allowed literals so we never write something the CHECK constraint rejects.
+ * Returns null when the input is empty (caller decides whether to persist).
+ */
+export function normalizeActionStatus(
+  raw: string | null | undefined,
+): ActionStatus | null {
+  if (!raw) return null;
+  const v = String(raw).trim();
+  if (!v) return null;
+  const lower = v.toLowerCase();
+  // Direct hits + the common typo `Completed` → canonical `Complete`.
+  if (lower === 'complete' || lower === 'completed' || lower === 'done' || lower === 'closed') {
+    return ACTION_STATUS_COMPLETE;
+  }
+  if (lower === 'open') return 'Open';
+  if (lower === 'in progress' || lower === 'in-progress' || lower === 'inprogress' || lower === 'pending') {
+    return 'In Progress';
+  }
+  // Unknown values fall through to null so the caller can drop the field
+  // rather than persist something the DB will reject.
+  return null;
+}
+
+/** True if an action_status value (any casing/spelling) represents completion. */
+export function isActionStatusComplete(raw: string | null | undefined): boolean {
+  return normalizeActionStatus(raw) === ACTION_STATUS_COMPLETE;
+}
+
 /**
  * Returns a human-readable list of inconsistencies between the cover status
  * and any sub-section state (e.g. action_status). Used to surface a warning
@@ -128,8 +182,7 @@ export function findStatusInconsistencies(
 ): string[] {
   const out: string[] = [];
   const status = normalizeStatus(incident.incident_status);
-  const actionStatus = (incident.action_status || '').toString().trim().toLowerCase();
-  if (status === CLOSED_STATUS && actionStatus && !/complete|closed|done/.test(actionStatus)) {
+  if (status === CLOSED_STATUS && incident.action_status && !isActionStatusComplete(incident.action_status)) {
     out.push(
       `Action Status is "${incident.action_status}" but incident is Closed — ` +
         `mark the corrective action as Completed before sending to the customer.`,

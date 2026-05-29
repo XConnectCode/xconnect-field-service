@@ -10,6 +10,7 @@ import {
   statusOptionsForRole,
   isGatedStatus,
   CLOSED_STATUS,
+  ACTION_STATUS_COMPLETE,
 } from "../lib/incidentWorkflow";
 import {
   resolveFailedComponentLabel,
@@ -129,9 +130,20 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident
     }
     setSaving(true);
     setOpen(false);
-    const { error } = await supabase.from("incidents").update({ [field]: opt }).eq("row_id", rowId);
-    if (!error) onUpdated(rowId, field, opt);
-    else toast.error(error.message || "Failed to update");
+    // When transitioning the incident to Closed via the quick-edit pill,
+    // force action_status to 'Complete' so it can't contradict the cover
+    // (and so a downstream save can't trip the DB CHECK constraint).
+    const updates: Record<string, any> = { [field]: opt };
+    if (field === "incident_status" && normalizeStatus(opt) === CLOSED_STATUS) {
+      updates.action_status = ACTION_STATUS_COMPLETE;
+    }
+    const { error } = await supabase.from("incidents").update(updates).eq("row_id", rowId);
+    if (!error) {
+      onUpdated(rowId, field, opt);
+      if (updates.action_status) onUpdated(rowId, "action_status", ACTION_STATUS_COMPLETE);
+    } else {
+      toast.error(error.message || "Failed to update");
+    }
     setSaving(false);
   };
 

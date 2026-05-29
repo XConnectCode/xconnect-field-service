@@ -9,7 +9,13 @@ import {
   resolveFailureTypeLabel,
   type ComponentMap,
 } from './failedComponent';
-import { normalizeStatus } from './incidentWorkflow';
+import {
+  normalizeStatus,
+  normalizeActionStatus,
+  ACTION_STATUS_LABELS,
+  ACTION_STATUS_COMPLETE,
+  isActionStatusComplete,
+} from './incidentWorkflow';
 
 export type { IncidentReportImage } from './incidentPdfImages';
 
@@ -299,20 +305,22 @@ export async function generateIncidentReportPDF(opts: IncidentReportOptions): Pr
     // action meta row
     // Label this "Action Status" explicitly so it cannot be mistaken for the
     // overall incident status shown on the cover. When the incident is fully
-    // Closed, force the action status to match so the two cannot contradict
-    // ("Closed" incident with an "In Progress" corrective action makes no
-    // sense to a customer reading the PDF).
-    const effectiveActionStatus =
-      canonicalStatus === 'Closed'
-        ? (r.action_status && /complete|closed|done/i.test(String(r.action_status))
-            ? r.action_status
-            : 'Completed')
-        : r.action_status;
+    // Closed, force the displayed action status to match so the two cannot
+    // contradict ("Closed" incident with an "In Progress" corrective action
+    // makes no sense to a customer reading the PDF).
+    //
+    // Persisted DB literal is one of {Open, In Progress, Complete} per the
+    // incidents_action_status_check constraint. We show the friendly label
+    // ("Completed") via ACTION_STATUS_LABELS but never mutate the stored value.
+    const canonicalAction = canonicalStatus === 'Closed'
+      ? (isActionStatusComplete(r.action_status) ? normalizeActionStatus(r.action_status) ?? ACTION_STATUS_COMPLETE : ACTION_STATUS_COMPLETE)
+      : normalizeActionStatus(r.action_status);
+    const displayedActionStatus = canonicalAction ? ACTION_STATUS_LABELS[canonicalAction] : '';
 
     const actionMeta = [
       { label: 'Assigned To',   value: r.action_assigned_to },
       { label: 'Due Date',      value: fmtDate(r.action_due_date) },
-      { label: 'Action Status', value: effectiveActionStatus },
+      { label: 'Action Status', value: displayedActionStatus },
     ].filter(f => f.value && f.value !== '—');
 
     if (actionMeta.length) {

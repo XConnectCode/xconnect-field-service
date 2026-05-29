@@ -17,6 +17,24 @@ const supabase = createClient(
 
 export const apiRoutes = new Hono();
 
+/**
+ * Coerce any inbound action_status value to one of the three literals
+ * allowed by the `incidents_action_status_check` Postgres CHECK constraint:
+ *   ('Open', 'In Progress', 'Complete')
+ * Returns null for empty / unknown so the column is left null rather than
+ * triggering a constraint violation. NOTE: 'Complete', NOT 'Completed'.
+ */
+function normalizeActionStatusForDb(raw: unknown): 'Open' | 'In Progress' | 'Complete' | null {
+  if (raw === null || raw === undefined) return null;
+  const v = String(raw).trim();
+  if (!v) return null;
+  const lower = v.toLowerCase();
+  if (lower === 'complete' || lower === 'completed' || lower === 'done' || lower === 'closed') return 'Complete';
+  if (lower === 'open') return 'Open';
+  if (lower === 'in progress' || lower === 'in-progress' || lower === 'inprogress' || lower === 'pending') return 'In Progress';
+  return null;
+}
+
 // ============ CUSTOMERS ============
 
 apiRoutes.get("/customers", async (c) => {
@@ -535,7 +553,7 @@ apiRoutes.post("/incidents", async (c) => {
         preventive_action: body.preventive_action,
         action_assigned_to: body.action_assigned_to,
         action_due_date: body.action_due_date,
-        action_status: body.action_status,
+        action_status: normalizeActionStatusForDb(body.action_status),
         closed_date: body.closed_date,
         closed_by: body.closed_by,
         report_version: body.report_version,
@@ -615,7 +633,7 @@ apiRoutes.put("/incidents/:id", async (c) => {
         preventive_action: body.preventive_action,
         action_assigned_to: body.action_assigned_to,
         action_due_date: body.action_due_date,
-        action_status: body.action_status,
+        action_status: normalizeActionStatusForDb(body.action_status),
         closed_date: body.closed_date,
         closed_by: body.closed_by,
         report_version: body.report_version,

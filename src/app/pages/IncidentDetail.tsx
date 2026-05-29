@@ -28,7 +28,13 @@ import IncidentForm from './forms/IncidentForm';
 import ImageUpload from '../components/ImageUpload';
 import IncidentPdfImagePicker from '../components/IncidentPdfImagePicker';
 import type { IncidentReportImage } from '../lib/generateIncidentReportPDF';
-import { normalizeStatus, canMarkReportSent, CLOSED_STATUS } from '../lib/incidentWorkflow';
+import {
+  normalizeStatus,
+  canMarkReportSent,
+  CLOSED_STATUS,
+  normalizeActionStatus,
+  ACTION_STATUS_LABELS,
+} from '../lib/incidentWorkflow';
 import {
   resolveFailedComponentLabel,
   resolveFailureTypeLabel,
@@ -762,7 +768,10 @@ export default function IncidentDetail() {
                 <div className="grid md:grid-cols-3 gap-4 pt-2">
                   <Field label="Assigned To" value={incident.action_assigned_to} />
                   <Field label="Due Date" value={incident.action_due_date ? fmtLocalDate(incident.action_due_date) : null} />
-                  <Field label="Action Status" value={incident.action_status} />
+                  <Field label="Action Status" value={(() => {
+                    const a = normalizeActionStatus(incident.action_status);
+                    return a ? ACTION_STATUS_LABELS[a] : incident.action_status;
+                  })()} />
                 </div>
               </CardContent>
             </Card>

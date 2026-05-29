@@ -22,7 +22,12 @@ import {
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { generateIncidentReportPDF, type IncidentReportImage } from '../lib/generateIncidentReportPDF';
 import IncidentPdfImagePicker from '../components/IncidentPdfImagePicker';
-import { normalizeStatus, canMarkReportSent } from '../lib/incidentWorkflow';
+import {
+  normalizeStatus,
+  canMarkReportSent,
+  normalizeActionStatus,
+  ACTION_STATUS_LABELS,
+} from '../lib/incidentWorkflow';
 import {
   resolveFailedComponentLabel,
   resolveFailureTypeLabel,
@@ -814,7 +819,10 @@ export default function IncidentsNew() {
                           <div className="grid grid-cols-3 gap-x-8 gap-y-4">
                             <Field label="Assigned To">{r.action_assigned_to}</Field>
                             <Field label="Due Date">{r.action_due_date ? new Date(r.action_due_date + 'T12:00:00').toLocaleDateString() : null}</Field>
-                            <Field label="Action Status">{r.action_status}</Field>
+                            <Field label="Action Status">{(() => {
+                              const a = normalizeActionStatus(r.action_status);
+                              return a ? ACTION_STATUS_LABELS[a] : r.action_status;
+                            })()}</Field>
                           </div>
                         </div>
                       </section>

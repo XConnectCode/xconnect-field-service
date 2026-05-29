@@ -25,9 +25,14 @@ import { toast } from 'sonner';
 import { Info } from 'lucide-react';
 import {
   normalizeStatus,
+  normalizeActionStatus,
   validateForStatus,
   statusOptionsForRole,
   canSetStatus,
+  ACTION_STATUSES,
+  ACTION_STATUS_LABELS,
+  ACTION_STATUS_COMPLETE,
+  CLOSED_STATUS,
 } from '../../lib/incidentWorkflow';
 import ImageUpload from '../../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
@@ -280,6 +285,16 @@ export default function IncidentForm({
 
     setSaving(true);
 
+    // The DB enforces action_status ∈ {Open, In Progress, Complete}. Normalize
+    // whatever the form submitted (and force Complete when the incident is
+    // moving to Closed) so we never trip incidents_action_status_check.
+    const normalizedTargetStatus = normalizeStatus(targetStatus);
+    const rawActionStatus = (fd.get('action_status') as string | null) || null;
+    const persistedActionStatus =
+      normalizedTargetStatus === CLOSED_STATUS
+        ? ACTION_STATUS_COMPLETE
+        : normalizeActionStatus(rawActionStatus);
+
     const payload: Record<string, any> = {
       date_incident: fd.get('date_incident') || null,
       incident_status: fd.get('incident_status') || null,
@@ -311,7 +326,7 @@ export default function IncidentForm({
       preventive_action: fd.get('preventive_action') || null,
       action_assigned_to: fd.get('action_assigned_to') || null,
       action_due_date: fd.get('action_due_date') || null,
-      action_status: fd.get('action_status') || null,
+      action_status: persistedActionStatus,
       closed_date: fd.get('closed_date') || null,
       closed_by: fd.get('closed_by') || null,
       report_version: fd.get('report_version') || null,
@@ -802,14 +817,20 @@ export default function IncidentForm({
             </F>
 
             <F label="Action Status">
+              {/* The DB has a CHECK constraint:
+                    action_status IN ('Open','In Progress','Complete')
+                  Source the options from ACTION_STATUSES so a typo like
+                  "Completed" can never reach Supabase. Friendly UI labels
+                  come from ACTION_STATUS_LABELS; the saved value is the
+                  canonical literal. */}
               <Sel
                 name="action_status"
-                defaultValue={incident?.action_status || ''}
+                defaultValue={normalizeActionStatus(incident?.action_status) ?? ''}
               >
                 <option value="">— Select —</option>
-                {opts(listItems, 'action_status').map((o) => (
+                {ACTION_STATUSES.map((o) => (
                   <option key={o} value={o}>
-                    {o}
+                    {ACTION_STATUS_LABELS[o]}
                   </option>
                 ))}
               </Sel>
