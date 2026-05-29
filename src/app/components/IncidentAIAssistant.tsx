@@ -17,7 +17,7 @@
  * which holds the provider API key. See supabase/functions/server/ai-assist.tsx.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -136,6 +136,23 @@ export default function IncidentAIAssistant({
   const [suggestionAction, setSuggestionAction] = useState<RewriteAction | null>(null);
   const [error, setError] = useState<string>('');
   const [findings, setFindings] = useState<ReviewFinding[] | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Radix Dialog (the parent IncidentForm) attaches NATIVE document-level
+  // listeners (DismissableLayer + FocusScope) to detect "outside" pointer/
+  // focus events. React's synthetic capture handlers do NOT stop those native
+  // listeners. Since this panel is portal'd to <body> (outside the Dialog),
+  // we must stop the native events at the capture phase on the panel node
+  // itself so they never bubble to document — otherwise any click here closes
+  // the Dialog (and unmounts the panel).
+  useEffect(() => {
+    const node = panelRef.current;
+    if (!node) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const events = ['pointerdown', 'mousedown', 'touchstart', 'focusin'] as const;
+    events.forEach((evt) => node.addEventListener(evt, stop, true));
+    return () => events.forEach((evt) => node.removeEventListener(evt, stop, true));
+  }, [open]);
 
   // Reset suggestion when the user switches fields so we never accept a
   // stale rewrite into the wrong field.
@@ -229,9 +246,21 @@ export default function IncidentAIAssistant({
 
   const panel = (
     <div
+      ref={panelRef}
       role="dialog"
       aria-label="AI Incident Assistant"
       data-ai-assistant-panel=""
+      // The parent IncidentForm is a Radix Dialog whose DismissableLayer +
+      // FocusScope listen on `document`. Because this panel is portal'd to
+      // <body> (outside the Dialog), any pointer/focus event here is seen by
+      // Radix as an "outside" interaction and closes the Dialog. Stopping
+      // these events at the capture phase prevents them from ever reaching
+      // Radix's document-level listeners, so the Dialog stays open and the
+      // panel is fully interactive.
+      onPointerDownCapture={(e) => e.stopPropagation()}
+      onMouseDownCapture={(e) => e.stopPropagation()}
+      onFocusCapture={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
       className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-2xl"
     >
       <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0">
