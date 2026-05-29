@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../lib/auth-context";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function fetchAllPages(query: any) {
@@ -301,6 +302,8 @@ function PanelStatusCard({ status, count, total, loading }: { status: string; co
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const { user } = useAuth();
+  const displayName = user?.name && user.name !== "Admin User" ? user.name : null;
   const [timeFilter, setTimeFilter] = useState("all_time");
   const [incStatusFilter, setIncStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -443,7 +446,7 @@ export default function Dashboard() {
       {/* ── Header ── */}
       <div style={styles.headerRow}>
         <div>
-          <h1 style={styles.heading}>Welcome back, Admin User!</h1>
+          <h1 style={styles.heading}>{displayName ? `Welcome back, ${displayName}!` : "Welcome back!"}</h1>
           <p style={styles.subheading}>Here's an overview of your company's performance</p>
         </div>
         <select style={styles.filterSelect} value={timeFilter} onChange={e => setTimeFilter(e.target.value)} disabled={loading}>

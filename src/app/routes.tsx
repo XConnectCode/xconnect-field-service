@@ -1,6 +1,8 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import Root from "./Root";
 import Dashboard from "./pages/Dashboard";
+import SQMDashboard from "./pages/SQMDashboard";
+import { useAuth } from "./lib/auth-context";
 import Customers from "./pages/Customers";
 import FieldVisitsNew from "./pages/FieldVisitsNew";
 import IncidentsNew from "./pages/IncidentsNew";
@@ -22,12 +24,25 @@ import TechnicalBulletin from './pages/TechnicalBulletin';
 import TechnicalBulletins from './pages/TechnicalBulletins';
 import TechnicalBulletinSetup from './pages/TechnicalBulletinSetup';
 
+function DashboardSwitch() {
+  const { user } = useAuth();
+  return user?.role === 'sqm' ? <SQMDashboard /> : <Dashboard />;
+}
+
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (user?.role !== 'admin') {
+    return <Navigate to="/technical-bulletins" replace />;
+  }
+  return <>{children}</>;
+}
+
 export const router = createBrowserRouter([
   {
     path: "/",
     Component: Root,
     children: [
-      { index: true, Component: Dashboard },
+      { index: true, Component: DashboardSwitch },
       { path: "customers", Component: Customers },
       { path: "customers/:id", Component: CustomerDetail },
       { path: "districts/:id", Component: DistrictDetail },
@@ -41,8 +56,8 @@ export const router = createBrowserRouter([
       { path: "sales", Component: Sales },
       { path: "reports", Component: Reports },
       { path: "technical-bulletins", Component: TechnicalBulletins },
-      { path: "technical-bulletin/:id", Component: TechnicalBulletin },
-      { path: "technical-bulletin-setup", Component: TechnicalBulletinSetup },
+      { path: "technical-bulletin/:id", element: <AdminOnly><TechnicalBulletin /></AdminOnly> },
+      { path: "technical-bulletin-setup", element: <AdminOnly><TechnicalBulletinSetup /></AdminOnly> },
       { path: "diagnostics", Component: DiagnosticsPage },
       { path: "debug", Component: Debug },
       { path: "*", Component: NotFound },

@@ -132,6 +132,14 @@ export default function IncidentsNew() {
   const reportTimeFilter   = searchParams.get('timeFilter');
   const fromReport = !!(reportCustomerName || reportDistrictName || reportTimeFilter);
 
+  // ── Open the add dialog when ?new=1 is present (deep-link from SQM dashboard) ─
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setEditingIncident(null);
+      setFormOpen(true);
+    }
+  }, [searchParams]);
+
   // ── Load lookup maps ──────────────────────────────────────────────────────
   useEffect(() => {
     const headers = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${publicAnonKey}` };

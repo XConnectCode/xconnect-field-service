@@ -17,34 +17,35 @@ import { useTheme } from '../../lib/theme-context';
 import {
   LayoutDashboard, Users, ClipboardList, AlertTriangle,
   Cpu, TrendingUp, FileBarChart,
-  Sun, Moon, LogOut, Map, BarChart2, FileText,
+  Sun, Moon, LogOut, Map, FileText,
 } from 'lucide-react';
+
+type Role = 'admin' | 'sqm';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
 const NAV_GROUPS = [
   {
     label: 'Overview',
     items: [
-      { path: '/',          label: 'Dashboard',    icon: LayoutDashboard },
-      { path: '/analytics', label: 'Analytics',    icon: BarChart2 },
+      { path: '/',          label: 'Dashboard',    icon: LayoutDashboard, roles: ['admin', 'sqm'] as Role[] },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { path: '/field-visits',    label: 'Field Visits',  icon: ClipboardList },
-      { path: '/field-visit-map', label: 'Visit Map',     icon: Map },
-      { path: '/incidents',       label: 'Incidents',     icon: AlertTriangle },
-      { path: '/panels',          label: 'XFire Panels',  icon: Cpu },
+      { path: '/field-visits',    label: 'Field Visits',  icon: ClipboardList,   roles: ['admin', 'sqm'] as Role[] },
+      { path: '/field-visit-map', label: 'Visit Map',     icon: Map,             roles: ['admin', 'sqm'] as Role[] },
+      { path: '/incidents',       label: 'Incidents',     icon: AlertTriangle,   roles: ['admin', 'sqm'] as Role[] },
+      { path: '/panels',          label: 'XFire Panels',  icon: Cpu,             roles: ['admin', 'sqm'] as Role[] },
     ],
   },
   {
     label: 'Customer',
     items: [
-      { path: '/customers',          label: 'Customers',        icon: Users },
-      { path: '/sales',              label: 'Sales',            icon: TrendingUp },
-      { path: '/reports',            label: 'Reports',          icon: FileBarChart },
-      { path: '/technical-bulletins', label: 'Tech Bulletins',   icon: FileText },
+      { path: '/customers',           label: 'Customers',      icon: Users,        roles: ['admin'] as Role[] },
+      { path: '/sales',               label: 'Sales',          icon: TrendingUp,   roles: ['admin'] as Role[] },
+      { path: '/reports',             label: 'Reports',        icon: FileBarChart, roles: ['admin'] as Role[] },
+      { path: '/technical-bulletins', label: 'Tech Bulletins', icon: FileText,     roles: ['admin', 'sqm'] as Role[] },
     ],
   },
 ];
@@ -56,6 +57,11 @@ export default function Sidebar() {
 
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
+
+  const role: Role = (user?.role as Role) || 'sqm';
+  const visibleGroups = NAV_GROUPS
+    .map(g => ({ ...g, items: g.items.filter(i => i.roles.includes(role)) }))
+    .filter(g => g.items.length > 0);
 
   return (
     <aside style={{
@@ -88,7 +94,7 @@ export default function Sidebar() {
 
       {/* ── Nav groups ── */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-        {NAV_GROUPS.map(group => (
+        {visibleGroups.map(group => (
           <div key={group.label} style={{ marginBottom: 4 }}>
             <div style={{
               padding: '10px 20px 4px',
@@ -156,7 +162,7 @@ export default function Sidebar() {
         {user && (
           <div style={{ marginBottom: 10, padding: '0 4px' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: isDark ? '#e2e8f0' : '#0f172a' }}>
-              {user.name || 'Admin User'}
+              {user.name && user.name !== 'Admin User' ? user.name : 'Welcome'}
             </div>
             <div style={{ fontSize: 11, color: isDark ? '#475569' : '#94a3b8', marginTop: 1 }}>
               {user.email || ''}
