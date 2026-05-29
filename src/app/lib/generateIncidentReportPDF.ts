@@ -4,6 +4,12 @@ import {
   MARGIN, CONT_W, PAGE_H,
 } from './pdfUtils';
 import { resolveEvidenceList, type IncidentReportImage } from './incidentPdfImages';
+import {
+  resolveFailedComponentLabel,
+  resolveFailureTypeLabel,
+  type ComponentMap,
+} from './failedComponent';
+import { normalizeStatus } from './incidentWorkflow';
 
 export type { IncidentReportImage } from './incidentPdfImages';
 
@@ -13,6 +19,13 @@ export interface IncidentReportOptions {
   vendorMap:   Record<string, string>;
   customerMap: Record<string, any>;
   districtMap: Record<string, string>;
+  /**
+   * Optional secondary lookup table for failed_component values that
+   * point at `components.row_id` (rather than `lists.row_id`). Without
+   * this map, the PDF falls back to the lists table only and may emit a
+   * raw row_id for newly-created incidents.
+   */
+  componentsMap?: ComponentMap;
   returnBlob?: boolean;
   /**
    * Optional explicit list of images (with captions) to include in the
@@ -25,30 +38,87 @@ export interface IncidentReportOptions {
 
 const MAX_IMAGE_H = 140; // mm — cap so very tall images don't blow up the layout
 
+/**
+ * Map a MIME type or URL extension to the format string jsPDF expects.
+ * jsPDF only understands JPEG, PNG, GIF, WEBP — anything else we treat as
+ * JPEG (jsPDF will fall back internally) so the image still gets attached.
+ */
+function pickPdfImageFormat(mime: string | null, url: string): 'JPEG' | 'PNG' | 'GIF' | 'WEBP' {
+  const m = (mime || '').toLowerCase();
+  if (m.includes('png'))  return 'PNG';
+  if (m.includes('gif'))  return 'GIF';
+  if (m.includes('webp')) return 'WEBP';
+  if (m.includes('jpeg') || m.includes('jpg')) return 'JPEG';
+  // Fall back to URL inspection — strip query string first so signed URLs
+  // like `.../image.png?token=xyz` are detected correctly.
+  const path = url.split('?')[0].toLowerCase();
+  if (path.endsWith('.png'))  return 'PNG';
+  if (path.endsWith('.gif'))  return 'GIF';
+  if (path.endsWith('.webp')) return 'WEBP';
+  return 'JPEG';
+}
+
+/**
+ * Fetch an image URL as a data URL so jsPDF can embed it without depending on
+ * cross-origin <img> behaviour. Signed Supabase URLs serve the asset directly;
+ * a normal fetch with `cache: 'no-store'` works without CORS preflights for
+ * GETs on the storage origin.
+ */
+async function fetchAsDataUrl(url: string): Promise<{ dataUrl: string; mime: string } | null> {
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    const mime = blob.type || resp.headers.get('content-type') || '';
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const r = new FileReader();
+      r.onloadend = () => res(typeof r.result === 'string' ? r.result : '');
+      r.onerror = () => rej(new Error('reader failed'));
+      r.readAsDataURL(blob);
+    });
+    return { dataUrl, mime };
+  } catch {
+    return null;
+  }
+}
+
 async function addImagePreserved(doc: any, url: string, x: number, y: number, targetW: number): Promise<number> {
   if (!url) return 0;
+
+  // 1. Pull the bytes ourselves so we don't depend on the <img> CORS dance and
+  //    so we can read the real content-type rather than guessing from the URL
+  //    extension (which is unreliable for signed storage URLs with tokens).
+  const fetched = await fetchAsDataUrl(url);
+
   return new Promise((resolve) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    // Only set crossOrigin when going through the <img> fallback path.
+    if (!fetched) img.crossOrigin = 'anonymous';
+
     img.onload = () => {
       try {
         let drawW = targetW;
         let drawH = targetW * (img.height / img.width);
+        if (!isFinite(drawH) || drawH <= 0) { resolve(0); return; }
         if (drawH > MAX_IMAGE_H) {
           drawH = MAX_IMAGE_H;
           drawW = drawH * (img.width / img.height);
         }
         if (y + drawH > PAGE_H - 20) { resolve(0); return; }
-        let fmt = 'JPEG';
-        if (url.toLowerCase().includes('.png'))  fmt = 'PNG';
-        if (url.toLowerCase().includes('.gif'))  fmt = 'GIF';
-        if (url.toLowerCase().includes('.webp')) fmt = 'WEBP';
-        doc.addImage(img, fmt, x, y, drawW, drawH);
+        const fmt = pickPdfImageFormat(fetched?.mime ?? null, url);
+        // When we have a data URL prefer it (more reliable across jsPDF
+        // versions); fall back to the raw <img> element.
+        const payload = fetched?.dataUrl ?? img;
+        doc.addImage(payload, fmt, x, y, drawW, drawH);
         resolve(drawH);
-      } catch { resolve(0); }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('PDF image embed failed:', err);
+        resolve(0);
+      }
     };
     img.onerror = () => resolve(0);
-    img.src = url;
+    img.src = fetched?.dataUrl ?? url;
   });
 }
 
@@ -58,7 +128,7 @@ function fmtDate(val?: string): string {
 }
 
 export async function generateIncidentReportPDF(opts: IncidentReportOptions): Promise<Blob | void> {
-  const { incident: r, listMap, vendorMap, customerMap, districtMap, returnBlob = false, selectedImages } = opts;
+  const { incident: r, listMap, vendorMap, customerMap, districtMap, componentsMap, returnBlob = false, selectedImages } = opts;
   const doc = await loadJsPDF();
 
   const colW = CONT_W / 2;
@@ -67,9 +137,14 @@ export async function generateIncidentReportPDF(opts: IncidentReportOptions): Pr
     ? (customerMap[r.customer] as any).name
     : (customerMap[r.customer] || r.customerName || r.customer || '—');
   const districtName = districtMap[r.customer_district] || r.districtName || r.customer_district || '—';
-  const failedComponent = listMap[r.failed_component]?.failed_component || r.failed_component || '—';
-  const failureType     = listMap[r.failure_type]?.failure_type         || r.failure_type     || '—';
+  const failedComponent = resolveFailedComponentLabel(r.failed_component, listMap, componentsMap);
+  const failureType     = resolveFailureTypeLabel(r.failure_type, listMap);
   const vendorName      = vendorMap[r.vendor] || r.vendor || '—';
+  // Single source of truth for status across cover/subsections so they can't
+  // contradict each other (e.g. cover "Final Review" while corrective-action
+  // block reads "In Progress"). The cover-page status takes precedence; any
+  // legacy "In Progress" / "Open" values are mapped to the canonical workflow.
+  const canonicalStatus = normalizeStatus(r.incident_status) || r.incident_status || '';
 
   // ── Page helpers ─────────────────────────────────────────────────────────────
   let y = drawHeader(doc, 'Field Incident Analysis') + 10;
@@ -130,10 +205,10 @@ export async function generateIncidentReportPDF(opts: IncidentReportOptions): Pr
   y += 7;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...GRAY_TEXT);
   const subtitle = [
-    r.event_id       ? `Event #${r.event_id}`               : null,
-    r.incident_status                                        ? `Status: ${r.incident_status}` : null,
-    r.report_version                                         ? `Version: ${r.report_version}` : null,
-    r.incident_severity                                      ? `Severity: ${r.incident_severity}` : null,
+    r.event_id          ? `Event #${r.event_id}`           : null,
+    canonicalStatus     ? `Status: ${canonicalStatus}`     : null,
+    r.report_version    ? `Version: ${r.report_version}`   : null,
+    r.incident_severity ? `Severity: ${r.incident_severity}` : null,
   ].filter(Boolean).join('   |   ');
   doc.text(subtitle, MARGIN, y);
   y += 14;
@@ -222,10 +297,22 @@ export async function generateIncidentReportPDF(opts: IncidentReportOptions): Pr
     narrativeBlock('Preventive Action',  r.preventive_action);
 
     // action meta row
+    // Label this "Action Status" explicitly so it cannot be mistaken for the
+    // overall incident status shown on the cover. When the incident is fully
+    // Closed, force the action status to match so the two cannot contradict
+    // ("Closed" incident with an "In Progress" corrective action makes no
+    // sense to a customer reading the PDF).
+    const effectiveActionStatus =
+      canonicalStatus === 'Closed'
+        ? (r.action_status && /complete|closed|done/i.test(String(r.action_status))
+            ? r.action_status
+            : 'Completed')
+        : r.action_status;
+
     const actionMeta = [
-      { label: 'Assigned To', value: r.action_assigned_to },
-      { label: 'Due Date',    value: fmtDate(r.action_due_date) },
-      { label: 'Status',      value: r.action_status },
+      { label: 'Assigned To',   value: r.action_assigned_to },
+      { label: 'Due Date',      value: fmtDate(r.action_due_date) },
+      { label: 'Action Status', value: effectiveActionStatus },
     ].filter(f => f.value && f.value !== '—');
 
     if (actionMeta.length) {

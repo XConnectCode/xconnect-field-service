@@ -11,6 +11,10 @@ import {
   isGatedStatus,
   CLOSED_STATUS,
 } from "../lib/incidentWorkflow";
+import {
+  resolveFailedComponentLabel,
+  resolveFailureTypeLabel,
+} from "../lib/failedComponent";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function fetchAllPages(query: any) {
@@ -180,9 +184,13 @@ function IncidentModal({ incident, listMap, vendorMap, onClose, onUpdated, role 
   role?: 'admin' | 'sqm';
 }) {
   const r = incident;
-  const failedComp  = listMap[r.failed_component]?.failed_component || r.failed_component || null;
-  const failureType = listMap[r.failure_type]?.failure_type          || r.failure_type     || null;
-  const vendorName  = vendorMap[r.vendor]                            || r.vendor           || null;
+  // Use the shared resolver so we never leak a raw row_id into the popup.
+  // Dashboard only loads the `lists` map (the components map isn't fetched
+  // here yet), so pass an empty componentsMap — the resolver will still
+  // return null/fallback rather than the raw id.
+  const failedComp  = resolveFailedComponentLabel(r.failed_component, listMap, {}, '') || null;
+  const failureType = resolveFailureTypeLabel(r.failure_type, listMap, '') || null;
+  const vendorName  = vendorMap[r.vendor] || r.vendor || null;
 
   return (
     <div style={modal.overlay} onClick={onClose}>

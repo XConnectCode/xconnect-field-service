@@ -24,6 +24,10 @@ import { generateIncidentReportPDF, type IncidentReportImage } from '../lib/gene
 import IncidentPdfImagePicker from '../components/IncidentPdfImagePicker';
 import { normalizeStatus, canMarkReportSent } from '../lib/incidentWorkflow';
 import {
+  resolveFailedComponentLabel,
+  resolveFailureTypeLabel,
+} from '../lib/failedComponent';
+import {
   uploadIncidentReport,
   getIncidentReportUrl,
   listIncidentReportsForEvents,
@@ -131,6 +135,7 @@ export default function IncidentsNew() {
   const [customers,    setCustomers]    = useState<any[]>([]);
   const [districts,    setDistricts]    = useState<any[]>([]);
   const [lists,        setLists]        = useState<any[]>([]);
+  const [components,   setComponents]   = useState<any[]>([]);
   const [vendors,      setVendors]      = useState<any[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [apiListMap,   setApiListMap]   = useState<Record<string, any>>({});
@@ -198,12 +203,13 @@ export default function IncidentsNew() {
     try {
       const restBase    = `https://${projectId}.supabase.co/rest/v1`;
       const restHeaders = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${publicAnonKey}` };
-      const [incRes, custRes, distRes, listsRes, vendorsRes] = await Promise.all([
+      const [incRes, custRes, distRes, listsRes, vendorsRes, compRes] = await Promise.all([
         fetch(`${baseUrl}/incidents`,  { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
         fetch(`${baseUrl}/customers`,  { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
         fetch(`${baseUrl}/districts`,  { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
         fetch(`${restBase}/lists?select=row_id,failed_component,failure_type`, { headers: restHeaders }),
         fetch(`${restBase}/vendors?select=row_id,vendor`, { headers: restHeaders }),
+        fetch(`${restBase}/components?select=row_id,failed_component`, { headers: restHeaders }),
       ]);
       const [incData, custData, distData] = await Promise.all([
         incRes.json(), custRes.json(), distRes.json(),
@@ -213,6 +219,7 @@ export default function IncidentsNew() {
       setDistricts(distData || []);
       if (listsRes.ok)   setLists(await listsRes.json()   || []);
       if (vendorsRes.ok) setVendors(await vendorsRes.json() || []);
+      if (compRes.ok)    setComponents(await compRes.json() || []);
 
       // Load shared incident reports (PDFs) from Supabase Storage
       const eventIds = (incData || []).map((i: any) => i.event_id).filter(Boolean);
@@ -244,6 +251,12 @@ export default function IncidentsNew() {
     lists.forEach((l: any) => { if (l.row_id) map[l.row_id] = { failed_component: l.failed_component || '', failure_type: l.failure_type || '' }; });
     return map;
   }, [lists]);
+
+  const componentsMap = useMemo(() => {
+    const map: Record<string, { failed_component: string }> = {};
+    components.forEach((c: any) => { if (c.row_id) map[c.row_id] = { failed_component: c.failed_component || '' }; });
+    return map;
+  }, [components]);
 
   const vendorLookupMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -294,8 +307,8 @@ export default function IncidentsNew() {
         catch { /* skip */ }
       }
       if (q) {
-        const failedComponent = listLookupMap[inc.failed_component]?.failed_component || inc.failed_component;
-        const failureType     = listLookupMap[inc.failure_type]?.failure_type || inc.failure_type;
+        const failedComponent = resolveFailedComponentLabel(inc.failed_component, listLookupMap, componentsMap, '');
+        const failureType     = resolveFailureTypeLabel(inc.failure_type, listLookupMap, '');
         const vendorName      = vendorLookupMap[inc.vendor] || inc.vendor;
         const haystack = [
           inc.event_id, inc.customerName, inc.districtName, inc.operating_company,
@@ -435,6 +448,7 @@ export default function IncidentsNew() {
       const blob = await generateIncidentReportPDF({
         incident:   incData,
         listMap:    apiListMap,
+        componentsMap,
         vendorMap:  apiVendorMap,
         customerMap,
         districtMap,
@@ -735,8 +749,8 @@ export default function IncidentsNew() {
             <div className="overflow-y-auto flex-1 pr-1">
               {viewingIncident && (() => {
                 const r = viewingIncident;
-                const fComp = listLookupMap[r.failed_component]?.failed_component || r.failed_component;
-                const fType = listLookupMap[r.failure_type]?.failure_type || r.failure_type;
+                const fComp = resolveFailedComponentLabel(r.failed_component, listLookupMap, componentsMap, '');
+                const fType = resolveFailureTypeLabel(r.failure_type, listLookupMap, '');
                 const vName = vendorLookupMap[r.vendor] || r.vendor;
                 return (
                   <div className="space-y-6 py-2 text-sm">

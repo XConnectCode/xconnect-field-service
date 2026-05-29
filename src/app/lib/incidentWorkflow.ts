@@ -118,6 +118,26 @@ export function validateForStatus(
   return missing;
 }
 
+/**
+ * Returns a human-readable list of inconsistencies between the cover status
+ * and any sub-section state (e.g. action_status). Used to surface a warning
+ * rather than silently producing a contradictory PDF.
+ */
+export function findStatusInconsistencies(
+  incident: Record<string, any>,
+): string[] {
+  const out: string[] = [];
+  const status = normalizeStatus(incident.incident_status);
+  const actionStatus = (incident.action_status || '').toString().trim().toLowerCase();
+  if (status === CLOSED_STATUS && actionStatus && !/complete|closed|done/.test(actionStatus)) {
+    out.push(
+      `Action Status is "${incident.action_status}" but incident is Closed — ` +
+        `mark the corrective action as Completed before sending to the customer.`,
+    );
+  }
+  return out;
+}
+
 // ── Permissions ──────────────────────────────────────────────────────────────
 
 export type UserRole = 'admin' | 'sqm' | undefined;
