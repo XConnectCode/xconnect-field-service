@@ -29,6 +29,7 @@ import {
   Check, Copy, AlertTriangle, AlertCircle, Info,
 } from 'lucide-react';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { supabase } from '../lib/supabase';
 import {
   ASSISTANT_FIELDS,
   FIELD_LABELS,
@@ -88,11 +89,20 @@ const REWRITE_ACTIONS: { key: RewriteAction; label: string; icon: any; tip: stri
 ];
 
 async function callAiAssist(body: Record<string, unknown>): Promise<any> {
+  // The /ai-assist edge route now requires a signed-in user (it calls paid AI
+  // APIs), so forward the live session token and fall back to anon if absent.
+  let token = publicAnonKey;
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) token = data.session.access_token;
+  } catch {
+    // ignore - fall back to anon
+  }
   const res = await fetch(EDGE_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${publicAnonKey}`,
+      authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body),
   });

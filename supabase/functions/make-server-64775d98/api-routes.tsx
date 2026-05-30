@@ -2,7 +2,7 @@ import { Hono } from "npm:hono";
 import { createClient } from "npm:@supabase/supabase-js@2.49.2";
 import { uploadIncidentImage, listIncidentImages, deleteIncidentImage, uploadImage, listImagesForRecord, deleteImageById } from './upload-handler.tsx';
 import { generateIncidentReportPDF } from './pdf-generator.tsx';
-import { requireAdmin } from './auth-helpers.tsx';
+import { requireAdmin, requireUser } from './auth-helpers.tsx';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -16,6 +16,13 @@ const supabase = createClient(
 );
 
 export const apiRoutes = new Hono();
+
+// SECURITY: every route in this router runs against the SERVICE_ROLE client,
+// which bypasses RLS. We therefore require a real signed-in user on ALL
+// routes (reads + writes). Delete routes additionally enforce requireAdmin.
+// Without this, anyone holding the public anon key could read/write all data
+// through the edge function, defeating the table RLS policies entirely.
+apiRoutes.use('*', requireUser);
 
 /**
  * Coerce any inbound action_status value to one of the three literals

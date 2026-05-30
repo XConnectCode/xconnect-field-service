@@ -32,6 +32,7 @@
  */
 
 import { Hono } from 'npm:hono';
+import { requireUser } from './auth-helpers.tsx';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -340,6 +341,10 @@ function isAssistantField(s: unknown): s is string {
 // ── Router ──────────────────────────────────────────────────────────────────
 
 export const aiAssistRoutes = new Hono();
+
+// Require a signed-in user: this route calls paid AI provider APIs, so it must
+// not be reachable with just the public anon key.
+aiAssistRoutes.use('*', requireUser);
 
 aiAssistRoutes.post('/ai-assist', async (c) => {
   let body: any;
