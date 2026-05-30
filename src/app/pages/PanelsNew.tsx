@@ -410,6 +410,18 @@ export default function PanelsNew() {
             <div className="grid gap-3 mt-2 text-sm">
               <div><strong>Type:</strong> {quickPanel?.panel_type || '-'}</div>
               <div><strong>Status:</strong> <StatusBadge status={quickPanel?.panel_status} /></div>
+              <div className="flex items-center gap-2">
+                <strong>Verified:</strong>
+                {(() => {
+                  const v = String(quickPanel?.verified ?? '').trim().toLowerCase();
+                  const isYes = v === 'y' || v === 'yes' || v === 'true' || v === '1';
+                  return (
+                    <Badge variant={isYes ? 'default' : 'secondary'} className={isYes ? 'bg-green-600 hover:bg-green-600' : 'bg-gray-400 hover:bg-gray-400'}>
+                      {isYes ? 'Yes' : (quickPanel?.verified ? 'No' : '-')}
+                    </Badge>
+                  );
+                })()}
+              </div>
               <div><strong>XC Base:</strong> {quickPanel?.xc_base || '-'}</div>
               <div><strong>Customer:</strong> {quickPanel?.customerName || 'Not assigned'}</div>
               <div><strong>District:</strong> {quickPanel?.districtName || '-'}</div>
