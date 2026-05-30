@@ -76,11 +76,9 @@ export default function PanelsNew() {
       const [panelsData, customersData, districtsData] = await Promise.all([
         panelsRes.json(), customersRes.json(), districtsRes.json(),
       ]);
-      // Only show verified panels (verified = Y / Yes / true).
-      const isVerified = (v: any) =>
-        ['y', 'yes', 'true', '1'].includes(String(v ?? '').trim().toLowerCase());
-      const verifiedPanels = (panelsData || []).filter((p: any) => isVerified(p.verified));
-      setPanels(verifiedPanels);
+      // Show all panels in the table (Verified column reflects status).
+      // KPI cards below are computed from verified-only panels.
+      setPanels(panelsData || []);
       setCustomers(customersData || []);
       setDistricts(districtsData || []);
     } catch (err) {
@@ -126,13 +124,20 @@ export default function PanelsNew() {
 
   const filtersActive = !!(filterCustomer || filterDistrict || filterStatus);
 
+  // Verified-only subset drives the KPI cards (cards stay verified = Y).
+  const isVerified = (v: any) =>
+    ['y', 'yes', 'true', '1'].includes(String(v ?? '').trim().toLowerCase());
+  const verifiedPanels = useMemo(() =>
+    panels.filter(p => isVerified(p.verified))
+  , [panels]);
+
   const statusCounts = useMemo(() => ({
-    total:      panels.length,
-    atFacility: panels.filter(p => p.panel_status === 'At Facility').length,
-    leased:     panels.filter(p => p.panel_status === 'Leased').length,
-    inRepair:   panels.filter(p => p.panel_status === 'In Repair').length,
-    loaned:     panels.filter(p => p.panel_status === 'Loaned').length,
-  }), [panels]);
+    total:      verifiedPanels.length,
+    atFacility: verifiedPanels.filter(p => p.panel_status === 'At Facility').length,
+    leased:     verifiedPanels.filter(p => p.panel_status === 'Leased').length,
+    inRepair:   verifiedPanels.filter(p => p.panel_status === 'In Repair').length,
+    loaned:     verifiedPanels.filter(p => p.panel_status === 'Loaned').length,
+  }), [verifiedPanels]);
 
   // Note: panel deletion intentionally not exposed in UI to prevent accidental loss.
   // To remove a panel, change its status (e.g. "Sold") or use a direct DB action.
@@ -328,6 +333,7 @@ export default function PanelsNew() {
                   <TableHead>Serial #</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Verified</TableHead>
                   <TableHead>XC Base</TableHead>
                   <TableHead>Customer / District</TableHead>
                   <TableHead>FW Version</TableHead>
@@ -338,7 +344,7 @@ export default function PanelsNew() {
               <TableBody>
                 {filteredPanels.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-gray-500 py-8">
+                    <TableCell colSpan={9} className="text-center text-gray-500 py-8">
                       {filtersActive ? 'No panels match the current filters.' : 'No panels found.'}
                       {filtersActive && (
                         <button onClick={clearFilters} className="ml-2 text-blue-600 underline text-sm">
@@ -364,6 +370,19 @@ export default function PanelsNew() {
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={panel.panel_status} />
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const yes = isVerified(panel.verified);
+                          return (
+                            <Badge
+                              variant={yes ? 'default' : 'secondary'}
+                              className={yes ? 'bg-green-600 hover:bg-green-600' : 'bg-gray-400 hover:bg-gray-400'}
+                            >
+                              {yes ? 'Yes' : (panel.verified ? 'No' : '-')}
+                            </Badge>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>{panel.xc_base}</TableCell>
                       <TableCell>
