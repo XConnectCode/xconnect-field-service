@@ -148,8 +148,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Supabase Edge gateway requires a JWT before the request reaches
           // the function. Without this, the gateway returns 401
           // UNAUTHORIZED_NO_AUTH_HEADER and the app shows "Failed to sign in".
+          // NOTE: only Authorization is sent (no apikey) because the edge
+          // function's CORS allowHeaders is [Content-Type, Authorization];
+          // adding apikey would fail the browser preflight ("Failed to fetch").
           'Authorization': `Bearer ${publicAnonKey}`,
-          'apikey': publicAnonKey,
         },
         body: JSON.stringify({ email, password }),
       });
