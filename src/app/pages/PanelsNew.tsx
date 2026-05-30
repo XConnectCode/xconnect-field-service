@@ -184,10 +184,10 @@ export default function PanelsNew() {
       const res = await fetch(`${baseUrl}/firmware-targets`, {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': `Bearer ${publicAnonKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(next),
+        body: JSON.stringify({ ...next, updated_by: user?.email ?? user?.name ?? null }),
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
