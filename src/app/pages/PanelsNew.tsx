@@ -12,6 +12,8 @@ import { Plus, Edit, ExternalLink, X, Download, FileText, Eye } from 'lucide-rea
 import { generatePanelListPDF } from '../lib/generatePanelListPDF';
 import { generateMonthlyPanelReport } from '../lib/generateMonthlyPanelReport';
 import { getSerial } from '../lib/serialUtils';
+import FirmwareStatusPanel from '../components/FirmwareStatusPanel';
+import { evaluateFirmware, type FirmwareField, type FirmwareTargets } from '../lib/firmwareVersion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import PanelForm from './forms/PanelForm';
 import { toast } from 'sonner';
@@ -50,6 +52,10 @@ export default function PanelsNew() {
   const [filterStatus,   setFilterStatus]   = useState('');
   const [filterVerified, setFilterVerified] = useState('');
 
+  // Firmware update tracking
+  const [firmwareTargets, setFirmwareTargets] = useState<FirmwareTargets>({});
+  const [firmwareFilter,  setFirmwareFilter]  = useState<FirmwareField | ''>('');
+
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [editingPanel, setEditingPanel] = useState<any>(null);
 
@@ -70,19 +76,21 @@ export default function PanelsNew() {
     setLoading(true);
     try {
       const headers = { 'Authorization': `Bearer ${publicAnonKey}` };
-      const [panelsRes, customersRes, districtsRes] = await Promise.all([
+      const [panelsRes, customersRes, districtsRes, fwRes] = await Promise.all([
         fetch(`${baseUrl}/panels`,    { headers }),
         fetch(`${baseUrl}/customers`, { headers }),
         fetch(`${baseUrl}/districts`, { headers }),
+        fetch(`${baseUrl}/firmware-targets`, { headers }),
       ]);
-      const [panelsData, customersData, districtsData] = await Promise.all([
-        panelsRes.json(), customersRes.json(), districtsRes.json(),
+      const [panelsData, customersData, districtsData, fwData] = await Promise.all([
+        panelsRes.json(), customersRes.json(), districtsRes.json(), fwRes.json(),
       ]);
       // Show all panels in the table (Verified column reflects status).
       // KPI cards below are computed from verified-only panels.
       setPanels(panelsData || []);
       setCustomers(customersData || []);
       setDistricts(districtsData || []);
+      setFirmwareTargets(fwData && typeof fwData === 'object' && !fwData.error ? fwData : {});
     } catch (err) {
       console.error('Error loading panels:', err);
       toast.error('Failed to load data');
@@ -122,6 +130,27 @@ export default function PanelsNew() {
         if (filterVerified === 'yes' && !yes) return false;
         if (filterVerified === 'no'  &&  yes) return false;
       }
+      if (firmwareFilter) {
+        // Show only panels that are behind or need review on the selected firmware
+        const s = evaluateFirmware(p[firmwareFilter], firmwareTargets[firmwareFilter]);
+        if (s !== 'behind' && s !== 'needs_review') return false;
+      }
+      return true;
+    })
+  , [panels, filterCustomer, filterDistrict, filterStatus, filterVerified, firmwareFilter, firmwareTargets]);
+
+  // Firmware status summary cards operate on the panels matching the
+  // non-firmware filters (so toggling the firmware filter doesn't change counts).
+  const firmwareScopePanels = useMemo(() =>
+    panels.filter(p => {
+      if (filterCustomer && p.customerName !== filterCustomer) return false;
+      if (filterDistrict && p.districtName !== filterDistrict) return false;
+      if (filterStatus   && p.panel_status !== filterStatus)   return false;
+      if (filterVerified) {
+        const yes = isVerified(p.verified);
+        if (filterVerified === 'yes' && !yes) return false;
+        if (filterVerified === 'no'  &&  yes) return false;
+      }
       return true;
     })
   , [panels, filterCustomer, filterDistrict, filterStatus, filterVerified]);
@@ -143,10 +172,36 @@ export default function PanelsNew() {
     setFilterDistrict('');
     setFilterStatus('');
     setFilterVerified('');
+    setFirmwareFilter('');
     window.history.replaceState({}, '', window.location.pathname);
   };
 
-  const filtersActive = !!(filterCustomer || filterDistrict || filterStatus || filterVerified);
+  const filtersActive = !!(filterCustomer || filterDistrict || filterStatus || filterVerified || firmwareFilter);
+
+  // Save firmware target versions (admin only).
+  const saveFirmwareTargets = async (next: Record<FirmwareField, string>) => {
+    try {
+      const res = await fetch(`${baseUrl}/firmware-targets`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error || `HTTP ${res.status}`);
+      }
+      const saved = await res.json();
+      setFirmwareTargets(saved || {});
+      toast.success('Firmware targets saved');
+    } catch (err: any) {
+      console.error('Error saving firmware targets:', err);
+      toast.error(err?.message === 'Forbidden' ? 'Only admins can set firmware targets' : 'Failed to save firmware targets');
+      throw err;
+    }
+  };
 
   // Verified-only subset drives the KPI cards (cards stay verified = Y).
   const verifiedPanels = useMemo(() =>
@@ -273,6 +328,16 @@ export default function PanelsNew() {
             </Card>
           ))}
         </div>
+
+        {/* Firmware update status */}
+        <FirmwareStatusPanel
+          panels={firmwareScopePanels}
+          targets={firmwareTargets}
+          activeFilter={firmwareFilter}
+          onFilterChange={setFirmwareFilter}
+          canEdit={user?.role === 'admin'}
+          onSaveTargets={saveFirmwareTargets}
+        />
 
         {/* Filter bar */}
         <Card className="mb-6">

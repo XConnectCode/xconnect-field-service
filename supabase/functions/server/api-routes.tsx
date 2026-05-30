@@ -834,6 +834,56 @@ apiRoutes.post("/sales", async (c) => {
   }
 });
 
+// ============ FIRMWARE TARGETS ============
+// Target (current/latest) firmware versions the fleet should be running.
+// Stored as a single JSONB blob in the kv store under key 'firmware_targets'.
+// Shape: { gui_version, wl_controlfw, surfacefw, shootingfw, loggingfw, updated_at, updated_by }
+const FW_TARGETS_KEY = 'firmware_targets';
+const FW_TARGET_FIELDS = ['gui_version', 'wl_controlfw', 'surfacefw', 'shootingfw', 'loggingfw'] as const;
+
+apiRoutes.get("/firmware-targets", async (c) => {
+  try {
+    const { data, error } = await supabase
+      .from('kv_store_64775d98')
+      .select('value')
+      .eq('key', FW_TARGETS_KEY)
+      .maybeSingle();
+    if (error) {
+      console.error('Error fetching firmware targets:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data?.value ?? {});
+  } catch (error) {
+    console.error('Error in firmware-targets GET:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.put("/firmware-targets", requireAdmin, async (c) => {
+  try {
+    const body = await c.req.json();
+    const user = c.get('user');
+    const value: Record<string, unknown> = {};
+    for (const f of FW_TARGET_FIELDS) {
+      const v = body?.[f];
+      value[f] = (v === undefined || v === null || String(v).trim() === '') ? null : String(v).trim();
+    }
+    value.updated_at = new Date().toISOString();
+    value.updated_by = user?.email ?? null;
+    const { error } = await supabase
+      .from('kv_store_64775d98')
+      .upsert({ key: FW_TARGETS_KEY, value });
+    if (error) {
+      console.error('Error saving firmware targets:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(value);
+  } catch (error) {
+    console.error('Error in firmware-targets PUT:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // ============ PANELS ============
 
 apiRoutes.get("/panels", async (c) => {
