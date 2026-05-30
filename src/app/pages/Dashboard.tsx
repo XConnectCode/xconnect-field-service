@@ -457,11 +457,20 @@ export default function Dashboard() {
         const visitsRaw = await fetchAllPages(applyDates(supabase.from("fieldvisits").select("visit_duration").not("visit_duration", "is", null), "arrival_date"));
         const hours = visitsRaw.reduce((s, r) => s + parseHHMMSS(r.visit_duration), 0);
 
-        const barrelsRaw = await fetchAllPages(applyDates(supabase.from("barrels_sold").select("quantity"), "date"));
-        const barrels = barrelsRaw.reduce((s, r) => s + (parseFloat(r.quantity) || 0), 0);
-
-        const stagesRaw = await fetchAllPages(applyDates(supabase.from("stages").select("quantity"), "date"));
-        const stages = stagesRaw.reduce((s, r) => s + (parseFloat(r.quantity) || 0), 0);
+        // Unified sales_volume view replaces the two separate barrels_sold /
+        // stages fetches. One round-trip, split by metric_type in the browser.
+        // (The `date` column in the view is a real DATE cast, so range filters
+        // work correctly instead of comparing text.)
+        const salesRaw = await fetchAllPages(
+          applyDates(supabase.from("sales_volume").select("metric_type,quantity"), "date")
+        );
+        let barrels = 0;
+        let stages = 0;
+        for (const r of salesRaw) {
+          const q = parseFloat(r.quantity) || 0;
+          if (r.metric_type === "barrels") barrels += q;
+          else if (r.metric_type === "stages") stages += q;
+        }
 
         setTotalVisits(visits ?? 0);
         setTotalHours(Math.round(hours * 10) / 10);
