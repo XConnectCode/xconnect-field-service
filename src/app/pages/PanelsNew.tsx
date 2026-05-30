@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { SortableHead, useSort } from '../components/SortableTable';
 import { Badge } from '../components/ui/badge';
-import { Plus, Edit, ExternalLink, X, Download, FileText, Eye } from 'lucide-react';
+import { Plus, Edit, ExternalLink, X, Download, FileText, Eye, Search } from 'lucide-react';
+import { Input } from '../components/ui/input';
 import { generatePanelListPDF } from '../lib/generatePanelListPDF';
 import { generateMonthlyPanelReport } from '../lib/generateMonthlyPanelReport';
 import { getSerial } from '../lib/serialUtils';
@@ -51,6 +52,7 @@ export default function PanelsNew() {
   const [filterDistrict, setFilterDistrict] = useState('');
   const [filterStatus,   setFilterStatus]   = useState('');
   const [filterVerified, setFilterVerified] = useState('');
+  const [searchText,     setSearchText]     = useState('');
 
   // Firmware update tracking
   const [firmwareTargets, setFirmwareTargets] = useState<FirmwareTargets>({});
@@ -120,6 +122,26 @@ export default function PanelsNew() {
   const isVerified = (v: any) =>
     ['y', 'yes', 'true', '1'].includes(String(v ?? '').trim().toLowerCase());
 
+  // Free-text search across the most useful identifying fields. Case-insensitive
+  // substring match; an empty query matches everything.
+  const matchesSearch = (p: any) => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return true;
+    return [
+      getSerial(p),
+      p.panel_type,
+      p.panel_status,
+      p.xc_base,
+      p.customerName,
+      p.districtName,
+      p.wl_controlfw,
+      p.unit_number,
+      p['so#'],
+    ]
+      .filter(Boolean)
+      .some(v => String(v).toLowerCase().includes(q));
+  };
+
   const filteredPanels = useMemo(() =>
     panels.filter(p => {
       if (filterCustomer && p.customerName !== filterCustomer) return false;
@@ -135,9 +157,10 @@ export default function PanelsNew() {
         const s = evaluateFirmware(p[firmwareFilter], firmwareTargets[firmwareFilter]);
         if (s !== 'behind' && s !== 'needs_review') return false;
       }
+      if (!matchesSearch(p)) return false;
       return true;
     })
-  , [panels, filterCustomer, filterDistrict, filterStatus, filterVerified, firmwareFilter, firmwareTargets]);
+  , [panels, filterCustomer, filterDistrict, filterStatus, filterVerified, firmwareFilter, firmwareTargets, searchText]);
 
   // Firmware status summary cards operate on the panels matching the
   // non-firmware filters (so toggling the firmware filter doesn't change counts).
@@ -151,9 +174,10 @@ export default function PanelsNew() {
         if (filterVerified === 'yes' && !yes) return false;
         if (filterVerified === 'no'  &&  yes) return false;
       }
+      if (!matchesSearch(p)) return false;
       return true;
     })
-  , [panels, filterCustomer, filterDistrict, filterStatus, filterVerified]);
+  , [panels, filterCustomer, filterDistrict, filterStatus, filterVerified, searchText]);
 
   // Sorting (applied after filtering)
   const { sorted: sortedPanels, sort, toggleSort } = useSort(filteredPanels, {
@@ -173,10 +197,11 @@ export default function PanelsNew() {
     setFilterStatus('');
     setFilterVerified('');
     setFirmwareFilter('');
+    setSearchText('');
     window.history.replaceState({}, '', window.location.pathname);
   };
 
-  const filtersActive = !!(filterCustomer || filterDistrict || filterStatus || filterVerified || firmwareFilter);
+  const filtersActive = !!(filterCustomer || filterDistrict || filterStatus || filterVerified || firmwareFilter || searchText.trim());
 
   // Save firmware target versions (admin only).
   const saveFirmwareTargets = async (next: Record<FirmwareField, string>) => {
@@ -342,6 +367,31 @@ export default function PanelsNew() {
         {/* Filter bar */}
         <Card className="mb-6">
           <CardContent className="pt-4">
+            {/* Search bar — free-text filter across serial, type, status, base,
+                customer/district, firmware, unit and SO number. */}
+            <div className="mb-4">
+              <Label className="text-xs text-gray-500 mb-1 block">Search</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                <Input
+                  type="text"
+                  value={searchText}
+                  onChange={e => setSearchText(e.target.value)}
+                  placeholder="Search serial, type, customer, district, firmware…"
+                  className="pl-9 pr-9"
+                />
+                {searchText && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchText('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    title="Clear search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="flex flex-wrap gap-4 items-end">
               <div className="flex-1 min-w-[180px]">
                 <Label className="text-xs text-gray-500 mb-1 block">Customer</Label>
