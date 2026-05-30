@@ -9,6 +9,7 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Textarea } from '../components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { SortableHead, useSort } from '../components/SortableTable';
 import { Badge } from '../components/ui/badge';
 import { Plus, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
@@ -89,6 +90,16 @@ export default function FieldVisits() {
       toast.error(error.message || 'Failed to log visit');
     }
   };
+
+  const { sorted: sortedVisits, sort, toggleSort } = useSort(visits, {
+    date:     v => v.date,
+    customer: v => v.customerName,
+    district: v => v.districtName,
+    type:     v => v.visitType,
+    sqm:      v => v.sqmName,
+    hours:    v => v.hours,
+    summary:  v => v.summary,
+  });
 
   const getVisitTypeBadge = (type: string) => {
     const variants: Record<string, { variant: any, label: string }> = {
@@ -230,17 +241,17 @@ export default function FieldVisits() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>District</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>SQM</TableHead>
-                    <TableHead>Hours</TableHead>
-                    <TableHead>Summary</TableHead>
+                    <SortableHead sortKey="date"     sort={sort} onSort={toggleSort}>Date</SortableHead>
+                    <SortableHead sortKey="customer" sort={sort} onSort={toggleSort}>Customer</SortableHead>
+                    <SortableHead sortKey="district" sort={sort} onSort={toggleSort}>District</SortableHead>
+                    <SortableHead sortKey="type"     sort={sort} onSort={toggleSort}>Type</SortableHead>
+                    <SortableHead sortKey="sqm"      sort={sort} onSort={toggleSort}>SQM</SortableHead>
+                    <SortableHead sortKey="hours"    sort={sort} onSort={toggleSort}>Hours</SortableHead>
+                    <SortableHead sortKey="summary"  sort={sort} onSort={toggleSort}>Summary</SortableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {visits.map((visit) => (
+                  {sortedVisits.map((visit) => (
                     <TableRow key={visit.id}>
                       <TableCell>
                         {visit.date ? format(new Date(visit.date), 'MMM dd, yyyy') : '-'}

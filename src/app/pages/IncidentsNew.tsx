@@ -5,6 +5,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { SortableHead, useSort } from '../components/SortableTable';
 import { Badge } from '../components/ui/badge';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -333,6 +334,23 @@ export default function IncidentsNew() {
     return [...filtered].sort((a, b) => compareIds(b.event_id, a.event_id));
   }, [enrichedIncidents, filterCustomer, filterDistrict, filterTime, searchTerm, listLookupMap, vendorLookupMap]);
 
+  // Interactive column sorting (layers on top of the default Event ID sort).
+  const { sorted: sortedIncidents, sort, toggleSort } = useSort(filteredIncidents, {
+    event_id:  inc => inc.event_id,
+    date:      inc => inc.date_incident,
+    customer:  inc => inc.customerName,
+    category:  inc => inc.event_category,
+    severity:  inc => {
+      const s = String(inc.incident_severity ?? '').toLowerCase();
+      if (s === 'critical') return 3;
+      if (s === 'moderate' || s === 'high') return 2;
+      if (s === 'low') return 1;
+      return 0;
+    },
+    status:    inc => inc.incident_status,
+    xc_caused: inc => inc.xc_caused,
+  });
+
   const clearFilters = () => {
     setFilterCustomer('');
     setFilterDistrict('');
@@ -648,19 +666,19 @@ export default function IncidentsNew() {
                 <Table>
                   <TableHeader className="bg-gray-50/50">
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="font-semibold text-gray-700 w-[90px]">Event ID</TableHead>
-                      <TableHead className="font-semibold text-gray-700 w-[100px]">Date</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Customer / District</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Category</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Severity</TableHead>
-                      <TableHead className="font-semibold text-gray-700">Status</TableHead>
-                      <TableHead className="font-semibold text-gray-700">XC Caused</TableHead>
+                      <SortableHead sortKey="event_id"  sort={sort} onSort={toggleSort} className="font-semibold text-gray-700 w-[90px]">Event ID</SortableHead>
+                      <SortableHead sortKey="date"      sort={sort} onSort={toggleSort} className="font-semibold text-gray-700 w-[100px]">Date</SortableHead>
+                      <SortableHead sortKey="customer"  sort={sort} onSort={toggleSort} className="font-semibold text-gray-700">Customer / District</SortableHead>
+                      <SortableHead sortKey="category"  sort={sort} onSort={toggleSort} className="font-semibold text-gray-700">Category</SortableHead>
+                      <SortableHead sortKey="severity"  sort={sort} onSort={toggleSort} className="font-semibold text-gray-700">Severity</SortableHead>
+                      <SortableHead sortKey="status"    sort={sort} onSort={toggleSort} className="font-semibold text-gray-700">Status</SortableHead>
+                      <SortableHead sortKey="xc_caused" sort={sort} onSort={toggleSort} className="font-semibold text-gray-700">XC Caused</SortableHead>
                       <TableHead className="font-semibold text-gray-700 w-[96px]">Reports</TableHead>
                       <TableHead className="font-semibold text-gray-700 text-right w-[110px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredIncidents.map(inc => (
+                    {sortedIncidents.map(inc => (
                       <TableRow key={inc.row_id || inc.event_id} className="hover:bg-gray-50 transition-colors">
                         <TableCell className="font-medium text-blue-600">
                           <Link to={`/incidents/${inc.row_id}`} className="flex items-center gap-1 hover:underline">

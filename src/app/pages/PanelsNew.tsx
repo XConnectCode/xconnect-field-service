@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { SortableHead, useSort } from '../components/SortableTable';
 import { Badge } from '../components/ui/badge';
 import { Plus, Edit, ExternalLink, X, Download, FileText, Eye } from 'lucide-react';
 import { generatePanelListPDF } from '../lib/generatePanelListPDF';
@@ -47,6 +48,7 @@ export default function PanelsNew() {
   const [filterCustomer, setFilterCustomer] = useState('');
   const [filterDistrict, setFilterDistrict] = useState('');
   const [filterStatus,   setFilterStatus]   = useState('');
+  const [filterVerified, setFilterVerified] = useState('');
 
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [editingPanel, setEditingPanel] = useState<any>(null);
@@ -106,27 +108,47 @@ export default function PanelsNew() {
     return districts.filter(d => d.customer === match.row_id);
   }, [filterCustomer, customers, districts]);
 
+  // Verified detection helper (used by filter, sort, KPI cards, and badges).
+  const isVerified = (v: any) =>
+    ['y', 'yes', 'true', '1'].includes(String(v ?? '').trim().toLowerCase());
+
   const filteredPanels = useMemo(() =>
     panels.filter(p => {
       if (filterCustomer && p.customerName !== filterCustomer) return false;
       if (filterDistrict && p.districtName !== filterDistrict) return false;
       if (filterStatus   && p.panel_status !== filterStatus)   return false;
+      if (filterVerified) {
+        const yes = isVerified(p.verified);
+        if (filterVerified === 'yes' && !yes) return false;
+        if (filterVerified === 'no'  &&  yes) return false;
+      }
       return true;
     })
-  , [panels, filterCustomer, filterDistrict, filterStatus]);
+  , [panels, filterCustomer, filterDistrict, filterStatus, filterVerified]);
+
+  // Sorting (applied after filtering)
+  const { sorted: sortedPanels, sort, toggleSort } = useSort(filteredPanels, {
+    serial:    p => getSerial(p),
+    type:      p => p.panel_type,
+    status:    p => p.panel_status,
+    verified:  p => (isVerified(p.verified) ? 1 : (p.verified ? 0 : -1)),
+    base:      p => p.xc_base,
+    customer:  p => p.customerName,
+    fw:        p => p.shootingfw,
+    updated:   p => p.date_updated,
+  });
 
   const clearFilters = () => {
     setFilterCustomer('');
     setFilterDistrict('');
     setFilterStatus('');
+    setFilterVerified('');
     window.history.replaceState({}, '', window.location.pathname);
   };
 
-  const filtersActive = !!(filterCustomer || filterDistrict || filterStatus);
+  const filtersActive = !!(filterCustomer || filterDistrict || filterStatus || filterVerified);
 
   // Verified-only subset drives the KPI cards (cards stay verified = Y).
-  const isVerified = (v: any) =>
-    ['y', 'yes', 'true', '1'].includes(String(v ?? '').trim().toLowerCase());
   const verifiedPanels = useMemo(() =>
     panels.filter(p => isVerified(p.verified))
   , [panels]);
@@ -305,6 +327,21 @@ export default function PanelsNew() {
                 </Select>
               </div>
 
+              <div className="flex-1 min-w-[150px]">
+                <Label className="text-xs text-gray-500 mb-1 block">Verified</Label>
+                <Select
+                  value={filterVerified || '__all__'}
+                  onValueChange={v => setFilterVerified(v === '__all__' ? '' : v)}
+                >
+                  <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All</SelectItem>
+                    <SelectItem value="yes">Verified</SelectItem>
+                    <SelectItem value="no">Not verified</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {filtersActive && (
                 <Button variant="ghost" size="sm" onClick={clearFilters} className="text-gray-500">
                   <X className="w-4 h-4 mr-1" /> Clear
@@ -330,19 +367,19 @@ export default function PanelsNew() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Serial #</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Verified</TableHead>
-                  <TableHead>XC Base</TableHead>
-                  <TableHead>Customer / District</TableHead>
-                  <TableHead>FW Version</TableHead>
-                  <TableHead>Last Updated</TableHead>
+                  <SortableHead sortKey="serial"   sort={sort} onSort={toggleSort}>Serial #</SortableHead>
+                  <SortableHead sortKey="type"     sort={sort} onSort={toggleSort}>Type</SortableHead>
+                  <SortableHead sortKey="status"   sort={sort} onSort={toggleSort}>Status</SortableHead>
+                  <SortableHead sortKey="verified" sort={sort} onSort={toggleSort}>Verified</SortableHead>
+                  <SortableHead sortKey="base"     sort={sort} onSort={toggleSort}>XC Base</SortableHead>
+                  <SortableHead sortKey="customer" sort={sort} onSort={toggleSort}>Customer / District</SortableHead>
+                  <SortableHead sortKey="fw"       sort={sort} onSort={toggleSort}>FW Version</SortableHead>
+                  <SortableHead sortKey="updated"  sort={sort} onSort={toggleSort}>Last Updated</SortableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPanels.length === 0 ? (
+                {sortedPanels.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={9} className="text-center text-gray-500 py-8">
                       {filtersActive ? 'No panels match the current filters.' : 'No panels found.'}
@@ -354,7 +391,7 @@ export default function PanelsNew() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredPanels.map(panel => (
+                  sortedPanels.map(panel => (
                     <TableRow key={panel.row_id} className="hover:bg-gray-50">
                       <TableCell className="font-medium">
                         <Link

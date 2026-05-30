@@ -9,6 +9,8 @@ import {
   Building2,
   Printer,
   ExternalLink,
+  Filter,
+  X,
 } from "lucide-react";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -58,6 +60,19 @@ type DistrictRow = {
   stages_per_xc_incident: number;
 };
 
+// Raw incident row used to recompute incident-derived metrics client-side so the
+// Customer / District / Date-range filters can re-slice the data without new views.
+type IncidentRow = {
+  event_id: string | null;
+  date_incident: string | null;
+  incident_status: string | null;
+  incident_severity: string | null;
+  xc_caused: string | null;
+  customer: string | null;
+  customer_district: string | null;
+  stage_number: string | null;
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(Number(n))) return "—";
@@ -76,6 +91,32 @@ function monthLabel(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
 }
+
+// Shared input styling for the filter bar controls.
+const selectStyle: React.CSSProperties = {
+  appearance: "none",
+  background: "#fff",
+  border: "1px solid #cbd5e1",
+  borderRadius: 9,
+  padding: "9px 12px",
+  fontSize: 13.5,
+  color: "#0f172a",
+  fontWeight: 600,
+  minWidth: 170,
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
+
+const inputStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #cbd5e1",
+  borderRadius: 9,
+  padding: "8px 11px",
+  fontSize: 13.5,
+  color: "#0f172a",
+  fontWeight: 600,
+  fontFamily: "inherit",
+};
 
 // ── Small UI primitives ────────────────────────────────────────────────────────
 function KpiCard({
@@ -227,53 +268,39 @@ export default function Executive() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [trend, setTrend] = useState<TrendRow[]>([]);
-  const [aging, setAging] = useState<AgingRow[]>([]);
-  const [customers, setCustomers] = useState<CustomerRow[]>([]);
-  const [districts, setDistricts] = useState<DistrictRow[]>([]);
+  // Raw incidents power the filterable, client-recomputed sections.
+  const [incidents, setIncidents] = useState<IncidentRow[]>([]);
+
+  // ── Filters (Customer / District / Date range) ──────────────────────────────
+  const [filterCustomer, setFilterCustomer] = useState("");
+  const [filterDistrict, setFilterDistrict] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setLoading(true);
-        const [s, t, a, c, d] = await Promise.all([
+        const [s, inc] = await Promise.all([
+          // Global KPIs that are NOT incident-derived (panels, barrels, stages,
+          // visits) stay sourced from the summary view — they are not scoped by
+          // the customer/district/date filters.
           supabase.from("v_dashboard_summary").select("*").maybeSingle(),
+          // Raw incidents — recomputed client-side so filters can re-slice them.
           supabase
-            .from("v_incident_trend_monthly")
-            .select("*")
-            .order("month", { ascending: true }),
-          supabase
-            .from("v_incident_open_aging")
-            .select("*")
-            .order("bucket_order", { ascending: true }),
-          supabase
-            .from("v_exec_customer_incidents")
-            .select("customer_id,customer_name,total_incidents,xc_caused_incidents,total_stages")
-            .order("xc_caused_incidents", { ascending: false, nullsFirst: false })
-            .limit(8),
-          supabase
-            .from("v_exec_district_incidents")
+            .from("incidents")
             .select(
-              "district_id,customer_district,customer_name,total_incidents,xc_caused_incidents,stages_per_xc_incident"
-            )
-            .order("xc_caused_incidents", { ascending: false, nullsFirst: false })
-            .limit(8),
+              "event_id,date_incident,incident_status,incident_severity,xc_caused,customer,customer_district,stage_number"
+            ),
         ]);
 
         if (cancelled) return;
         if (s.error) throw s.error;
-        if (t.error) throw t.error;
-        if (a.error) throw a.error;
-        if (c.error) throw c.error;
-        if (d.error) throw d.error;
+        if (inc.error) throw inc.error;
 
         setSummary((s.data as Summary) || null);
-        // Show only the last 12 months of trend.
-        setTrend(((t.data as TrendRow[]) || []).slice(-12));
-        setAging((a.data as AgingRow[]) || []);
-        setCustomers((c.data as CustomerRow[]) || []);
-        setDistricts((d.data as DistrictRow[]) || []);
+        setIncidents((inc.data as IncidentRow[]) || []);
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Failed to load executive data");
       } finally {
@@ -285,17 +312,173 @@ export default function Executive() {
     };
   }, []);
 
-  const xcRate = useMemo(() => {
-    if (!trend.length) return null;
-    const totXc = trend.reduce((s, r) => s + r.xc_caused_incidents, 0);
-    const tot = trend.reduce((s, r) => s + r.total_incidents, 0);
-    return { totXc, tot };
-  }, [trend]);
+  // ── Filter option lists (from the full, unfiltered dataset) ──────────────────
+  const customerOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const i of incidents) if (i.customer) set.add(i.customer);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [incidents]);
 
-  const totalOpen = useMemo(
-    () => aging.reduce((s, r) => s + r.open_count, 0),
-    [aging]
+  // Districts available for the chosen customer (or all customers).
+  const districtOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const i of incidents) {
+      if (filterCustomer && i.customer !== filterCustomer) continue;
+      if (i.customer_district) set.add(i.customer_district);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [incidents, filterCustomer]);
+
+  const filtersActive = !!(filterCustomer || filterDistrict || dateFrom || dateTo);
+
+  function clearFilters() {
+    setFilterCustomer("");
+    setFilterDistrict("");
+    setDateFrom("");
+    setDateTo("");
+  }
+
+  // ── Apply filters to the raw incidents ──────────────────────────────────────
+  const filteredIncidents = useMemo(() => {
+    return incidents.filter((i) => {
+      if (filterCustomer && i.customer !== filterCustomer) return false;
+      if (filterDistrict && i.customer_district !== filterDistrict) return false;
+      if (dateFrom && (!i.date_incident || i.date_incident < dateFrom)) return false;
+      if (dateTo && (!i.date_incident || i.date_incident > dateTo)) return false;
+      return true;
+    });
+  }, [incidents, filterCustomer, filterDistrict, dateFrom, dateTo]);
+
+  // ── Recompute incident-derived metrics from the filtered set ────────────────
+  // Definitions mirror the original Supabase views exactly:
+  //   XC-caused      = xc_caused === 'Yes'
+  //   Critical       = incident_severity === 'Critical'
+  //   open (trend/aging) = incident_status !== 'Closed'
+  //   open (KPI)         = incident_status === 'New'
+  const isXc = (i: IncidentRow) => i.xc_caused === "Yes";
+  const isOpenNotClosed = (i: IncidentRow) => i.incident_status !== "Closed";
+
+  // Total / open KPI counts.
+  const totalIncidents = filteredIncidents.length;
+  const openNewCount = useMemo(
+    () => filteredIncidents.filter((i) => i.incident_status === "New").length,
+    [filteredIncidents]
   );
+
+  // Monthly trend (last 12 months of the filtered set).
+  const trend = useMemo<TrendRow[]>(() => {
+    const byMonth = new Map<string, TrendRow>();
+    for (const i of filteredIncidents) {
+      if (!i.date_incident) continue;
+      const month = i.date_incident.slice(0, 7) + "-01"; // YYYY-MM-01
+      let r = byMonth.get(month);
+      if (!r) {
+        r = {
+          month,
+          total_incidents: 0,
+          xc_caused_incidents: 0,
+          critical_incidents: 0,
+          closed_incidents: 0,
+          open_incidents: 0,
+        };
+        byMonth.set(month, r);
+      }
+      r.total_incidents++;
+      if (isXc(i)) r.xc_caused_incidents++;
+      if (i.incident_severity === "Critical") r.critical_incidents++;
+      if (i.incident_status === "Closed") r.closed_incidents++;
+      else r.open_incidents++;
+    }
+    return Array.from(byMonth.values())
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-12);
+  }, [filteredIncidents]);
+
+  // Open-incident aging buckets (status <> Closed), matching v_incident_open_aging.
+  const aging = useMemo<AgingRow[]>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const buckets: Record<string, AgingRow> = {
+      "0-7 days": { age_bucket: "0-7 days", bucket_order: 1, open_count: 0, xc_caused_count: 0, critical_count: 0, unreviewed_count: 0 },
+      "8-30 days": { age_bucket: "8-30 days", bucket_order: 2, open_count: 0, xc_caused_count: 0, critical_count: 0, unreviewed_count: 0 },
+      "31-90 days": { age_bucket: "31-90 days", bucket_order: 3, open_count: 0, xc_caused_count: 0, critical_count: 0, unreviewed_count: 0 },
+      "90+ days": { age_bucket: "90+ days", bucket_order: 4, open_count: 0, xc_caused_count: 0, critical_count: 0, unreviewed_count: 0 },
+    };
+    for (const i of filteredIncidents) {
+      if (!isOpenNotClosed(i) || !i.date_incident) continue;
+      const d = new Date(i.date_incident + "T00:00:00");
+      const ageDays = Math.floor((today.getTime() - d.getTime()) / 86_400_000);
+      const key =
+        ageDays <= 7 ? "0-7 days" : ageDays <= 30 ? "8-30 days" : ageDays <= 90 ? "31-90 days" : "90+ days";
+      const b = buckets[key];
+      b.open_count++;
+      if (isXc(i)) b.xc_caused_count++;
+      if (i.incident_severity === "Critical") b.critical_count++;
+    }
+    return Object.values(buckets)
+      .filter((b) => b.open_count > 0)
+      .sort((a, b) => a.bucket_order - b.bucket_order);
+  }, [filteredIncidents]);
+
+  // Top customers by XC-caused (matches v_exec_customer_incidents shape).
+  const customers = useMemo<CustomerRow[]>(() => {
+    const map = new Map<string, CustomerRow>();
+    for (const i of filteredIncidents) {
+      const name = i.customer || "—";
+      let r = map.get(name);
+      if (!r) {
+        r = { customer_id: name, customer_name: name, total_incidents: 0, xc_caused_incidents: 0, total_stages: 0 };
+        map.set(name, r);
+      }
+      r.total_incidents++;
+      if (isXc(i)) r.xc_caused_incidents++;
+      const st = Number(i.stage_number);
+      if (Number.isFinite(st)) r.total_stages += st;
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.xc_caused_incidents - a.xc_caused_incidents || b.total_incidents - a.total_incidents)
+      .slice(0, 8);
+  }, [filteredIncidents]);
+
+  // Top districts (matches v_exec_district_incidents shape).
+  const districts = useMemo<DistrictRow[]>(() => {
+    const map = new Map<string, DistrictRow>();
+    for (const i of filteredIncidents) {
+      const name = i.customer_district || "—";
+      let r = map.get(name);
+      if (!r) {
+        r = {
+          district_id: name,
+          customer_district: name,
+          customer_name: i.customer || "",
+          total_incidents: 0,
+          xc_caused_incidents: 0,
+          stages_per_xc_incident: 0,
+        };
+        map.set(name, r);
+      }
+      r.total_incidents++;
+      if (isXc(i)) r.xc_caused_incidents++;
+      const st = Number(i.stage_number);
+      if (Number.isFinite(st)) (r as any)._stages = ((r as any)._stages || 0) + st;
+    }
+    const rows = Array.from(map.values());
+    for (const r of rows) {
+      const stages = (r as any)._stages || 0;
+      r.stages_per_xc_incident = r.xc_caused_incidents ? stages / r.xc_caused_incidents : 0;
+    }
+    return rows
+      .sort((a, b) => b.xc_caused_incidents - a.xc_caused_incidents || b.total_incidents - a.total_incidents)
+      .slice(0, 8);
+  }, [filteredIncidents]);
+
+  const xcRate = useMemo(() => {
+    if (!filteredIncidents.length) return null;
+    const totXc = filteredIncidents.filter(isXc).length;
+    return { totXc, tot: filteredIncidents.length };
+  }, [filteredIncidents]);
+
+  const totalOpen = useMemo(() => aging.reduce((s, r) => s + r.open_count, 0), [aging]);
   const aged90 = useMemo(
     () => aging.find((r) => r.age_bucket === "90+ days")?.open_count || 0,
     [aging]
@@ -376,6 +559,101 @@ export default function Executive() {
         </button>
       </div>
 
+      {/* Filter bar */}
+      <div
+        className="exec-filter-bar"
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          gap: 14,
+          flexWrap: "wrap",
+          background: "#fff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 14,
+          padding: "16px 18px",
+          marginBottom: 24,
+          boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+        }}
+      >
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "#0f172a", fontWeight: 700, fontSize: 14, paddingBottom: 6 }}>
+          <Filter size={16} /> Filters
+        </div>
+
+        {/* Customer */}
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#64748b" }}>
+          Customer
+          <select
+            value={filterCustomer}
+            onChange={(e) => {
+              setFilterCustomer(e.target.value);
+              setFilterDistrict(""); // reset district when customer changes
+            }}
+            style={selectStyle}
+          >
+            <option value="">All customers</option>
+            {customerOptions.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* District */}
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#64748b" }}>
+          District
+          <select
+            value={filterDistrict}
+            onChange={(e) => setFilterDistrict(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="">All districts</option>
+            {districtOptions.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* Date range */}
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#64748b" }}>
+          From
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 600, color: "#64748b" }}>
+          To
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
+        </label>
+
+        {filtersActive && (
+          <button
+            onClick={clearFilters}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "#f1f5f9",
+              color: "#475569",
+              border: "1px solid #e2e8f0",
+              borderRadius: 10,
+              padding: "9px 13px",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <X size={14} /> Clear
+          </button>
+        )}
+
+        <div style={{ marginLeft: "auto", fontSize: 12.5, color: "#94a3b8", paddingBottom: 6 }}>
+          {filtersActive
+            ? `Incident metrics reflect ${fmt(totalIncidents)} matching incidents. Panels, barrels, stages & visit KPIs are company-wide.`
+            : "Showing all customers and districts."}
+        </div>
+      </div>
+
       {/* KPI row */}
       <div
         style={{
@@ -387,9 +665,9 @@ export default function Executive() {
       >
         <KpiCard
           icon={<AlertTriangle size={18} />}
-          label="Total Incidents"
-          value={fmt(summary?.total_incidents)}
-          sub={`${fmt(summary?.open_incidents)} currently open`}
+          label={filtersActive ? "Incidents (filtered)" : "Total Incidents"}
+          value={fmt(totalIncidents)}
+          sub={`${fmt(openNewCount)} currently open (New)`}
           accent="#0ea5e9"
         />
         <KpiCard
@@ -587,6 +865,7 @@ export default function Executive() {
           aside { display: none !important; }
           main { margin-left: 0 !important; }
           .exec-print-btn { display: none !important; }
+          .exec-filter-bar { display: none !important; }
         }
         @media (max-width: 900px) {
           .exec-two-col { grid-template-columns: 1fr !important; }

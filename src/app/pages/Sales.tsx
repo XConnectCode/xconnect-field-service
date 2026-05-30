@@ -9,6 +9,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { SortableHead, useSort } from '../components/SortableTable';
 import { Plus, TrendingUp, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
@@ -138,6 +139,14 @@ export default function Sales() {
       return true;
     });
   }, [sales, filterCustomer, filterDistrict, filterTime]);
+
+  const { sorted: sortedSales, sort, toggleSort } = useSort(filteredSales, {
+    week:     s => s.weekEnding,
+    customer: s => s.customerName,
+    district: s => s.districtName,
+    barrels:  s => s.barrels || 0,
+    stages:   s => s.stages || 0,
+  });
 
   const clearFilters = () => {
     setFilterCustomer('');
@@ -377,15 +386,15 @@ export default function Sales() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Week Ending</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>District</TableHead>
-                    <TableHead className="text-right">Barrels</TableHead>
-                    <TableHead className="text-right">Stages</TableHead>
+                    <SortableHead sortKey="week"     sort={sort} onSort={toggleSort}>Week Ending</SortableHead>
+                    <SortableHead sortKey="customer" sort={sort} onSort={toggleSort}>Customer</SortableHead>
+                    <SortableHead sortKey="district" sort={sort} onSort={toggleSort}>District</SortableHead>
+                    <SortableHead sortKey="barrels"  sort={sort} onSort={toggleSort} className="text-right">Barrels</SortableHead>
+                    <SortableHead sortKey="stages"   sort={sort} onSort={toggleSort} className="text-right">Stages</SortableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredSales.map((sale) => (
+                  {sortedSales.map((sale) => (
                     <TableRow key={sale.id}>
                       <TableCell className="font-medium">
                         {sale.weekEnding ? format(parseISO(sale.weekEnding), 'MMM dd, yyyy') : '-'}
