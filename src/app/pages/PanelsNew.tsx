@@ -76,7 +76,11 @@ export default function PanelsNew() {
       const [panelsData, customersData, districtsData] = await Promise.all([
         panelsRes.json(), customersRes.json(), districtsRes.json(),
       ]);
-      setPanels(panelsData       || []);
+      // Only show verified panels (verified = Y / Yes / true).
+      const isVerified = (v: any) =>
+        ['y', 'yes', 'true', '1'].includes(String(v ?? '').trim().toLowerCase());
+      const verifiedPanels = (panelsData || []).filter((p: any) => isVerified(p.verified));
+      setPanels(verifiedPanels);
       setCustomers(customersData || []);
       setDistricts(districtsData || []);
     } catch (err) {
