@@ -11,6 +11,8 @@ import {
   isGatedStatus,
   CLOSED_STATUS,
   ACTION_STATUS_COMPLETE,
+  needsReview,
+  isReviewed,
 } from "../lib/incidentWorkflow";
 import {
   resolveFailedComponentLabel,
@@ -214,6 +216,11 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
           <div>
             <span style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Incident #{r.event_id}</span>
             <span style={{ marginLeft: 10, fontSize: 13, color: "#64748b" }}>{r.date_incident ? new Date(r.date_incident + "T00:00:00").toLocaleDateString(undefined, { year:"numeric", month:"short", day:"numeric" }) : ""}</span>
+            {r.reviewed_at && (
+              <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: "#dcfce7", color: "#166534" }}>
+                ✓ Reviewed{r.reviewed_by ? ` by ${r.reviewed_by}` : ""}
+              </span>
+            )}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#64748b", lineHeight: 1 }}>✕</button>
         </div>
@@ -403,6 +410,42 @@ export default function Dashboard() {
     if (modalIncident?.row_id === rowId) setModalIncident((prev: any) => ({ ...prev, [field]: value }));
   }, [modalIncident]);
 
+  // ── Director review: one-click acknowledge ─────────────────────────────────
+  // Stamps reviewed_by + reviewed_at so the incident leaves the review queue
+  // and becomes eligible for Closed. Admin-only.
+  const handleMarkReviewed = useCallback(async (inc: any) => {
+    if (role !== "admin") {
+      toast.error("Only the director/admin can mark an incident reviewed.");
+      return;
+    }
+    const reviewer = user?.name || user?.email || "Director";
+    const reviewedAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("incidents")
+      .update({ reviewed_by: reviewer, reviewed_at: reviewedAt })
+      .eq("row_id", inc.row_id);
+    if (error) { toast.error(error.message || "Failed to mark reviewed"); return; }
+    setIncidents(prev => prev.map(i =>
+      i.row_id === inc.row_id ? { ...i, reviewed_by: reviewer, reviewed_at: reviewedAt } : i
+    ));
+    // Log to the incident timeline (best-effort — don't block on failure).
+    supabase.from("incident_updates").insert({
+      event_id: inc.event_id ?? null,
+      incident_id: inc.row_id ?? null,
+      update_type: "review",
+      note: `Reviewed by ${reviewer}`,
+      created_by: reviewer,
+    }).then(({ error: e }) => { if (e) console.warn("timeline log failed", e.message); });
+    toast.success("Marked as reviewed");
+  }, [role, user]);
+
+  // Incidents awaiting director review (XC-caused / Critical, unreviewed, open).
+  const reviewQueue = useMemo(
+    () => enriched.filter(needsReview)
+      .sort((a, b) => String(a.date_incident || "").localeCompare(String(b.date_incident || ""))),
+    [enriched]
+  );
+
   // ── Load reference tables once ──────────────────────────────────────────────
   useEffect(() => {
     async function loadRefs() {
@@ -536,6 +579,43 @@ export default function Dashboard() {
           <option value="all_time">All Time</option>
         </select>
       </div>
+
+      {/* ── Needs My Review queue (director/admin only) ── */}
+      {role === "admin" && !loading && reviewQueue.length > 0 && (
+        <div style={{ marginBottom: 28, background: "#fff", borderRadius: 12, border: "1px solid #fecaca", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", background: "#fef2f2", borderBottom: "1px solid #fecaca" }}>
+            <span style={{ fontSize: 16 }}>🔎</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#991b1b" }}>Needs My Review</span>
+            <span style={{ fontSize: 12, fontWeight: 600, padding: "2px 10px", borderRadius: 20, background: "#dc2626", color: "#fff" }}>{reviewQueue.length}</span>
+            <span style={{ fontSize: 12, color: "#b91c1c", marginLeft: 4 }}>XC-caused or Critical incidents awaiting your sign-off · oldest first</span>
+          </div>
+          <div>
+            {reviewQueue.map((inc, idx) => {
+              const sevCfg = SEVERITY_COLORS[inc.incident_severity] ?? { bg: "#f1f5f9", color: "#475569" };
+              return (
+                <div key={inc.row_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 20px", borderBottom: idx < reviewQueue.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#3b82f6", minWidth: 64 }}>#{inc.event_id}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inc.customerName}</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                      {inc.districtName}
+                      {inc.date_incident && <> · {new Date(inc.date_incident + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</>}
+                    </div>
+                  </div>
+                  {inc.incident_severity && (
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: sevCfg.bg, color: sevCfg.color }}>{inc.incident_severity}</span>
+                  )}
+                  {inc.xc_caused && (
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: "#fee2e2", color: "#b91c1c" }}>XC: {inc.xc_caused}</span>
+                  )}
+                  <button onClick={() => setModalIncident(inc)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 11, color: "#475569", fontWeight: 500 }}>View</button>
+                  <button onClick={() => handleMarkReviewed(inc)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "#16a34a", cursor: "pointer", fontSize: 11, color: "#fff", fontWeight: 600 }}>✓ Mark Reviewed</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── KPI row ── */}
       <div style={styles.grid4}>

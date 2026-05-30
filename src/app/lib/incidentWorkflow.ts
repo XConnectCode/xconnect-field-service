@@ -81,7 +81,32 @@ export const REQUIRED_FOR_FINAL_REVIEW: RequiredField[] = [
 // Additional fields required to mark Closed.
 export const REQUIRED_FOR_CLOSED_EXTRA: RequiredField[] = [
   { key: 'report_sent',      label: 'Report sent to customer' },
+  { key: 'reviewed_at',      label: 'Director review' },
 ];
+
+// ── Director review ───────────────────────────────────────────────────────────
+//
+// An incident must carry a director-review stamp (reviewed_by + reviewed_at)
+// before it can be Closed. This makes "the director reviewed this" an
+// enforced, auditable step rather than an informal expectation.
+
+/** True if the incident has been director-reviewed. */
+export function isReviewed(incident: Record<string, any>): boolean {
+  return !!(incident && incident.reviewed_at);
+}
+
+/**
+ * An incident "needs my review" when it is XC-caused or Critical, not yet
+ * reviewed, and not already Closed. This is the director's daily queue.
+ */
+export function needsReview(incident: Record<string, any>): boolean {
+  if (!incident) return false;
+  if (isReviewed(incident)) return false;
+  if (normalizeStatus(incident.incident_status) === CLOSED_STATUS) return false;
+  const xc  = String(incident.xc_caused || '').toLowerCase();
+  const sev = String(incident.incident_severity || '').toLowerCase();
+  return xc === 'yes' || xc === 'inconclusive' || sev === 'critical';
+}
 
 // Vendor (the reference link) is only required if vendor_caused is set to "Yes".
 function vendorRequired(incident: Record<string, any>): boolean {
