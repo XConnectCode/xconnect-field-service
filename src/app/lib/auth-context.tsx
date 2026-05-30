@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { projectId } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '/utils/supabase/info';
 import { supabase } from './supabase';
 
 const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
@@ -145,6 +145,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // Supabase Edge gateway requires a JWT before the request reaches
+          // the function. Without this, the gateway returns 401
+          // UNAUTHORIZED_NO_AUTH_HEADER and the app shows "Failed to sign in".
+          'Authorization': `Bearer ${publicAnonKey}`,
+          'apikey': publicAnonKey,
         },
         body: JSON.stringify({ email, password }),
       });
