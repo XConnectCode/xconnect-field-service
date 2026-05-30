@@ -248,12 +248,12 @@ export default function Executive() {
             .select("*")
             .order("bucket_order", { ascending: true }),
           supabase
-            .from("v_customer_kpis")
+            .from("v_exec_customer_incidents")
             .select("customer_id,customer_name,total_incidents,xc_caused_incidents,total_stages")
             .order("xc_caused_incidents", { ascending: false, nullsFirst: false })
             .limit(8),
           supabase
-            .from("v_district_kpis")
+            .from("v_exec_district_incidents")
             .select(
               "district_id,customer_district,customer_name,total_incidents,xc_caused_incidents,stages_per_xc_incident"
             )
