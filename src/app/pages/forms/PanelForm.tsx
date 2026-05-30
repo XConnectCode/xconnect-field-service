@@ -110,7 +110,7 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
       operating_company:fd.get('operating_company')|| null,
       'unit#':          fd.get('unit')             || null,
       'so#':            fd.get('so')               || null,
-      'gui#':           fd.get('gui')              || null,
+      gui_version:      fd.get('gui')              || null,
       shootingfw:       fd.get('shootingfw')       || null,
       wl_controlfw:     fd.get('wl_controlfw')     || null,
       loggingfw:        fd.get('loggingfw')        || null,
@@ -198,7 +198,7 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
           </F>
 
           <F label="GUI #">
-            <Input name="gui" defaultValue={panel?.['gui#'] || ''} />
+            <Input name="gui" defaultValue={panel?.gui_version || ''} />
           </F>
 
           <F label="SO #">

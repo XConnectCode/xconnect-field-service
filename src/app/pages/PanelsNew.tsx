@@ -134,7 +134,7 @@ export default function PanelsNew() {
     verified:  p => (isVerified(p.verified) ? 1 : (p.verified ? 0 : -1)),
     base:      p => p.xc_base,
     customer:  p => p.customerName,
-    fw:        p => p.shootingfw,
+    fw:        p => p.wl_controlfw,
     updated:   p => p.date_updated,
   });
 
@@ -373,7 +373,7 @@ export default function PanelsNew() {
                   <SortableHead sortKey="verified" sort={sort} onSort={toggleSort}>Verified</SortableHead>
                   <SortableHead sortKey="base"     sort={sort} onSort={toggleSort}>XC Base</SortableHead>
                   <SortableHead sortKey="customer" sort={sort} onSort={toggleSort}>Customer / District</SortableHead>
-                  <SortableHead sortKey="fw"       sort={sort} onSort={toggleSort}>FW Version</SortableHead>
+                  <SortableHead sortKey="fw"       sort={sort} onSort={toggleSort}>FW</SortableHead>
                   <SortableHead sortKey="updated"  sort={sort} onSort={toggleSort}>Last Updated</SortableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -432,7 +432,7 @@ export default function PanelsNew() {
                             : <span className="text-gray-400">Not assigned</span>}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{panel.shootingfw || '-'}</TableCell>
+                      <TableCell className="text-sm">{panel.wl_controlfw || '-'}</TableCell>
                       <TableCell className="text-sm">{panel.date_updated}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
@@ -481,7 +481,7 @@ export default function PanelsNew() {
               <div><strong>XC Base:</strong> {quickPanel?.xc_base || '-'}</div>
               <div><strong>Customer:</strong> {quickPanel?.customerName || 'Not assigned'}</div>
               <div><strong>District:</strong> {quickPanel?.districtName || '-'}</div>
-              <div><strong>FW Version:</strong> {quickPanel?.shootingfw || '-'}</div>
+              <div><strong>FW:</strong> {quickPanel?.wl_controlfw || '-'}</div>
               <div><strong>Last Updated:</strong> {quickPanel?.date_updated || '-'}</div>
             </div>
           </DialogContent>

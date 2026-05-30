@@ -111,7 +111,7 @@ export default function PanelDetail() {
               <div><label className="text-sm font-medium text-gray-500">Logging FW</label>
                 <p className="text-gray-900 mt-1">{panel.loggingfw || 'N/A'}</p></div>
               <div><label className="text-sm font-medium text-gray-500">GUI #</label>
-                <p className="text-gray-900 mt-1">{panel['gui#'] || 'N/A'}</p></div>
+                <p className="text-gray-900 mt-1">{panel.gui_version || 'N/A'}</p></div>
               <div><label className="text-sm font-medium text-gray-500">Surface FW</label>
                 <p className="text-gray-900 mt-1">{panel.surfacefw || 'N/A'}</p></div>
             </CardContent>
