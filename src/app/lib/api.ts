@@ -1,4 +1,5 @@
 import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { supabase } from './supabase';
 
 const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -12,8 +13,21 @@ async function apiRequest(endpoint: string, options: RequestInit = {}, token?: s
     ...options.headers as Record<string, string>,
   };
 
-  // Try with the anon key
-  headers['Authorization'] = `Bearer ${publicAnonKey}`;
+  // Forward the signed-in user's access token so the edge function can
+  // enforce requireUser/requireAdmin server-side. Prefer an explicitly
+  // passed token, then the live Supabase session, then fall back to the
+  // anon key (e.g. for public/unauthenticated endpoints). Sending the anon
+  // key to a guarded route will (correctly) be rejected with 401.
+  let authToken = token;
+  if (!authToken) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      authToken = data.session?.access_token;
+    } catch {
+      // ignore - fall through to anon
+    }
+  }
+  headers['Authorization'] = `Bearer ${authToken || publicAnonKey}`;
 
   try {
     console.log(`Making API request to ${endpoint}`);
