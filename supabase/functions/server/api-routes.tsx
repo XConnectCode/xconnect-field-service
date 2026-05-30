@@ -22,7 +22,30 @@ export const apiRoutes = new Hono();
 // routes (reads + writes). Delete routes additionally enforce requireAdmin.
 // Without this, anyone holding the public anon key could read/write all data
 // through the edge function, defeating the table RLS policies entirely.
-apiRoutes.use('*', requireUser);
+//
+// NOTE: this router is mounted at the same base path as the public auth
+// routes (signin/signup/session/admin-exists/health/config/signout) defined
+// in index.tsx. Hono applies a mounted sub-app's wildcard middleware to the
+// whole shared prefix, so a blanket use('*') would (wrongly) guard those
+// public routes too and lock users out at login. We therefore exempt the
+// known public paths explicitly.
+const PUBLIC_PATHS = new Set([
+  '/make-server-64775d98/signin',
+  '/make-server-64775d98/signup',
+  '/make-server-64775d98/signout',
+  '/make-server-64775d98/session',
+  '/make-server-64775d98/admin-exists',
+  '/make-server-64775d98/health',
+  '/make-server-64775d98/config',
+  '/make-server-64775d98/schema',
+  '/make-server-64775d98/diagnose-row-id',
+]);
+apiRoutes.use('*', async (c, next) => {
+  if (c.req.method === 'OPTIONS' || PUBLIC_PATHS.has(new URL(c.req.url).pathname)) {
+    return next();
+  }
+  return requireUser(c, next);
+});
 
 /**
  * Coerce any inbound action_status value to one of the three literals
