@@ -136,7 +136,7 @@ export default function PanelsNew() {
     customer:  p => p.customerName,
     fw:        p => p.wl_controlfw,
     updated:   p => p.date_updated,
-  });
+  }, { key: 'updated', dir: 'desc' });
 
   const clearFilters = () => {
     setFilterCustomer('');
