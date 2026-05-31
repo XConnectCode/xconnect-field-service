@@ -157,14 +157,14 @@ export default function Reports() {
         fetchAll(applyFilters(supabase.from('incidents').select('date_incident,incident_status,incident_severity,xc_caused,event_category'), 'date_incident')),
         fetchAll(applyFilters(supabase.from('panels').select('panel_type,panel_status').in('panel_status', ['Leased', 'Loaned', 'Sold']), 'created_at')),
         fetchAll((() => {
-          let q = supabase.from('barrels_sold').select('date,quantity');
+          let q = supabase.from('sales_volume').select('date,quantity').eq('metric_type', 'barrels');
           if (start) q = q.gte('date', start); if (end) q = q.lte('date', end);
           if (custName) q = q.eq('customer', custName);
           if (distName) q = q.eq('customer_district', distName);
           return q;
         })()),
         fetchAll((() => {
-          let q = supabase.from('stages').select('date,quantity');
+          let q = supabase.from('sales_volume').select('date,quantity').eq('metric_type', 'stages');
           if (start) q = q.gte('date', start); if (end) q = q.lte('date', end);
           if (custName) q = q.eq('customer', custName);
           if (distName) q = q.eq('customer_district', distName);
