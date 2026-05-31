@@ -27,22 +27,22 @@ export default function DataFix() {
       // Load all data
       const [customersRes, districtsRes, visitsRes, incidentsRes, salesRes, panelsRes] = await Promise.all([
         fetch(`${baseUrl}/customers`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         }),
         fetch(`${baseUrl}/districts`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         }),
         fetch(`${baseUrl}/field-visits`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         }),
         fetch(`${baseUrl}/incidents`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         }),
         fetch(`${baseUrl}/sales`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         }),
         fetch(`${baseUrl}/panels`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         }),
       ]);
 
@@ -77,7 +77,7 @@ export default function DataFix() {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                'Authorization': `Bearer ${accessToken ?? publicAnonKey}`
               },
               body: JSON.stringify({
                 ...visit,
@@ -102,7 +102,7 @@ export default function DataFix() {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                'Authorization': `Bearer ${accessToken ?? publicAnonKey}`
               },
               body: JSON.stringify({
                 ...incident,
@@ -127,7 +127,7 @@ export default function DataFix() {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                'Authorization': `Bearer ${accessToken ?? publicAnonKey}`
               },
               body: JSON.stringify({
                 ...sale,
@@ -152,7 +152,7 @@ export default function DataFix() {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                'Authorization': `Bearer ${accessToken ?? publicAnonKey}`
               },
               body: JSON.stringify({
                 ...panel,
@@ -176,7 +176,7 @@ export default function DataFix() {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
+                'Authorization': `Bearer ${accessToken ?? publicAnonKey}`
               },
               body: JSON.stringify({
                 ...district,

@@ -21,6 +21,7 @@ import {
   subWeeks, subMonths,
 } from 'date-fns';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { getBearerToken } from '../lib/authHeaders';
 import { generateIncidentReportPDF, type IncidentReportImage } from '../lib/generateIncidentReportPDF';
 import IncidentPdfImagePicker from '../components/IncidentPdfImagePicker';
 import {
@@ -184,18 +185,24 @@ export default function IncidentsNew() {
 
   // ── Load lookup maps ──────────────────────────────────────────────────────
   useEffect(() => {
-    const headers = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${publicAnonKey}` };
-    Promise.all([
-      fetch(`https://${projectId}.supabase.co/rest/v1/lists?select=row_id,failed_component,failure_type`, { headers }).then(r => r.json()),
-      fetch(`https://${projectId}.supabase.co/rest/v1/vendors?select=row_id,vendor`, { headers }).then(r => r.json()),
-    ]).then(([listsData, vendorsData]) => {
-      const lm: Record<string, any> = {};
-      (listsData || []).forEach((l: any) => { lm[l.row_id] = l; });
-      setApiListMap(lm);
-      const vm: Record<string, string> = {};
-      (vendorsData || []).forEach((v: any) => { vm[v.row_id] = v.vendor; });
-      setApiVendorMap(vm);
-    }).catch(err => console.error('Error fetching lookup maps:', err));
+    (async () => {
+      // Forward the user's session token so RLS applies on the REST reads.
+      const headers = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${await getBearerToken()}` };
+      try {
+        const [listsData, vendorsData] = await Promise.all([
+          fetch(`https://${projectId}.supabase.co/rest/v1/lists?select=row_id,failed_component,failure_type`, { headers }).then(r => r.json()),
+          fetch(`https://${projectId}.supabase.co/rest/v1/vendors?select=row_id,vendor`, { headers }).then(r => r.json()),
+        ]);
+        const lm: Record<string, any> = {};
+        (Array.isArray(listsData) ? listsData : []).forEach((l: any) => { lm[l.row_id] = l; });
+        setApiListMap(lm);
+        const vm: Record<string, string> = {};
+        (Array.isArray(vendorsData) ? vendorsData : []).forEach((v: any) => { vm[v.row_id] = v.vendor; });
+        setApiVendorMap(vm);
+      } catch (err) {
+        console.error('Error fetching lookup maps:', err);
+      }
+    })();
   }, []);
 
   // ── Load data ─────────────────────────────────────────────────────────────

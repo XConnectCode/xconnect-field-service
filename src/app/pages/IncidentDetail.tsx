@@ -171,7 +171,12 @@ export default function IncidentDetail() {
     setLoading(true);
     try {
       const restBase = `https://${projectId}.supabase.co/rest/v1`;
-      const restHeaders = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${publicAnonKey}` };
+      // Forward the user's session token so RLS sees the authenticated user on
+      // REST reads, and so the guarded edge routes (which reject the anon key)
+      // accept the request. loadAll only runs once accessToken exists.
+      const token = accessToken ?? publicAnonKey;
+      const restHeaders = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${token}` };
+      const edgeHeaders = { 'Authorization': `Bearer ${token}` };
       const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
       const [incidentData, listsRes, compRes, vendorsRes, custRes, distRes] = await Promise.all([
@@ -179,16 +184,17 @@ export default function IncidentDetail() {
         fetch(`${restBase}/lists?select=row_id,failed_component,failure_type`, { headers: restHeaders }),
         fetch(`${restBase}/components?select=row_id,failed_component`, { headers: restHeaders }),
         fetch(`${restBase}/vendors?select=row_id,vendor`, { headers: restHeaders }),
-        fetch(`${baseUrl}/customers`, { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
-        fetch(`${baseUrl}/districts`, { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
+        fetch(`${baseUrl}/customers`, { headers: edgeHeaders }),
+        fetch(`${baseUrl}/districts`, { headers: edgeHeaders }),
       ]);
 
       setIncident(incidentData);
-      if (listsRes.ok)   setLists(await listsRes.json()   || []);
-      if (compRes.ok)    setComponents(await compRes.json() || []);
-      if (vendorsRes.ok) setVendors(await vendorsRes.json() || []);
-      if (custRes.ok)    setCustomers(await custRes.json() || []);
-      if (distRes.ok)    setDistricts(await distRes.json() || []);
+      // Guard each response so a non-array error body can't crash the page.
+      if (listsRes.ok)   { const d = await listsRes.json();   setLists(Array.isArray(d) ? d : []); }
+      if (compRes.ok)    { const d = await compRes.json();    setComponents(Array.isArray(d) ? d : []); }
+      if (vendorsRes.ok) { const d = await vendorsRes.json(); setVendors(Array.isArray(d) ? d : []); }
+      if (custRes.ok)    { const d = await custRes.json();    setCustomers(Array.isArray(d) ? d : []); }
+      if (distRes.ok)    { const d = await distRes.json();    setDistricts(Array.isArray(d) ? d : []); }
 
       // Resolve linked field visit row_id (for cross-nav) using business field_visit_id
       if (incidentData?.field_visit_id) {

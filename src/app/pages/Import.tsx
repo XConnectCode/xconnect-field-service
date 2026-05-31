@@ -106,7 +106,7 @@ export default function Import() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${accessToken ?? publicAnonKey}`,
           },
           body: JSON.stringify({ tableName, limit: 10 }),
         }
@@ -153,7 +153,7 @@ export default function Import() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${accessToken ?? publicAnonKey}`,
           },
           body: JSON.stringify({ tableName, mapping }),
         }

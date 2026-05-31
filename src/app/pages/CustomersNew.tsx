@@ -61,18 +61,19 @@ export default function CustomersNew() {
     try {
       const [customersRes, districtsRes] = await Promise.all([
         fetch(`${baseUrl}/customers`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         }),
         fetch(`${baseUrl}/districts`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+          headers: { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` }
         })
       ]);
 
       const customersData = await customersRes.json();
       const districtsData = await districtsRes.json();
 
-      setCustomers(customersData || []);
-      setDistricts(districtsData || []);
+      // Guard against non-array error responses so the table never crashes.
+      setCustomers(Array.isArray(customersData) ? customersData : []);
+      setDistricts(Array.isArray(districtsData) ? districtsData : []);
       
       console.log('Loaded customers:', customersData);
       console.log('Loaded districts:', districtsData);
@@ -92,7 +93,7 @@ export default function CustomersNew() {
       const response = await fetch(`${baseUrl}/customers`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          'Authorization': `Bearer ${accessToken ?? publicAnonKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -126,7 +127,7 @@ export default function CustomersNew() {
       const response = await fetch(`${baseUrl}/customers/${editingCustomer.row_id}`, {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          'Authorization': `Bearer ${accessToken ?? publicAnonKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -208,7 +209,7 @@ export default function CustomersNew() {
       const response = await fetch(`${baseUrl}/districts`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          'Authorization': `Bearer ${accessToken ?? publicAnonKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(districtData)
@@ -242,7 +243,7 @@ export default function CustomersNew() {
       const response = await fetch(`${baseUrl}/districts/${editingDistrict.row_id}`, {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          'Authorization': `Bearer ${accessToken ?? publicAnonKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({

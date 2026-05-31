@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ImageIcon, Loader2 } from 'lucide-react';
 import type { ImageRecord } from './ImageUpload';
+import { getBearerToken } from '../lib/authHeaders';
 
 /**
  * Read-only gallery for any polymorphic parent record.
@@ -65,8 +66,9 @@ export default function RecordImages({
     (async () => {
       try {
         const url = `${baseUrl}/images/${encodeURIComponent(parentTable)}/${encodeURIComponent(parentRowId)}`;
+        // Forward the live session token; the /images route requires auth.
         const resp = await fetch(url, {
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
+          headers: { Authorization: `Bearer ${await getBearerToken()}` },
         });
         if (!resp.ok) {
           throw new Error(`Failed to load images (${resp.status})`);

@@ -95,7 +95,7 @@ export default function ImageUpload({
       try {
         const resp = await fetch(
           `${baseUrl}/images/${encodeURIComponent(effectiveTable)}/${encodeURIComponent(effectiveRowId)}`,
-          { headers: { Authorization: `Bearer ${publicAnonKey}` } }
+          { headers: { Authorization: `Bearer ${accessToken ?? publicAnonKey}` } }
         );
         if (resp.ok) {
           const data = await resp.json();
@@ -155,7 +155,7 @@ export default function ImageUpload({
         const url = `${baseUrl}/images/${encodeURIComponent(effectiveTable)}/${encodeURIComponent(effectiveRowId)}`;
         const response = await fetch(url, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
+          headers: { Authorization: `Bearer ${accessToken ?? publicAnonKey}` },
           body: formData,
         });
 

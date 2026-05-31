@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getBearerToken } from '../lib/authHeaders';
 
 export default function Debug() {
   const [counts, setCounts] = useState<any>(null);
@@ -15,7 +16,7 @@ export default function Debug() {
     try {
       const response = await fetch(`${baseUrl}/debug/row-counts`, {
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`
+          'Authorization': `Bearer ${await getBearerToken()}`
         }
       });
       

@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from './ui/dialog';
 import type { ImageRecord } from './ImageUpload';
+import { getBearerToken } from '../lib/authHeaders';
 import {
   buildDefaultSelection,
   selectionToPdfImages,
@@ -59,8 +60,9 @@ export default function IncidentPdfImagePicker({
     (async () => {
       try {
         const url = `${baseUrl}/images/incidents/${encodeURIComponent(incidentRowId)}`;
+        // Forward the live session token; the /images route requires auth.
         const resp = await fetch(url, {
-          headers: { Authorization: `Bearer ${publicAnonKey}` },
+          headers: { Authorization: `Bearer ${await getBearerToken()}` },
         });
         if (!resp.ok) throw new Error(`Failed to load images (${resp.status})`);
         const data = await resp.json();
