@@ -154,6 +154,9 @@ export default function IncidentsNew() {
   const [filterDistrict, setFilterDistrict] = useState('');
   const [filterTime,     setFilterTime]     = useState('all_time');
   const [searchTerm,     setSearchTerm]     = useState('');
+  const [filterXcCaused, setFilterXcCaused] = useState('');   // drill-down: 'Yes' etc.
+  const [filterSeverity, setFilterSeverity] = useState('');   // drill-down: 'Critical' etc.
+  const [filterMonth,    setFilterMonth]    = useState('');   // drill-down: 'YYYY-MM'
 
   // ── Dialogs ───────────────────────────────────────────────────────────────
   const [formOpen,        setFormOpen]        = useState(false);
@@ -174,7 +177,10 @@ export default function IncidentsNew() {
   const reportCustomerName = searchParams.get('customerName');
   const reportDistrictName = searchParams.get('districtName');
   const reportTimeFilter   = searchParams.get('timeFilter');
-  const fromReport = !!(reportCustomerName || reportDistrictName || reportTimeFilter);
+  const reportXcCaused     = searchParams.get('xcCaused');
+  const reportSeverity     = searchParams.get('severity');
+  const reportMonth        = searchParams.get('month');
+  const fromReport = !!(reportCustomerName || reportDistrictName || reportTimeFilter || reportXcCaused || reportSeverity || reportMonth);
 
   // ── Open the add dialog when ?new=1 is present (deep-link from SQM dashboard) ─
   useEffect(() => {
@@ -299,7 +305,10 @@ export default function IncidentsNew() {
     if (!fromReport || !enrichedIncidents.length) return;
     if (reportCustomerName) setFilterCustomer(reportCustomerName);
     if (reportTimeFilter)   setFilterTime(reportTimeFilter);
-  }, [fromReport, reportCustomerName, reportTimeFilter, enrichedIncidents]);
+    if (reportXcCaused)     setFilterXcCaused(reportXcCaused);
+    if (reportSeverity)     setFilterSeverity(reportSeverity);
+    if (reportMonth)        setFilterMonth(reportMonth);
+  }, [fromReport, reportCustomerName, reportTimeFilter, reportXcCaused, reportSeverity, reportMonth, enrichedIncidents]);
 
   useEffect(() => {
     if (!fromReport || !reportDistrictName || !filterCustomer) return;
@@ -324,6 +333,9 @@ export default function IncidentsNew() {
     const filtered = enrichedIncidents.filter(inc => {
       if (filterCustomer && inc.customerName !== filterCustomer) return false;
       if (filterDistrict && inc.districtName !== filterDistrict) return false;
+      if (filterXcCaused && inc.xc_caused !== filterXcCaused) return false;
+      if (filterSeverity && inc.incident_severity !== filterSeverity) return false;
+      if (filterMonth && String(inc.date_incident || '').slice(0, 7) !== filterMonth) return false;
       if (start && end && inc.date_incident) {
         try { if (!isWithinInterval(parseISO(inc.date_incident), { start, end })) return false; }
         catch { /* skip */ }
@@ -348,7 +360,7 @@ export default function IncidentsNew() {
     });
     // Default sort: Event ID descending (newer IDs first)
     return [...filtered].sort((a, b) => compareIds(b.event_id, a.event_id));
-  }, [enrichedIncidents, filterCustomer, filterDistrict, filterTime, searchTerm, listLookupMap, vendorLookupMap]);
+  }, [enrichedIncidents, filterCustomer, filterDistrict, filterTime, filterXcCaused, filterSeverity, filterMonth, searchTerm, listLookupMap, vendorLookupMap]);
 
   // Interactive column sorting (layers on top of the default Event ID sort).
   const { sorted: sortedIncidents, sort, toggleSort } = useSort(filteredIncidents, {

@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
+import { useTheme } from '../lib/theme-context';
 import { customerApi, districtApi } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { Button } from '../components/ui/button';
@@ -7,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
-import { FileText, Download, BarChart3, Building2 } from 'lucide-react';
+import { FileText, Download, BarChart3, Building2, ArrowUpRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { 
   format, startOfWeek, endOfWeek, subWeeks, 
@@ -16,7 +18,7 @@ import {
   addDays 
 } from 'date-fns';
 import {
-  BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
+  BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, ComposedChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { generateReportPDF } from '../lib/generateReport';
@@ -86,6 +88,11 @@ function getDateRange(tf: string) {
 
 export default function Reports() {
   const { accessToken } = useAuth();
+  const { isDark } = useTheme();
+  const navigate = useNavigate();
+  const axisTick = isDark ? '#94a3b8' : '#64748b';
+  const gridStroke = isDark ? '#334155' : '#f0f0f0';
+
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -117,6 +124,19 @@ export default function Reports() {
   const persist = useCallback((cust: string, dist: string, tf: string) => {
     try { localStorage.setItem(LS_KEY, JSON.stringify({ selectedCustomer: cust, selectedDistrict: dist, timeFilter: tf })); } catch {}
   }, []);
+
+  // Build a deep-link into the Incidents page carrying the current report filters
+  // plus any extra drill-down dimension (xcCaused / severity / month).
+  const drillToIncidents = useCallback((extra: Record<string, string> = {}) => {
+    const params = new URLSearchParams();
+    const cust = customers.find(c => c.row_id === selectedCustomer);
+    const dist = districts.find(d => d.row_id === selectedDistrict);
+    if (cust?.customer) params.set('customerName', cust.customer);
+    if (dist?.customer_district) params.set('districtName', dist.customer_district);
+    if (timeFilter && timeFilter !== 'all_time') params.set('timeFilter', timeFilter);
+    Object.entries(extra).forEach(([k, v]) => { if (v) params.set(k, v); });
+    navigate(`/incidents?${params.toString()}`);
+  }, [customers, districts, selectedCustomer, selectedDistrict, timeFilter, navigate]);
 
   useEffect(() => {
     customerApi.getAll(accessToken || undefined)
@@ -218,6 +238,22 @@ export default function Reports() {
     return Object.entries(counts).map(([purpose, count]) => ({ purpose, count }));
   }, [visitRaw]);
 
+  // ── Monthly incident trend (XC-caused vs other, + critical) ──
+  const incidentTrend = useMemo(() => {
+    const buckets: Record<string, { month: string; xcCaused: number; other: number; critical: number; total: number }> = {};
+    incidentRaw.forEach(i => {
+      if (!i.date_incident) return;
+      const month = String(i.date_incident).slice(0, 7); // YYYY-MM
+      if (!buckets[month]) buckets[month] = { month, xcCaused: 0, other: 0, critical: 0, total: 0 };
+      buckets[month].total += 1;
+      if (i.xc_caused === 'Yes') buckets[month].xcCaused += 1; else buckets[month].other += 1;
+      if (i.incident_severity === 'Critical') buckets[month].critical += 1;
+    });
+    return Object.values(buckets)
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map(b => ({ ...b, label: format(new Date(b.month + '-01T00:00:00'), 'MMM yyyy') }));
+  }, [incidentRaw]);
+
   const handleDownloadReport = async () => {
     const customer = customers.find(c => c.row_id === selectedCustomer);
     const district = districts.find(d => d.row_id === selectedDistrict);
@@ -257,13 +293,13 @@ export default function Reports() {
       <div className="max-w-7xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 tracking-tight">Performance Analytics</h1>
-          <p className="text-gray-500 mt-1">Operational KPIs and production reliability metrics</p>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Operational KPIs and production reliability metrics</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
             <Card className="shadow-sm border-gray-200 dark:border-gray-700">
-              <CardHeader className="bg-gray-50/50 border-b"><CardTitle className="text-sm">Report Filters</CardTitle></CardHeader>
+              <CardHeader className="bg-gray-50/50 dark:bg-gray-800/50 border-b dark:border-gray-700"><CardTitle className="text-sm">Report Filters</CardTitle></CardHeader>
               <CardContent className="pt-6 space-y-5">
                 <div>
                   <Label className="text-xs uppercase text-gray-400 font-bold mb-2 block">Timeframe</Label>
@@ -295,7 +331,7 @@ export default function Reports() {
                   </Select>
                 </div>
                 <div className="pt-4 space-y-3">
-                  <Button className="w-full bg-gray-900 hover:bg-gray-800" onClick={handleGenerateReport} disabled={generating}>
+                  <Button className="w-full bg-gray-900 hover:bg-gray-800 dark:bg-blue-600 dark:hover:bg-blue-500" onClick={handleGenerateReport} disabled={generating}>
                     {generating ? 'Processing Live Data...' : 'Generate Dashboard'}
                   </Button>
                   {generated && (
@@ -318,13 +354,13 @@ export default function Reports() {
               </Card>
             ) : (
               <div>
-                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex items-center gap-6 mb-6">
-                  <div className="h-16 w-16 bg-gray-50 dark:bg-gray-800/50 rounded-lg flex items-center justify-center text-gray-400">
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex items-center gap-6 mb-6">
+                  <div className="h-16 w-16 bg-white dark:bg-gray-900/50 rounded-lg flex items-center justify-center text-gray-400">
                     <Building2 className="w-8 h-8" />
                   </div>
                   <div>
                     <h2 className="text-2xl font-black text-gray-900 dark:text-gray-100">{activeCustomer?.customer || 'XConnect Network'}</h2>
-                    <p className="text-gray-500 font-medium">{activeDistrict?.customer_district || 'Combined Districts'}</p>
+                    <p className="text-gray-500 dark:text-gray-400 font-medium">{activeDistrict?.customer_district || 'Combined Districts'}</p>
                     <div className="mt-2 flex items-center gap-2">
                        <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100">{getReportTimeframeLabel(timeFilter)}</Badge>
                     </div>
@@ -339,18 +375,48 @@ export default function Reports() {
                          <div className="text-xs text-blue-600 font-bold mt-1">{totalHours.toLocaleString()} Total Hours invested</div>
                       </CardContent>
                    </Card>
-                   <Card className="border-l-4 border-l-indigo-500">
+                   <Card
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                         const params = new URLSearchParams();
+                         if (activeCustomer?.customer) params.set('customerName', activeCustomer.customer);
+                         if (activeDistrict?.customer_district) params.set('districtName', activeDistrict.customer_district);
+                         if (timeFilter && timeFilter !== 'all_time') params.set('timeFilter', timeFilter);
+                         navigate(`/sales?${params.toString()}`);
+                      }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLElement).click(); }}
+                      className="border-l-4 border-l-indigo-500 cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                   >
                       <CardContent className="p-5">
-                         <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Production Volume</Label>
+                         <div className="flex items-start justify-between">
+                            <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest cursor-pointer">Production Volume</Label>
+                            <ArrowUpRight className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600" />
+                         </div>
                          <div className="text-3xl font-black text-gray-900 dark:text-gray-100 mt-1">{totalBarrels.toLocaleString()} <span className="text-sm font-normal text-gray-400">Barrels</span></div>
                          <div className="text-xs text-indigo-600 font-bold mt-1">{totalStages.toLocaleString()} Stages Completed</div>
                       </CardContent>
                    </Card>
-                   <Card className="border-l-4 border-l-red-500">
+                   <Card
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => drillToIncidents({ xcCaused: 'Yes' })}
+                      onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLElement).click(); }}
+                      className="border-l-4 border-l-red-500 cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-red-400"
+                   >
                       <CardContent className="p-5">
-                         <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">XC Reliability</Label>
+                         <div className="flex items-start justify-between">
+                            <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest cursor-pointer">XC Reliability</Label>
+                            <ArrowUpRight className="w-3.5 h-3.5 text-gray-300 dark:text-gray-600" />
+                         </div>
                          <div className="text-3xl font-black text-red-600 mt-1">{xcCausedCount} <span className="text-sm font-normal text-gray-400">XC Incidents</span></div>
-                         <div className="text-xs text-gray-500 font-medium mt-1">From {incidentRaw.length} total investigations</div>
+                         <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); drillToIncidents({}); }}
+                            className="text-xs text-gray-500 font-medium mt-1 hover:text-blue-600 hover:underline"
+                         >
+                            From {incidentRaw.length} total investigations
+                         </button>
                       </CardContent>
                    </Card>
                    <Card className="border-l-4 border-l-emerald-500">
@@ -364,16 +430,42 @@ export default function Reports() {
                    </Card>
                 </div>
 
+                {/* ── Monthly incident trend ── */}
+                <Card className="mt-6">
+                   <CardHeader>
+                      <CardTitle className="text-sm font-bold text-gray-600 dark:text-gray-300">Incident Trend (Monthly)</CardTitle>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">XC-caused vs other incidents per month, with critical-severity overlay — lower &amp; flatter is better.</p>
+                   </CardHeader>
+                   <CardContent className="h-72">
+                      {incidentTrend.length === 0 ? (
+                         <div className="h-full flex items-center justify-center text-sm text-gray-400">No incidents in the selected range.</div>
+                      ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                         <ComposedChart data={incidentTrend} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={gridStroke} />
+                            <XAxis dataKey="label" tick={{ fontSize: 10, fill: axisTick }} interval="preserveStartEnd" minTickGap={24} />
+                            <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: axisTick }} />
+                            <Tooltip contentStyle={isDark ? { backgroundColor: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' } : undefined} />
+                            <Legend wrapperStyle={isDark ? { color: '#94a3b8', fontSize: 12 } : { fontSize: 12 }} />
+                            <Bar dataKey="xcCaused" name="XC-Caused" stackId="a" fill="#ef4444" radius={[0, 0, 0, 0]} cursor="pointer" onClick={(d: any) => d?.payload?.month && drillToIncidents({ month: d.payload.month, xcCaused: 'Yes' })} />
+                            <Bar dataKey="other" name="Other" stackId="a" fill="#94a3b8" radius={[3, 3, 0, 0]} cursor="pointer" onClick={(d: any) => d?.payload?.month && drillToIncidents({ month: d.payload.month })} />
+                            <Line type="monotone" dataKey="critical" name="Critical" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                         </ComposedChart>
+                      </ResponsiveContainer>
+                      )}
+                   </CardContent>
+                </Card>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                    <Card>
                       <CardHeader><CardTitle className="text-sm font-bold text-gray-600 dark:text-gray-300">Service Focus</CardTitle></CardHeader>
                       <CardContent className="h-64">
                          <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={visitPurposeBreakdown} layout="vertical">
-                               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={gridStroke} />
                                <XAxis type="number" hide />
-                               <YAxis dataKey="purpose" type="category" width={100} tick={{ fontSize: 10 }} />
-                               <Tooltip />
+                               <YAxis dataKey="purpose" type="category" width={100} tick={{ fontSize: 10, fill: axisTick }} />
+                               <Tooltip contentStyle={isDark ? { backgroundColor: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' } : undefined} />
                                <Bar dataKey="count" fill="#5db848" radius={[0, 4, 4, 0]} />
                             </BarChart>
                          </ResponsiveContainer>
@@ -385,10 +477,10 @@ export default function Reports() {
                          <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                                <Pie data={panelBreakdown} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="count" nameKey="type">
-                                  {panelBreakdown.map((_, index) => <Cell key={index} fill={['#232323', '#5db848', '#94a3b8'][index % 3]} />)}
+                                  {panelBreakdown.map((_, index) => <Cell key={index} fill={[isDark ? '#64748b' : '#232323', '#5db848', '#94a3b8'][index % 3]} />)}
                                </Pie>
-                               <Tooltip />
-                               <Legend />
+                               <Tooltip contentStyle={isDark ? { backgroundColor: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' } : undefined} />
+                               <Legend wrapperStyle={isDark ? { color: '#94a3b8' } : undefined} />
                             </PieChart>
                          </ResponsiveContainer>
                       </CardContent>

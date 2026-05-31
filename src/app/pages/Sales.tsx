@@ -183,6 +183,8 @@ export default function Sales() {
   const totalBarrels = filteredSales.reduce((sum, s) => sum + (s.barrels || 0), 0);
   const totalStages  = filteredSales.reduce((sum, s) => sum + (s.stages || 0), 0);
   const filtersActive = filterCustomer || filterDistrict || filterTime !== 'all_time';
+  const weekCount = new Set(filteredSales.map(s => s.weekEnding).filter(Boolean)).size;
+  const avgBarrelsPerWeek = weekCount > 0 ? Math.round(totalBarrels / weekCount) : 0;
 
   return (
     <div className="p-8">
@@ -254,7 +256,7 @@ export default function Sales() {
 
         {/* ── Report filter banner ── */}
         {fromReport && (
-          <div className="mb-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+          <div className="mb-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-sm text-blue-800 dark:text-blue-200">
             <span>📊</span>
             <span>
               Filtered from Report —{' '}
@@ -262,7 +264,7 @@ export default function Sales() {
               {reportDistrictName && <> · {reportDistrictName}</>}
               {reportTimeFilter   && <> · {TIME_FILTER_LABELS[reportTimeFilter] ?? reportTimeFilter}</>}
             </span>
-            <button onClick={clearFilters} className="ml-auto flex items-center gap-1 text-blue-600 hover:text-blue-800 underline">
+            <button onClick={clearFilters} className="ml-auto flex items-center gap-1 text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-100 underline">
               <X className="w-3 h-3" /> Clear filters
             </button>
           </div>
@@ -271,10 +273,10 @@ export default function Sales() {
         {/* ── Filter bar ── */}
         <Card className="mb-6">
           <CardContent className="pt-4">
-            <div className="flex flex-wrap gap-4 items-end">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-4 sm:items-end">
               {/* Customer filter */}
-              <div className="flex-1 min-w-[180px]">
-                <Label className="text-xs text-gray-500 mb-1 block">Customer</Label>
+              <div className="w-full sm:flex-1 sm:min-w-[180px]">
+                <Label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Customer</Label>
                 <Select
                   value={filterCustomer || '__all__'}
                   onValueChange={(v) => {
@@ -293,8 +295,8 @@ export default function Sales() {
               </div>
 
               {/* District filter */}
-              <div className="flex-1 min-w-[180px]">
-                <Label className="text-xs text-gray-500 mb-1 block">District</Label>
+              <div className="w-full sm:flex-1 sm:min-w-[180px]">
+                <Label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">District</Label>
                 <Select
                   value={filterDistrict || '__all__'}
                   onValueChange={(v) => setFilterDistrict(v === '__all__' ? '' : v)}
@@ -313,8 +315,8 @@ export default function Sales() {
               </div>
 
               {/* Time filter */}
-              <div className="flex-1 min-w-[160px]">
-                <Label className="text-xs text-gray-500 mb-1 block">Timeframe</Label>
+              <div className="w-full sm:flex-1 sm:min-w-[160px]">
+                <Label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Timeframe</Label>
                 <Select value={filterTime} onValueChange={setFilterTime}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -327,7 +329,7 @@ export default function Sales() {
 
               {/* Clear */}
               {filtersActive && (
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="text-gray-500">
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="text-gray-500 w-full sm:w-auto">
                   <X className="w-4 h-4 mr-1" /> Clear
                 </Button>
               )}
@@ -336,27 +338,45 @@ export default function Sales() {
         </Card>
 
         {/* ── KPI cards ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          <Card>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <Card className="border-l-4 border-l-indigo-500">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-300">Total Barrels</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{totalBarrels.toLocaleString()}</div>
+              <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{totalBarrels.toLocaleString()}</div>
               {filtersActive && (
-                <p className="text-xs text-gray-400 mt-1">filtered from {sales.reduce((s, r) => s + (r.barrels || 0), 0).toLocaleString()} total</p>
+                <p className="text-xs text-gray-400 mt-1">of {sales.reduce((s, r) => s + (r.barrels || 0), 0).toLocaleString()} total</p>
               )}
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-l-4 border-l-blue-500">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-300">Total Stages</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{totalStages.toLocaleString()}</div>
+              <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{totalStages.toLocaleString()}</div>
               {filtersActive && (
-                <p className="text-xs text-gray-400 mt-1">filtered from {sales.reduce((s, r) => s + (r.stages || 0), 0).toLocaleString()} total</p>
+                <p className="text-xs text-gray-400 mt-1">of {sales.reduce((s, r) => s + (r.stages || 0), 0).toLocaleString()} total</p>
               )}
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-300">Weeks Reported</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{weekCount.toLocaleString()}</div>
+              <p className="text-xs text-gray-400 mt-1">{filteredSales.length.toLocaleString()} records</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-amber-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-300">Avg Barrels / Week</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{avgBarrelsPerWeek.toLocaleString()}</div>
+              <p className="text-xs text-gray-400 mt-1">across {weekCount.toLocaleString()} weeks</p>
             </CardContent>
           </Card>
         </div>
@@ -383,6 +403,7 @@ export default function Sales() {
                 )}
               </div>
             ) : (
+              <div className="overflow-x-auto -mx-2 sm:mx-0">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -407,6 +428,7 @@ export default function Sales() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>

@@ -1,21 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../lib/auth-context';
-import { customerApi, districtApi, authApi } from '../lib/api';
-import { Link } from 'react-router';
+import { customerApi, districtApi, authApi, salesApi, incidentApi } from '../lib/api';
+import { Link, useNavigate } from 'react-router';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Plus, Building2, MapPin, UserPlus, Phone, Mail } from 'lucide-react';
+import { Plus, Building2, MapPin, UserPlus, Phone, Mail, Droplet, Layers, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 // Customer Management Page - Card Layout (Updated)
 export default function Customers() {
   const { accessToken, user } = useAuth();
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState<any[]>([]);
   const [districts, setDistricts] = useState<any[]>([]);
+  const [sales, setSales] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [districtDialogOpen, setDistrictDialogOpen] = useState(false);
@@ -36,9 +39,11 @@ export default function Customers() {
     }
     
     try {
-      const [customersData, allDistrictsData] = await Promise.all([
+      const [customersData, allDistrictsData, salesData, incidentsData] = await Promise.all([
         customerApi.getAll(accessToken),
-        districtApi.getAll(accessToken)
+        districtApi.getAll(accessToken),
+        salesApi.getAll(accessToken).catch(() => []),
+        incidentApi.getAll(accessToken).catch(() => [])
       ]);
       
       console.log('Loaded customers:', customersData);
@@ -52,6 +57,8 @@ export default function Customers() {
       
       setCustomers(customersData || []);
       setDistricts(allDistrictsData || []);
+      setSales(Array.isArray(salesData) ? salesData : (salesData?.sales || []));
+      setIncidents(Array.isArray(incidentsData) ? incidentsData : (incidentsData?.incidents || []));
     } catch (error: any) {
       console.error('Error loading data:', error);
       toast.error('Failed to load data');
@@ -122,6 +129,26 @@ export default function Customers() {
     }
   };
 
+  // Per-customer rollups: barrels / stages / incidents / xc-caused, keyed by customer NAME
+  // (sales + incidents store the customer NAME in customerName, not the row_id).
+  const rollupByName = useMemo(() => {
+    const map: Record<string, { barrels: number; stages: number; incidents: number; xcCaused: number }> = {};
+    const ensure = (name: string) => (map[name] = map[name] || { barrels: 0, stages: 0, incidents: 0, xcCaused: 0 });
+    sales.forEach(s => {
+      if (!s.customerName) return;
+      const r = ensure(s.customerName);
+      r.barrels += Number(s.barrels) || 0;
+      r.stages += Number(s.stages) || 0;
+    });
+    incidents.forEach(i => {
+      if (!i.customerName) return;
+      const r = ensure(i.customerName);
+      r.incidents += 1;
+      if (i.xc_caused === 'Yes') r.xcCaused += 1;
+    });
+    return map;
+  }, [sales, incidents]);
+
   if (loading) {
     return (
       <div className="p-8">
@@ -133,7 +160,8 @@ export default function Customers() {
   // Group districts by customer
   const customersWithDistricts = customers.map(customer => ({
     ...customer,
-    districts: districts.filter(d => d.customer === customer.row_id)
+    districts: districts.filter(d => d.customer === customer.row_id),
+    rollup: rollupByName[customer.customer] || { barrels: 0, stages: 0, incidents: 0, xcCaused: 0 }
   }));
 
   console.log('Rendering Customers page with card layout - customers:', customersWithDistricts.length);
@@ -290,7 +318,7 @@ export default function Customers() {
             {customersWithDistricts.map((customer) => (
               <Card key={customer.row_id} className="overflow-hidden">
                 {/* Customer Header */}
-                <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
+                <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-800 border-b dark:border-gray-700">
                   <Link to={`/customers/${customer.row_id}`} className="flex items-center gap-4 hover:opacity-80 transition-opacity">
                     {customer.customer_logo ? (
                       <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm">
@@ -312,6 +340,37 @@ export default function Customers() {
                       </p>
                     </div>
                   </Link>
+
+                  {/* Clickable rollup KPI badges */}
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/sales?customerName=${encodeURIComponent(customer.customer)}`)}
+                      className="flex items-center gap-1.5 rounded-full bg-white dark:bg-gray-900/60 border border-indigo-100 dark:border-gray-600 px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-300 shadow-sm hover:shadow hover:border-indigo-300 transition-all"
+                      title="View sales volume for this customer"
+                    >
+                      <Droplet className="w-3.5 h-3.5" /> {customer.rollup.barrels.toLocaleString()} bbl
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/sales?customerName=${encodeURIComponent(customer.customer)}`)}
+                      className="flex items-center gap-1.5 rounded-full bg-white dark:bg-gray-900/60 border border-blue-100 dark:border-gray-600 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300 shadow-sm hover:shadow hover:border-blue-300 transition-all"
+                      title="View stages for this customer"
+                    >
+                      <Layers className="w-3.5 h-3.5" /> {customer.rollup.stages.toLocaleString()} stages
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/incidents?customerName=${encodeURIComponent(customer.customer)}`)}
+                      className="flex items-center gap-1.5 rounded-full bg-white dark:bg-gray-900/60 border border-red-100 dark:border-gray-600 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-300 shadow-sm hover:shadow hover:border-red-300 transition-all"
+                      title="View incidents for this customer"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5" /> {customer.rollup.incidents} incidents
+                      {customer.rollup.xcCaused > 0 && (
+                        <span className="ml-1 rounded-full bg-red-600 text-white px-1.5 py-0.5 text-[10px] leading-none">{customer.rollup.xcCaused} XC</span>
+                      )}
+                    </button>
+                  </div>
                 </CardHeader>
 
                 {/* Districts Grid */}

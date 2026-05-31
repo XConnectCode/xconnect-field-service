@@ -736,9 +736,10 @@ apiRoutes.get("/sales", async (c) => {
     // Combine data by date and customer/district
     const combinedMap = new Map();
 
-    // Process barrels data
+    // Process barrels data — SUM (not overwrite) when multiple rows share a date+customer+district key
     (barrelsData || []).forEach(barrel => {
       const key = `${barrel.date}-${barrel.customer}-${barrel.customer_district}`;
+      const qty = Number(barrel.quantity) || 0;
       if (!combinedMap.has(key)) {
         combinedMap.set(key, {
           id: barrel.row_id,
@@ -748,20 +749,21 @@ apiRoutes.get("/sales", async (c) => {
           customerName: barrel.customer,
           districtId: barrel.customer_district,
           districtName: barrel.customer_district,
-          barrels: parseInt(barrel.quantity) || 0,
+          barrels: qty,
           stages: 0,
           notes: null,
           enteredBy: null
         });
       } else {
         const existing = combinedMap.get(key);
-        existing.barrels = parseInt(barrel.quantity) || 0;
+        existing.barrels += qty;
       }
     });
 
-    // Process stages data
+    // Process stages data — SUM (not overwrite) when multiple rows share a date+customer+district key
     (stagesData || []).forEach(stage => {
       const key = `${stage.date}-${stage.customer}-${stage.customer_district}`;
+      const qty = Number(stage.quantity) || 0;
       if (!combinedMap.has(key)) {
         combinedMap.set(key, {
           id: stage.row_id,
@@ -772,13 +774,13 @@ apiRoutes.get("/sales", async (c) => {
           districtId: stage.customer_district,
           districtName: stage.customer_district,
           barrels: 0,
-          stages: parseInt(stage.quantity) || 0,
+          stages: qty,
           notes: null,
           enteredBy: null
         });
       } else {
         const existing = combinedMap.get(key);
-        existing.stages = parseInt(stage.quantity) || 0;
+        existing.stages += qty;
       }
     });
 
