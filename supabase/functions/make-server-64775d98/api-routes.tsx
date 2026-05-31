@@ -713,8 +713,9 @@ apiRoutes.get("/sales", async (c) => {
   try {
     // Fetch barrels data
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
-      .select('*');
+      .from('sales_volume')
+      .select('*')
+      .eq('metric_type', 'barrels');
 
     if (barrelsError) {
       console.error('Error fetching barrels:', barrelsError);
@@ -723,8 +724,9 @@ apiRoutes.get("/sales", async (c) => {
 
     // Fetch stages data
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
-      .select('*');
+      .from('sales_volume')
+      .select('*')
+      .eq('metric_type', 'stages');
 
     if (stagesError) {
       console.error('Error fetching stages:', stagesError);
@@ -818,16 +820,18 @@ apiRoutes.post("/sales", async (c) => {
     const customerName = customer?.customer;
     const districtName = district?.customer_district;
     
-    // Insert into barrels_sold table if barrels > 0
+    // Insert barrels row into sales_volume if barrels > 0
     if (body.barrels && body.barrels > 0) {
       const { error: barrelsError } = await supabase
-        .from('barrels_sold')
+        .from('sales_volume')
         .insert({
+          metric_type: 'barrels',
+          date_text: body.weekEnding,
           date: body.weekEnding,
           quantity: body.barrels.toString(),
           customer_district: districtName,
           customer: customerName,
-          product_line: 'Perforating Guns'
+          category: 'Perforating Guns'
         });
 
       if (barrelsError) {
@@ -836,16 +840,18 @@ apiRoutes.post("/sales", async (c) => {
       }
     }
 
-    // Insert into stages table if stages > 0
+    // Insert stages row into sales_volume if stages > 0
     if (body.stages && body.stages > 0) {
       const { error: stagesError } = await supabase
-        .from('stages')
+        .from('sales_volume')
         .insert({
+          metric_type: 'stages',
+          date_text: body.weekEnding,
           date: body.weekEnding,
           quantity: body.stages.toString(),
           customer_district: districtName,
           customer: customerName,
-          item: 'Stage'
+          category: 'Stage'
         });
 
       if (stagesError) {
@@ -1294,10 +1300,11 @@ apiRoutes.get("/kpi/:customerId/:districtId", async (c) => {
     const visitCount = visits?.length || 0;
     const totalVisitHours = visits?.reduce((sum, v) => sum + (parseFloat(v.visit_duration) || 0), 0) || 0;
     
-    // Get sales data (barrels from barrels_sold table and stages from stages table) - use NAMES, not row_ids
+    // Get sales data from sales_volume - use NAMES, not row_ids
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'barrels')
       .eq('customer', customerName)
       .eq('customer_district', districtName);
     
@@ -1306,8 +1313,9 @@ apiRoutes.get("/kpi/:customerId/:districtId", async (c) => {
     }
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'stages')
       .eq('customer', customerName)
       .eq('customer_district', districtName);
     
@@ -1393,10 +1401,11 @@ apiRoutes.get("/kpi/:customerId", async (c) => {
     const visitCount = visits?.length || 0;
     const totalVisitHours = visits?.reduce((sum, v) => sum + (parseFloat(v.visit_duration) || 0), 0) || 0;
     
-    // Get sales data (barrels from barrels_sold table and stages from stages table) - use customer NAME, not row_id
+    // Get sales data from sales_volume - use customer NAME, not row_id
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'barrels')
       .eq('customer', customerName);
     
     if (barrelsError) {
@@ -1404,8 +1413,9 @@ apiRoutes.get("/kpi/:customerId", async (c) => {
     }
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'stages')
       .eq('customer', customerName);
     
     if (stagesError) {
@@ -1476,10 +1486,11 @@ apiRoutes.get("/kpi/company/summary", async (c) => {
     const visitCount = visits?.length || 0;
     const totalVisitHours = visits?.reduce((sum, v) => sum + (parseFloat(v.visit_duration) || 0), 0) || 0;
     
-    // Get all sales data (barrels from barrels_sold table and stages from stages table)
+    // Get all sales data from sales_volume
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
-      .select('quantity');
+      .from('sales_volume')
+      .select('quantity')
+      .eq('metric_type', 'barrels');
     
     if (barrelsError) {
       console.error('Error fetching barrels:', barrelsError);
@@ -1487,8 +1498,9 @@ apiRoutes.get("/kpi/company/summary", async (c) => {
     console.log(`Barrels rows: ${barrelsData?.length || 0}`);
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
-      .select('quantity');
+      .from('sales_volume')
+      .select('quantity')
+      .eq('metric_type', 'stages');
     
     if (stagesError) {
       console.error('Error fetching stages:', stagesError);
@@ -1745,8 +1757,9 @@ apiRoutes.get("/customers/:id/details", async (c) => {
 
     // Get sales data - use customer NAME, not row_id
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity, date, customer_district, customer')
+      .eq('metric_type', 'barrels')
       .eq('customer', customerName);
     
     if (barrelsError) {
@@ -1756,8 +1769,9 @@ apiRoutes.get("/customers/:id/details", async (c) => {
     console.log(`Customer ${customerName} (ID: ${id}) - Barrels data count: ${barrelsData?.length || 0}`);
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity, date, customer_district, customer')
+      .eq('metric_type', 'stages')
       .eq('customer', customerName);
     
     if (stagesError) {
@@ -1863,13 +1877,15 @@ apiRoutes.get("/districts/:id/details", async (c) => {
 
     // Get sales data - use district NAME, not row_id
     const { data: barrelsData } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity, date')
+      .eq('metric_type', 'barrels')
       .eq('customer_district', districtName);
     
     const { data: stagesData } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity, date')
+      .eq('metric_type', 'stages')
       .eq('customer_district', districtName);
     
     const totalBarrels = barrelsData?.reduce((sum, b) => sum + (parseInt(b.quantity) || 0), 0) || 0;
@@ -1933,12 +1949,14 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
   try {
     // Get exact row counts using head: true (doesn't fetch data, just counts)
     const { count: stagesCount } = await supabase
-      .from('stages')
-      .select('*', { count: 'exact', head: true });
+      .from('sales_volume')
+      .select('*', { count: 'exact', head: true })
+      .eq('metric_type', 'stages');
     
     const { count: barrelsCount } = await supabase
-      .from('barrels_sold')
-      .select('*', { count: 'exact', head: true });
+      .from('sales_volume')
+      .select('*', { count: 'exact', head: true })
+      .eq('metric_type', 'barrels');
     
     // Fetch all stages data with pagination to sum quantities
     let allStagesData: any[] = [];
@@ -1946,8 +1964,9 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
     const pageSize = 1000;
     while (true) {
       const { data } = await supabase
-        .from('stages')
+        .from('sales_volume')
         .select('quantity')
+        .eq('metric_type', 'stages')
         .range(stagesPage * pageSize, (stagesPage + 1) * pageSize - 1);
       if (!data || data.length === 0) break;
       allStagesData = [...allStagesData, ...data];
@@ -1961,8 +1980,9 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
     let barrelsPage = 0;
     while (true) {
       const { data } = await supabase
-        .from('barrels_sold')
+        .from('sales_volume')
         .select('quantity')
+        .eq('metric_type', 'barrels')
         .range(barrelsPage * pageSize, (barrelsPage + 1) * pageSize - 1);
       if (!data || data.length === 0) break;
       allBarrelsData = [...allBarrelsData, ...data];
