@@ -143,6 +143,117 @@ export function validateForStatus(
   return missing;
 }
 
+// ── Review workflow sequence (the intuitive, ordered flow) ───────────────────
+//
+// The review of an incident is a strict, ordered sequence. Each step unlocks
+// only once the previous step is complete:
+//
+//   1. Complete required fields  (failed component, root cause, etc.)
+//   2. Director review           (reviewed_by + reviewed_at)
+//   3. Send report to customer   (report_sent timestamp)  ← always the last task
+//   4. Close the incident        (incident_status = Closed)
+//
+// `getReviewSteps` returns this sequence as a checklist the UI can render so
+// the user always sees what's done, what's next, and why a step is blocked.
+
+export type ReviewStepId = 'fields' | 'review' | 'sent' | 'closed';
+
+export interface ReviewStep {
+  id: ReviewStepId;
+  label: string;
+  /** This step is finished. */
+  done: boolean;
+  /** All prerequisite steps are done, so this step may be acted on now. */
+  actionable: boolean;
+  /** Current user's role is allowed to perform this step's action. */
+  allowedForRole: boolean;
+  /** Human-readable reason this step is blocked (empty when actionable). */
+  blockedReason: string;
+  /** Missing field labels — only populated for the 'fields' step. */
+  missing: string[];
+}
+
+/** True once the report has been sent to the customer. */
+export function isReportSent(incident: Record<string, any>): boolean {
+  const v = incident?.report_sent;
+  return v !== null && v !== undefined && String(v).trim() !== '';
+}
+
+/** True once the incident is Closed. */
+export function isClosed(incident: Record<string, any>): boolean {
+  return normalizeStatus(incident?.incident_status) === CLOSED_STATUS;
+}
+
+/**
+ * Build the ordered review checklist for an incident. Each step is `done`,
+ * `actionable` (prerequisites met), and carries a `blockedReason` for the UI.
+ * Role gating: only admins may review / send / close; SQMs may complete fields.
+ */
+export function getReviewSteps(
+  incident: Record<string, any>,
+  role: UserRole,
+): ReviewStep[] {
+  const isAdmin = role === 'admin';
+
+  // Step 1 — required fields (same set that gates Final Review).
+  const missing = validateForStatus(incident, FINAL_REVIEW_STATUS);
+  const fieldsDone = missing.length === 0;
+
+  // Step 2 — director review.
+  const reviewDone = isReviewed(incident);
+
+  // Step 3 — report sent to customer.
+  const sentDone = isReportSent(incident);
+
+  // Step 4 — closed.
+  const closedDone = isClosed(incident);
+
+  return [
+    {
+      id: 'fields',
+      label: 'Complete required fields',
+      done: fieldsDone,
+      actionable: !fieldsDone,
+      allowedForRole: isAdmin || role === 'sqm',
+      blockedReason: '',
+      missing,
+    },
+    {
+      id: 'review',
+      label: 'Director review',
+      done: reviewDone,
+      actionable: fieldsDone && !reviewDone,
+      allowedForRole: isAdmin,
+      blockedReason: !fieldsDone
+        ? 'Complete the required fields first.'
+        : (!isAdmin ? 'Only the director/admin can mark an incident reviewed.' : ''),
+      missing: [],
+    },
+    {
+      id: 'sent',
+      label: 'Send report to customer',
+      done: sentDone,
+      actionable: fieldsDone && reviewDone && !sentDone,
+      allowedForRole: isAdmin,
+      blockedReason: !reviewDone
+        ? 'Director must review the incident first.'
+        : (!isAdmin ? 'Only the director/admin can send the report.' : ''),
+      missing: [],
+    },
+    {
+      id: 'closed',
+      label: 'Close incident',
+      done: closedDone,
+      actionable: fieldsDone && reviewDone && sentDone && !closedDone,
+      allowedForRole: isAdmin,
+      blockedReason: !sentDone
+        ? 'Send the report to the customer first.'
+        : (!isAdmin ? 'Only the director/admin can close an incident.' : ''),
+      missing: [],
+    },
+  ];
+}
+
 // ── Action status (corrective/preventive action) ─────────────────────────────
 //
 // The `incidents.action_status` column has a Postgres CHECK constraint:
