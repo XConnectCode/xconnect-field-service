@@ -226,6 +226,38 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
   const failureType = resolveFailureTypeLabel(r.failure_type, listMap, '') || null;
   const vendorName  = vendorMap[r.vendor] || r.vendor || null;
 
+  // Evidence photos live in the images_legacy table (linked by event_id),
+  // not on the incident row itself (incidents.image1/image2 are unused).
+  // Fetch them on open, falling back to any inline image1/image2 if present.
+  const [evidenceImages, setEvidenceImages] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const inline = [r.image1, r.image2].filter(Boolean) as string[];
+    if (!r.event_id) {
+      setEvidenceImages(inline);
+      return;
+    }
+    (async () => {
+      const { data, error } = await supabase
+        .from("images_legacy")
+        .select("pictures,description")
+        .eq("event_id", String(r.event_id))
+        .order("description", { ascending: true });
+      if (cancelled) return;
+      const fromLegacy = error
+        ? []
+        : ((data as any[]) || [])
+            .map((row) => row?.pictures)
+            .filter((u): u is string => !!u && String(u).trim() !== "");
+      // De-dupe while preserving order; legacy first, then any inline extras.
+      const merged = Array.from(new Set([...fromLegacy, ...inline]));
+      setEvidenceImages(merged);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [r.event_id, r.image1, r.image2]);
+
   return (
     <div style={modal.overlay} onClick={onClose}>
       <div style={modal.box} onClick={e => e.stopPropagation()}>
@@ -299,15 +331,17 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
             </div>
           ))}
 
-          {/* Images */}
-          {(r.image1 || r.image2) && (
+          {/* Images (from images_legacy by event_id; see effect above) */}
+          {evidenceImages.length > 0 && (
             <div style={{ marginBottom: 14 }}>
-              <div style={modal.blockLabel}>Evidence Images</div>
-              <div style={{ display: "flex", gap: 10 }}>
-                {[r.image1, r.image2].filter(Boolean).map((url: string, i: number) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{ display: "block", flex: 1, borderRadius: 8, overflow: "hidden", border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}` }}>
-                    <img src={url} alt={`Evidence ${i+1}`} style={{ width: "100%", height: 160, objectFit: "cover", display: "block" }}
-                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              <div style={modal.blockLabel}>
+                Evidence Images{evidenceImages.length > 1 ? ` (${evidenceImages.length})` : ""}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
+                {evidenceImages.map((url: string, i: number) => (
+                  <a key={url + i} href={url} target="_blank" rel="noopener noreferrer" title="Open full size in new tab" style={{ display: "block", borderRadius: 8, overflow: "hidden", border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}` }}>
+                    <img src={url} alt={`Evidence ${i+1}`} loading="lazy" style={{ width: "100%", height: 160, objectFit: "cover", display: "block", background: isDark ? "#0f172a" : "#f1f5f9" }}
+                      onError={e => { const el = e.target as HTMLImageElement; el.style.display = "none"; }} />
                   </a>
                 ))}
               </div>

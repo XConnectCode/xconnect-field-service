@@ -336,11 +336,11 @@ export default function PanelsNew() {
         {/* KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           {[
-            { label: 'Total Panels', value: statusCounts.total,      color: 'text-gray-900',   filter: '' },
-            { label: 'At Facility',  value: statusCounts.atFacility, color: 'text-green-600',  filter: 'At Facility' },
-            { label: 'Leased',       value: statusCounts.leased,     color: 'text-blue-600',   filter: 'Leased' },
-            { label: 'In Repair',    value: statusCounts.inRepair,   color: 'text-amber-500',  filter: 'In Repair' },
-            { label: 'Loaned',       value: statusCounts.loaned,     color: 'text-purple-600', filter: 'Loaned' },
+            { label: 'Total Panels', value: statusCounts.total,      color: 'text-gray-900 dark:text-gray-100', filter: '' },
+            { label: 'At Facility',  value: statusCounts.atFacility, color: 'text-green-600 dark:text-green-400',  filter: 'At Facility' },
+            { label: 'Leased',       value: statusCounts.leased,     color: 'text-blue-600 dark:text-blue-400',   filter: 'Leased' },
+            { label: 'In Repair',    value: statusCounts.inRepair,   color: 'text-amber-500 dark:text-amber-400',  filter: 'In Repair' },
+            { label: 'Loaned',       value: statusCounts.loaned,     color: 'text-purple-600 dark:text-purple-400', filter: 'Loaned' },
           ].map(({ label, value, color, filter }) => (
             <Card
               key={label}

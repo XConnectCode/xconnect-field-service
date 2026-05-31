@@ -164,7 +164,7 @@ export default function FirmwareStatusPanel({
                           <button
                             type="button"
                             onClick={() => onFilterChange(active ? '' : f)}
-                            className="text-xs text-amber-700 hover:underline flex items-center gap-1"
+                            className="text-xs text-amber-700 dark:text-amber-400 hover:underline flex items-center gap-1"
                             title={active ? 'Clear filter' : 'Show only panels behind on this firmware'}
                           >
                             {c.behind > 0 && <span>{c.behind} behind</span>}
