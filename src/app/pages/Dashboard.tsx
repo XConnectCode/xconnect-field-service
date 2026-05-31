@@ -20,6 +20,7 @@ import {
   resolveFailedComponentLabel,
   resolveFailureTypeLabel,
 } from "../lib/failedComponent";
+import { parseSlackUrl } from "../lib/slackUrl";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function fetchAllPages(query: any) {
@@ -304,16 +305,23 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
               image1/image2 are unused). Shared component renders nothing if none. */}
           <IncidentEvidenceImages eventId={r.event_id} inline={[r.image1, r.image2]} title="Evidence Images" />
 
-          {/* Slack */}
-          {r.slack_url && (
-            <div>
-              <div style={modal.blockLabel}>Slack Notification</div>
-              <a href={r.slack_url} target="_blank" rel="noopener noreferrer"
-                style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8, background: "#4A154B", color: "#fff", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
-                <span>💬</span> View in Slack ↗
-              </a>
-            </div>
-          )}
+          {/* Slack — only render when the row holds a real https URL. AppSheet
+              stores this column as a JSON blob ({"Url":"...","LinkText":"..."}),
+              so parse it first; using the raw blob as an href made the browser
+              treat it as a relative path and prepend the app domain. */}
+          {(() => {
+            const slackUrl = parseSlackUrl(r.slack_url);
+            if (!slackUrl) return null;
+            return (
+              <div>
+                <div style={modal.blockLabel}>Slack Notification</div>
+                <a href={slackUrl} target="_blank" rel="noopener noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 8, background: "#4A154B", color: "#fff", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
+                  <span>💬</span> View in Slack ↗
+                </a>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

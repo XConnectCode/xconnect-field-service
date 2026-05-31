@@ -41,6 +41,7 @@ import {
   resolveFailureTypeLabel,
 } from '../lib/failedComponent';
 import { sendIncidentReportToCustomer } from '../lib/sendIncidentReport';
+import { parseSlackUrl } from '../lib/slackUrl';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function safeFmtDate(val: any, fmt: string): string {
@@ -58,28 +59,7 @@ function fmtLocalDate(val?: string | null): string {
   catch { return val; }
 }
 
-// AppSheet stores link columns as a JSON object string like
-//   {"Url":"https://…","LinkText":"https://…"}
-// Older rows may hold a bare URL string, and many rows hold an empty
-//   {"Url":"","LinkText":""}. Extract the real https URL or return '' so the
-// UI can decide whether to show a link at all. (Previously the raw JSON blob
-// was used as an href, so the browser treated it as a relative path and
-// prefixed it with the app domain — the "pretense" the link picked up.)
-function parseSlackUrl(raw?: string | null): string {
-  if (!raw) return '';
-  const val = String(raw).trim();
-  if (!val) return '';
-  // JSON-wrapped (AppSheet) form.
-  if (val.startsWith('{')) {
-    try {
-      const obj = JSON.parse(val);
-      const url = (obj?.Url ?? obj?.url ?? obj?.LinkText ?? '').toString().trim();
-      return /^https?:\/\//i.test(url) ? url : '';
-    } catch { return ''; }
-  }
-  // Bare URL form.
-  return /^https?:\/\//i.test(val) ? val : '';
-}
+// parseSlackUrl now lives in ../lib/slackUrl (shared with Dashboard.tsx).
 
 // Slack's bracket glyph rendered inline so we don't need an external asset.
 // lucide-react ships no Slack icon, so this matches the brand mark.
