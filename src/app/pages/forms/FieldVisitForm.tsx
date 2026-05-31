@@ -75,17 +75,18 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   const [latLngValue,   setLatLngValue]   = useState('');
   const [xcRep,         setXcRep]         = useState('');
 
-  // Fetch next available Visit ID
+  // Fetch next available Visit ID — fetch ALL field_visit_ids and find the true
+  // numeric max. We can't .order() because Postgres sorts field_visit_id as
+  // text (e.g. "999" > "1500"), and we can't .limit() because that would miss
+  // higher IDs. Mirrors the Event ID logic in IncidentForm.
   useEffect(() => {
     if (!open || editing) return;
     supabase
       .from('fieldvisits')
       .select('field_visit_id')
-      .order('field_visit_id', { ascending: false })
-      .limit(20)
       .then(({ data }) => {
-        const maxId = (data || []).reduce((max, row) => {
-          const n = parseInt(row.field_visit_id);
+        const maxId = (data || []).reduce((max, row: any) => {
+          const n = parseInt(row.field_visit_id, 10);
           return !isNaN(n) && n > max ? n : max;
         }, 0);
         setNextVisitId(String(maxId + 1));
