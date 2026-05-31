@@ -36,7 +36,7 @@ import { requireUser } from './auth-helpers.tsx';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-type AIAction = 'polish' | 'expand' | 'customer_rewrite' | 'review';
+type AIAction = 'polish' | 'expand' | 'customer_rewrite' | 'review' | 'summarize';
 
 interface ReviewFinding {
   severity: 'high' | 'medium' | 'low';
@@ -164,6 +164,54 @@ Severity guidance:
 
 If the report is clean, return { "findings": [] }. Output JSON only.
 `.trim();
+
+// ── Summarize prompt (mirror aiAssistantCore.ts) ────────────────────────────
+const SUMMARIZE_SYSTEM_PROMPT = [
+  `You are a quality manager writing a one-glance summary of an oil & gas`,
+  `field-service incident for a dashboard card. Write 1 to 2 short sentences`,
+  `(max ~40 words total) capturing WHAT happened, the component/system`,
+  `involved, and the current disposition (fault attribution + status) when`,
+  `those are present. Lead with the failure/event itself, not the customer`,
+  `name. Do NOT restate the incident ID, date, or customer name — those are`,
+  `already shown on the card. Never invent facts not present in the input.`,
+  `If the input is too sparse, summarize only what is given.`,
+  ``,
+  STYLE_GUIDE,
+].join('\n');
+
+const SUMMARIZE_CONTEXT_FIELDS = [
+  'incident_description',
+  'investigation',
+  'root_cause',
+  'notes',
+] as const;
+
+function buildSummarizeUserMessage(incident: Record<string, unknown>): string {
+  const lines: string[] = ['Summarize the following incident.'];
+  const ctx: string[] = [];
+  const pushCtx = (label: string, key: string) => {
+    const v = incident[key];
+    if (v === undefined || v === null || v === '') return;
+    ctx.push(`${label}: ${String(v)}`);
+  };
+  pushCtx('Category', 'event_category');
+  pushCtx('Severity', 'incident_severity');
+  pushCtx('Failed Component', 'failed_component_label');
+  pushCtx('Failure Type', 'failure_type_label');
+  pushCtx('Well', 'well_name');
+  pushCtx('Stage', 'stage#');
+  pushCtx('XC Caused', 'xc_caused');
+  pushCtx('Vendor Caused', 'vendor_caused');
+  pushCtx('Status', 'incident_status');
+  if (ctx.length) lines.push('', `Context: ${ctx.join(' · ')}`);
+  const push = (label: string, key: string) => {
+    const v = incident[key];
+    if (v === undefined || v === null || v === '') return;
+    lines.push('', `--- ${label} (${key}) ---`, String(v));
+  };
+  for (const f of SUMMARIZE_CONTEXT_FIELDS) push(FIELD_LABELS[f] ?? f, f);
+  return lines.join('\n');
+}
 
 function buildReviewUserMessage(incident: Record<string, unknown>): string {
   const lines: string[] = ['Review the following incident report.'];
@@ -355,7 +403,7 @@ aiAssistRoutes.post('/ai-assist', requireUser, async (c) => {
   }
 
   const action = body?.action as AIAction | undefined;
-  if (action !== 'polish' && action !== 'expand' && action !== 'customer_rewrite' && action !== 'review') {
+  if (action !== 'polish' && action !== 'expand' && action !== 'customer_rewrite' && action !== 'review' && action !== 'summarize') {
     return c.json({ error: `Unknown action "${String(action)}"` }, 400);
   }
 
@@ -368,6 +416,20 @@ aiAssistRoutes.post('/ai-assist', requireUser, async (c) => {
   }
 
   try {
+    if (action === 'summarize') {
+      const incident = body?.incident;
+      if (!incident || typeof incident !== 'object') {
+        return c.json({ error: 'summarize requires an "incident" object' }, 400);
+      }
+      const userPrompt = truncate(buildSummarizeUserMessage(incident), MAX_INCIDENT_CHARS);
+      const raw = await provider.chat({
+        systemPrompt: SUMMARIZE_SYSTEM_PROMPT,
+        userPrompt,
+        jsonMode: false,
+      });
+      return c.json({ result: String(raw).trim(), provider: provider.name, model: provider.model });
+    }
+
     if (action === 'review') {
       const incident = body?.incident;
       if (!incident || typeof incident !== 'object') {

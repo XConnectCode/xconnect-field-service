@@ -796,6 +796,22 @@ export default function Dashboard() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inc.customerName}</div>
                       <div style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inc.districtName}</div>
+                      {(() => {
+                        const rawText = inc.notes || inc.incident_description || inc.investigation || null;
+                        const sum = inc.ai_summary || rawText;
+                        if (!sum) return null;
+                        return (
+                          <div
+                            title={inc.ai_summary && rawText ? rawText : undefined}
+                            style={{ fontSize: 12, color: "#64748b", lineHeight: 1.4, marginTop: 3,
+                              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+                              cursor: inc.ai_summary && rawText ? "help" : "default" }}
+                          >
+                            {inc.ai_summary && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#6366f1", marginRight: 5, letterSpacing: "0.03em", textTransform: "uppercase" }}>✨</span>}
+                            {sum}
+                          </div>
+                        );
+                      })()}
                     </div>
                     <span style={{ minWidth: 78, textAlign: "center" }}>
                       {inc.incident_severity ? <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: sevCfg.bg, color: sevCfg.color }}>{inc.incident_severity}</span> : <span style={{ color: "#cbd5e1" }}>—</span>}
@@ -896,7 +912,10 @@ export default function Dashboard() {
             const sevCfg = SEVERITY_COLORS[inc.incident_severity] ?? { bg: "#f1f5f9", color: "#475569" };
             const normStatus = normalizeStatus(inc.incident_status);
             const staCfg = STATUS_COLORS[normStatus]    ?? { bg: "#f1f5f9", color: "#475569" };
-            const preview = inc.notes || inc.incident_description || inc.investigation || null;
+            // Prefer the cached AI summary; fall back to raw text if not generated yet.
+            const rawText = inc.notes || inc.incident_description || inc.investigation || null;
+            const preview = inc.ai_summary || rawText || null;
+            const isAiSummary = Boolean(inc.ai_summary);
             const isClosed = normStatus === CLOSED_STATUS;
             return (
               <div key={inc.row_id} style={{
@@ -920,10 +939,17 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                {/* Notes preview */}
+                {/* Summary preview (AI summary when available, else raw text). */}
                 {preview && (
-                  <div style={{ padding: "10px 16px", fontSize: 12, color: "#64748b", lineHeight: 1.5, flex: 1,
-                    display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                  <div
+                    title={isAiSummary && rawText ? rawText : undefined}
+                    style={{ padding: "10px 16px", fontSize: 12.5, color: "#475569", lineHeight: 1.5, flex: 1,
+                      display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+                      cursor: isAiSummary && rawText ? "help" : "default" }}
+                  >
+                    {isAiSummary && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#6366f1", marginRight: 6, letterSpacing: "0.03em", textTransform: "uppercase" }}>✨ Summary</span>
+                    )}
                     {preview}
                   </div>
                 )}

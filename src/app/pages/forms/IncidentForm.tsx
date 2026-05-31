@@ -16,6 +16,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+import { generateAndStoreIncidentSummary } from '../../lib/incidentSummary';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -469,20 +470,35 @@ export default function IncidentForm({
       report_version: fd.get('report_version') || null,
       notes: fd.get('notes') || null,
     };
+    // Note: the `incidents` table has no `updated_by` column — edit attribution
+    // is captured via the `incident_updates` timeline, not a column here.
 
     if (!editing) {
       payload.event_id = fd.get('event_id') || '';
     }
 
     try {
-      const { error } = editing
+      const { data: savedRows, error } = editing
         ? await supabase
             .from('incidents')
             .update(payload)
             .eq('row_id', incident.row_id)
-        : await supabase.from('incidents').insert(payload);
+            .select('row_id')
+        : await supabase.from('incidents').insert(payload).select('row_id');
 
       if (error) throw new Error(error.message);
+
+      // Regenerate the cached AI summary in the background (non-blocking) so the
+      // dashboard cards stay current. The user never waits on the LLM.
+      const savedRowId = savedRows?.[0]?.row_id ?? (editing ? incident.row_id : null);
+      if (savedRowId) {
+        const snap = getIncidentSnapshot();
+        void generateAndStoreIncidentSummary(savedRowId, {
+          ...snap,
+          well_name: (fd.get('well_name') as string) || null,
+          stage_number: (fd.get('stage_number') as string) || null,
+        });
+      }
 
       toast.success(`Incident ${editing ? 'updated' : 'created'} successfully`);
       onSaved();
