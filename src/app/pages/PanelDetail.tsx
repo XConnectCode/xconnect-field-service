@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
 import { detailApi, panelApi } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -34,6 +35,16 @@ const PANEL_STATUS_OPTS = [
 ];
 
 const XC_BASE_OPTS = ['Denver', 'Midland', 'Williston'];
+const YES_NO_OPTS = ['Yes', 'No'];
+const YN_OPTS = ['Y', 'N'];
+
+// Conditional field rules (identical to PanelForm)
+const GUI_TYPES    = ['P1000', 'P2000', 'P2500'];
+const GUI_STATUSES = ['Leased', 'Loaned'];
+const showPlusPanel  = (type: string) => type === 'P2500';
+const showGui        = (type: string, status: string) => GUI_TYPES.includes(type) && GUI_STATUSES.includes(status);
+const showSurfaceFw  = (type: string) => type === 'Surface Tester';
+const showShootingFw = (type: string) => type === 'Digital Shooting Panel';
 
 // ── Field helper ───────────────────────────────────────────────────────────────
 interface FieldProps {
@@ -105,7 +116,7 @@ function Sel({
 export default function PanelDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
 
   const [panel, setPanel] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -113,9 +124,35 @@ export default function PanelDetail() {
   const [saving, setSaving] = useState(false);
   const [form, setFormState] = useState<any>({});
 
+  // Reference data (same sources as PanelForm) for FK selects.
+  const [customers,   setCustomers]   = useState<any[]>([]);
+  const [districts,   setDistricts]   = useState<any[]>([]);
+  const [epCompanies, setEpCompanies] = useState<string[]>([]);
+
   useEffect(() => {
     loadPanel();
   }, [id]);
+
+  // Load customers + operating companies once we're authenticated (mirrors PanelForm).
+  useEffect(() => {
+    if (!accessToken) return;
+    Promise.all([
+      supabase.from('customers').select('row_id,customer').order('customer'),
+      supabase.from('ep').select('operating_company').order('operating_company'),
+    ]).then(([c, e]) => {
+      setCustomers(c.data || []);
+      setEpCompanies((e.data || []).map((r: any) => r.operating_company).filter(Boolean));
+    });
+  }, [accessToken]);
+
+  // Cascade districts off the currently-selected customer (form.customer while
+  // editing, else the panel's stored customer). Mirrors PanelForm.
+  useEffect(() => {
+    const custId = editing ? form.customer : panel?.customer;
+    if (!custId) { setDistricts([]); return; }
+    supabase.from('districts').select('row_id,customer_district').eq('customer', custId).order('customer_district')
+      .then(({ data }) => setDistricts(data || []));
+  }, [editing, form.customer, panel?.customer]);
 
   const loadPanel = async () => {
     if (!id || !accessToken) {
@@ -140,9 +177,14 @@ export default function PanelDetail() {
   const handleEdit = () => {
     if (!panel) return;
     setFormState({
+      // panel_type is LOCKED on edit (matches PanelForm) — captured for display
+      // / conditional logic only, never editable.
       panel_type: panel.panel_type ?? '',
       panel_status: panel.panel_status ?? '',
       xc_base: panel.xc_base ?? '',
+      customer: panel.customer ?? '',
+      customer_district: panel.customer_district ?? '',
+      operating_company: panel.operating_company ?? '',
       unit_number: panel.unit_number ?? '',
       'so#': panel['so#'] ?? '',
       plus_panel: panel.plus_panel ?? '',
@@ -151,10 +193,11 @@ export default function PanelDetail() {
       loggingfw: panel.loggingfw ?? '',
       surfacefw: panel.surfacefw ?? '',
       gui_version: panel.gui_version ?? '',
+      tracking_info: panel.tracking_info ?? '',
       rma: panel.rma ?? '',
       is_spare: panel.is_spare ?? '',
-      verified: panel.verified ?? '',
-      activity: panel.activity ?? '',
+      verified: panel.verified ?? 'N',
+      activity: panel.activity ?? 'N',
       comments: panel.comments ?? '',
     });
     setEditing(true);
@@ -165,27 +208,44 @@ export default function PanelDetail() {
     setFormState({});
   };
 
+  // When customer changes in edit mode, clear the district (it belongs to the
+  // old customer). Mirrors the cascade reset in PanelForm.
+  const handleCustomerChange = (v: string) => {
+    setFormState((prev: any) => ({ ...prev, customer: v, customer_district: '' }));
+  };
+
   const handleSave = async () => {
     if (!id || !accessToken) return;
     setSaving(true);
     try {
-      const payload = {
-        panel_type: form.panel_type,
-        panel_status: form.panel_status,
-        xc_base: form.xc_base,
-        unit_number: form.unit_number,
-        'so#': form['so#'],
-        plus_panel: form.plus_panel,
-        shootingfw: form.shootingfw,
-        wl_controlfw: form.wl_controlfw,
-        loggingfw: form.loggingfw,
-        surfacefw: form.surfacefw,
-        gui_version: form.gui_version,
-        rma: form.rma,
-        is_spare: form.is_spare,
-        verified: form.verified,
-        activity: form.activity,
-        comments: form.comments,
+      // panel_type is locked on edit, so use the stored value for conditional rules.
+      const type   = panel.panel_type || '';
+      const status = form.panel_status || '';
+      const payload: Record<string, any> = {
+        // panel_type intentionally NOT sent — locked after creation (PanelForm parity).
+        panel_status: form.panel_status || null,
+        xc_base: form.xc_base || null,
+        customer: form.customer || null,
+        customer_district: form.customer_district || null,
+        operating_company: form.operating_company || null,
+        unit_number: form.unit_number || null,
+        'so#': form['so#'] || null,
+        // Conditional fields: only persist when applicable, else null (PanelForm parity).
+        plus_panel: showPlusPanel(type) ? (form.plus_panel || null) : null,
+        gui_version: showGui(type, status) ? (form.gui_version || null) : null,
+        shootingfw: showShootingFw(type) ? (form.shootingfw || null) : null,
+        surfacefw: showSurfaceFw(type) ? (form.surfacefw || null) : null,
+        wl_controlfw: form.wl_controlfw || null,
+        loggingfw: form.loggingfw || null,
+        tracking_info: form.tracking_info || null,
+        rma: form.rma || null,
+        is_spare: form.is_spare || null,
+        verified: form.verified || 'N',
+        activity: form.activity || 'N',
+        comments: form.comments || null,
+        // Always stamp the saving user + today's date on edit (PanelForm parity).
+        updated_by: user?.name || user?.email || null,
+        date_updated: new Date().toLocaleDateString(),
       };
       await panelApi.update(id, payload, accessToken);
       toast.success('Panel updated successfully');
@@ -294,22 +354,9 @@ export default function PanelDetail() {
               </CardHeader>
               <CardContent>
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-                  {/* Read-only */}
-                  <Field label="Customer" value={panel.customerName} />
-                  <Field label="District" value={panel.districtName} />
-
-                  <Field
-                    label="Panel Type"
-                    value={panel.panel_type}
-                    editing={editing}
-                  >
-                    <Sel
-                      value={form.panel_type}
-                      onChange={(v) => setField('panel_type', v)}
-                      opts={PANEL_TYPE_OPTS}
-                      placeholder="Select type"
-                    />
-                  </Field>
+                  {/* Panel Type is LOCKED after creation (PanelForm parity) —
+                      always read-only, even in edit mode. */}
+                  <Field label="Panel Type" value={panel.panel_type} />
 
                   <Field
                     label="Panel Status"
@@ -322,6 +369,61 @@ export default function PanelDetail() {
                       opts={PANEL_STATUS_OPTS}
                       placeholder="Select status"
                     />
+                  </Field>
+
+                  {/* Customer (FK) — editable select with district cascade. */}
+                  <Field
+                    label="Customer"
+                    value={panel.customerName}
+                    editing={editing}
+                  >
+                    <select
+                      value={form.customer ?? ''}
+                      onChange={(e) => handleCustomerChange(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                    >
+                      <option value="">— Not assigned —</option>
+                      {customers.map((c) => (
+                        <option key={c.row_id} value={c.row_id}>{c.customer}</option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {/* District (FK) — cascades off selected customer. */}
+                  <Field
+                    label="District"
+                    value={panel.districtName}
+                    editing={editing}
+                  >
+                    <select
+                      value={form.customer_district ?? ''}
+                      onChange={(e) => setField('customer_district', e.target.value)}
+                      disabled={!form.customer}
+                      className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                    >
+                      <option value="">— Not assigned —</option>
+                      {districts.map((d) => (
+                        <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {/* Operating Company (FK from ep table). */}
+                  <Field
+                    label="Operating Company"
+                    value={panel.operating_company}
+                    editing={editing}
+                  >
+                    <select
+                      value={form.operating_company ?? ''}
+                      onChange={(e) => setField('operating_company', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                    >
+                      <option value="">— Select —</option>
+                      {epCompanies.map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
                   </Field>
 
                   <Field
@@ -359,16 +461,21 @@ export default function PanelDetail() {
                     />
                   </Field>
 
-                  <Field
-                    label="Plus Panel"
-                    value={panel.plus_panel}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.plus_panel}
-                      onChange={(e) => setField('plus_panel', e.target.value)}
-                    />
-                  </Field>
+                  {/* Plus Panel — only applies to P2500 (PanelForm parity). */}
+                  {showPlusPanel(panel.panel_type) && (
+                    <Field
+                      label="Plus Panel"
+                      value={panel.plus_panel}
+                      editing={editing}
+                    >
+                      <Sel
+                        value={form.plus_panel}
+                        onChange={(v) => setField('plus_panel', v)}
+                        opts={YES_NO_OPTS}
+                        placeholder="Select"
+                      />
+                    </Field>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -380,16 +487,19 @@ export default function PanelDetail() {
               </CardHeader>
               <CardContent>
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-                  <Field
-                    label="Shooting FW"
-                    value={panel.shootingfw}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.shootingfw}
-                      onChange={(e) => setField('shootingfw', e.target.value)}
-                    />
-                  </Field>
+                  {/* Shooting FW — only for Digital Shooting Panel (PanelForm parity). */}
+                  {showShootingFw(panel.panel_type) && (
+                    <Field
+                      label="Shooting FW"
+                      value={panel.shootingfw}
+                      editing={editing}
+                    >
+                      <Input
+                        value={form.shootingfw}
+                        onChange={(e) => setField('shootingfw', e.target.value)}
+                      />
+                    </Field>
+                  )}
 
                   <Field
                     label="WL Control FW"
@@ -413,27 +523,34 @@ export default function PanelDetail() {
                     />
                   </Field>
 
-                  <Field
-                    label="Surface FW"
-                    value={panel.surfacefw}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.surfacefw}
-                      onChange={(e) => setField('surfacefw', e.target.value)}
-                    />
-                  </Field>
+                  {/* Surface FW — only for Surface Tester (PanelForm parity). */}
+                  {showSurfaceFw(panel.panel_type) && (
+                    <Field
+                      label="Surface FW"
+                      value={panel.surfacefw}
+                      editing={editing}
+                    >
+                      <Input
+                        value={form.surfacefw}
+                        onChange={(e) => setField('surfacefw', e.target.value)}
+                      />
+                    </Field>
+                  )}
 
-                  <Field
-                    label="GUI Version"
-                    value={panel.gui_version}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.gui_version}
-                      onChange={(e) => setField('gui_version', e.target.value)}
-                    />
-                  </Field>
+                  {/* GUI Version — only for GUI panel types in Leased/Loaned status
+                      (PanelForm parity). While editing, use the in-progress status. */}
+                  {showGui(panel.panel_type, editing ? form.panel_status : panel.panel_status) && (
+                    <Field
+                      label="GUI Version"
+                      value={panel.gui_version}
+                      editing={editing}
+                    >
+                      <Input
+                        value={form.gui_version}
+                        onChange={(e) => setField('gui_version', e.target.value)}
+                      />
+                    </Field>
+                  )}
                 </div>
               </CardContent>
             </Card>

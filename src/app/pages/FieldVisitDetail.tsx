@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
 import { detailApi, fieldVisitApi } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { getSerial } from '../lib/serialUtils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -34,6 +35,11 @@ const VISIT_PURPOSE_OPTS = [
 
 const FIELD_OR_FACILITY_OPTS = ['Field', 'Facility'];
 
+// Panel types whose serials populate the equipment selects (FieldVisitForm parity).
+const DIGITAL_SHOOTING_PANEL = 'Digital Shooting Panel';
+const COMMUNICATION_PANEL = 'Communication Panel';
+const SURFACE_TESTER = 'Surface Tester';
+
 // ── Field helper ──────────────────────────────────────────────────────────────
 interface FieldProps {
   label: string;
@@ -61,7 +67,7 @@ function Field({ label, value, editing, children }: FieldProps) {
 export default function FieldVisitDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
 
   const [visit, setVisit] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -71,10 +77,46 @@ export default function FieldVisitDetail() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<any>({});
 
+  // Reference data (same sources as FieldVisitForm) for FK / enum selects.
+  const [customers,   setCustomers]   = useState<any[]>([]);
+  const [districts,   setDistricts]   = useState<any[]>([]);
+  const [sqmReps,     setSqmReps]     = useState<string[]>([]);
+  const [epCompanies, setEpCompanies] = useState<string[]>([]);
+  const [allPanels,   setAllPanels]   = useState<any[]>([]);
+
   // ── data loading ────────────────────────────────────────────────────────────
   useEffect(() => {
     loadVisit();
   }, [id]);
+
+  // Load customers / SQM reps / operating companies / panels once authenticated
+  // (mirrors FieldVisitForm). Filter out the 'Pre-Tracking' SQM placeholder.
+  useEffect(() => {
+    if (!accessToken) return;
+    Promise.all([
+      supabase.from('customers').select('row_id,customer').order('customer'),
+      supabase.from('sqm').select('sq_manager').order('sq_manager'),
+      supabase.from('ep').select('operating_company').order('operating_company'),
+      supabase.from('panels').select('serial_number,panel_type').order('serial_number'),
+    ]).then(([c, s, e, p]) => {
+      setCustomers(c.data || []);
+      setSqmReps((s.data || []).map((r: any) => r.sq_manager).filter((r: string) => r && r !== 'Pre-Tracking'));
+      setEpCompanies((e.data || []).map((r: any) => r.operating_company).filter(Boolean));
+      setAllPanels(p.data || []);
+    });
+  }, [accessToken]);
+
+  // Cascade districts off the selected customer (form.customer while editing,
+  // else the visit's stored customer). Mirrors FieldVisitForm.
+  useEffect(() => {
+    const custId = editing ? form.customer : visit?.customer;
+    if (!custId) { setDistricts([]); return; }
+    supabase.from('districts').select('row_id,customer_district').eq('customer', custId).order('customer_district')
+      .then(({ data }) => setDistricts(data || []));
+  }, [editing, form.customer, visit?.customer]);
+
+  // Panel options filtered by type (FieldVisitForm.panelsByType parity).
+  const panelsByType = (type: string) => allPanels.filter((p) => p.panel_type === type);
 
   const loadVisit = async () => {
     if (!id || !accessToken) {
@@ -115,6 +157,8 @@ export default function FieldVisitDetail() {
       arrival_date: visit.arrival_date ?? '',
       departure_date: visit.departure_date ?? '',
       visit_duration: visit.visit_duration ?? '',
+      customer: visit.customer ?? '',
+      customer_district: visit.customer_district ?? '',
       customer_rep: visit.customer_rep ?? '',
       xc_rep: visit.xc_rep ?? '',
       operating_company: visit.operating_company ?? '',
@@ -126,6 +170,12 @@ export default function FieldVisitDetail() {
       visit_summary: visit.visit_summary ?? '',
     });
     setEditing(true);
+  }
+
+  // Changing the customer resets the district (it belongs to the old customer).
+  // Mirrors the cascade reset in FieldVisitForm.
+  function handleCustomerChange(v: string) {
+    setForm((prev: any) => ({ ...prev, customer: v, customer_district: '' }));
   }
 
   function cancelEdit() {
@@ -142,20 +192,25 @@ export default function FieldVisitDetail() {
     setSaving(true);
     try {
       const payload = {
-        visit_purpose: form.visit_purpose,
-        field_or_facility: form.field_or_facility,
-        arrival_date: form.arrival_date,
-        departure_date: form.departure_date,
-        visit_duration: form.visit_duration,
-        customer_rep: form.customer_rep,
-        xc_rep: form.xc_rep,
-        operating_company: form.operating_company,
-        pad_name: form.pad_name,
-        lat_long: form.lat_long,
-        communication_panel: form.communication_panel,
-        digital_shooting_panel: form.digital_shooting_panel,
-        surface_tester: form.surface_tester,
-        visit_summary: form.visit_summary,
+        visit_purpose: form.visit_purpose || null,
+        field_or_facility: form.field_or_facility || null,
+        arrival_date: form.arrival_date || null,
+        departure_date: form.departure_date || null,
+        visit_duration: form.visit_duration || null,
+        customer: form.customer || null,
+        customer_district: form.customer_district || null,
+        customer_rep: form.customer_rep || null,
+        xc_rep: form.xc_rep || null,
+        operating_company: form.operating_company || null,
+        pad_name: form.pad_name || null,
+        lat_long: form.lat_long || null,
+        communication_panel: form.communication_panel || null,
+        digital_shooting_panel: form.digital_shooting_panel || null,
+        surface_tester: form.surface_tester || null,
+        visit_summary: form.visit_summary || null,
+        // Always stamp the saving user + today's date on edit (form parity).
+        updated_by: user?.name || user?.email || null,
+        date_updated: new Date().toLocaleDateString(),
       };
       await fieldVisitApi.update(id, payload, accessToken);
       toast.success('Field visit updated successfully');
@@ -366,16 +421,22 @@ export default function FieldVisitDetail() {
                   />
                 </Field>
 
+                {/* XC Rep — constrained SQM dropdown (FieldVisitForm parity). */}
                 <Field
                   label="XC Representative"
                   value={visit.xc_rep}
                   editing={editing}
                 >
-                  <Input
-                    value={form.xc_rep}
+                  <select
+                    value={form.xc_rep ?? ''}
                     onChange={(e) => setField('xc_rep', e.target.value)}
-                    className="text-sm"
-                  />
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  >
+                    <option value="">— Select —</option>
+                    {sqmReps.map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
                 </Field>
 
                 <Field
@@ -398,32 +459,59 @@ export default function FieldVisitDetail() {
                 <CardTitle className="text-base">Location &amp; Operator</CardTitle>
               </CardHeader>
               <CardContent className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-                {/* Customer — read-only display */}
+                {/* Customer — editable FK select with district cascade (form parity). */}
                 <Field
                   label="Customer"
                   value={visit.customerName}
                   editing={editing}
-                />
+                >
+                  <select
+                    value={form.customer ?? ''}
+                    onChange={(e) => handleCustomerChange(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  >
+                    <option value="">— Select customer —</option>
+                    {customers.map((c) => (
+                      <option key={c.row_id} value={c.row_id}>{c.customer}</option>
+                    ))}
+                  </select>
+                </Field>
 
-                {/* District — read-only display */}
+                {/* District — FK select cascading off the selected customer. */}
                 <Field
                   label="District"
                   value={visit.districtName}
                   editing={editing}
-                />
+                >
+                  <select
+                    value={form.customer_district ?? ''}
+                    onChange={(e) => setField('customer_district', e.target.value)}
+                    disabled={!form.customer}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  >
+                    <option value="">— Select district —</option>
+                    {districts.map((d) => (
+                      <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>
+                    ))}
+                  </select>
+                </Field>
 
+                {/* Operating Company — constrained ep dropdown (form parity). */}
                 <Field
                   label="Operating Company"
                   value={visit.operating_company}
                   editing={editing}
                 >
-                  <Input
-                    value={form.operating_company}
-                    onChange={(e) =>
-                      setField('operating_company', e.target.value)
-                    }
-                    className="text-sm"
-                  />
+                  <select
+                    value={form.operating_company ?? ''}
+                    onChange={(e) => setField('operating_company', e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  >
+                    <option value="">— Select —</option>
+                    {epCompanies.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
                 </Field>
 
                 <Field
@@ -459,44 +547,58 @@ export default function FieldVisitDetail() {
                 <CardTitle className="text-base">Equipment</CardTitle>
               </CardHeader>
               <CardContent className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
+                {/* Communication Panel — serials filtered by panel_type (form parity). */}
                 <Field
                   label="Communication Panel"
                   value={visit.communication_panel}
                   editing={editing}
                 >
-                  <Input
-                    value={form.communication_panel}
-                    onChange={(e) =>
-                      setField('communication_panel', e.target.value)
-                    }
-                    className="text-sm"
-                  />
+                  <select
+                    value={form.communication_panel ?? ''}
+                    onChange={(e) => setField('communication_panel', e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  >
+                    <option value="">— None —</option>
+                    {panelsByType(COMMUNICATION_PANEL).map((p) => (
+                      <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
+                    ))}
+                  </select>
                 </Field>
 
+                {/* Digital Shooting Panel — serials filtered by panel_type (form parity). */}
                 <Field
                   label="Digital Shooting Panel"
                   value={visit.digital_shooting_panel}
                   editing={editing}
                 >
-                  <Input
-                    value={form.digital_shooting_panel}
-                    onChange={(e) =>
-                      setField('digital_shooting_panel', e.target.value)
-                    }
-                    className="text-sm"
-                  />
+                  <select
+                    value={form.digital_shooting_panel ?? ''}
+                    onChange={(e) => setField('digital_shooting_panel', e.target.value)}
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  >
+                    <option value="">— None —</option>
+                    {panelsByType(DIGITAL_SHOOTING_PANEL).map((p) => (
+                      <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
+                    ))}
+                  </select>
                 </Field>
 
+                {/* Surface Tester — serials filtered by panel_type (form parity). */}
                 <Field
                   label="Surface Tester"
                   value={visit.surface_tester}
                   editing={editing}
                 >
-                  <Input
-                    value={form.surface_tester}
+                  <select
+                    value={form.surface_tester ?? ''}
                     onChange={(e) => setField('surface_tester', e.target.value)}
-                    className="text-sm"
-                  />
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                  >
+                    <option value="">— None —</option>
+                    {panelsByType(SURFACE_TESTER).map((p) => (
+                      <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
+                    ))}
+                  </select>
                 </Field>
               </CardContent>
             </Card>

@@ -1,14 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { detailApi, incidentApi } from '../lib/api';
+import { detailApi } from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
   ArrowLeft, Edit, FileText, Download, Send, CheckCircle2,
-  RefreshCw, Eye, X, ExternalLink, Clock, Plus, Save, Loader2, SlidersHorizontal,
+  RefreshCw, Eye, X, ExternalLink, Clock, Plus,
 } from 'lucide-react';
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
@@ -87,39 +87,18 @@ function XcCausedBadge({ caused }: { caused?: string }) {
   return <Badge variant="outline">{caused}</Badge>;
 }
 
-// Inline-edit context passed down to Field / TextBlock so they can swap between
-// a read-only view and a bound input without changing call sites everywhere.
-type EditCtx = {
-  editing: boolean;
-  form: any;
-  setField: (name: string, value: any) => void;
-};
-
 const CAPTION = 'text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1';
 
+// Read-only display helpers. All incident editing now routes through the
+// IncidentForm modal so the status-machine validation + FK/enum logic in the
+// form is never bypassed (parity requirement).
 function Field({
-  label, value, children, editKey, edit,
+  label, value, children,
 }: {
   label: string;
   value?: string | null;
   children?: React.ReactNode;
-  // When editKey + edit are provided and edit.editing is true, render a text input
-  // bound to edit.form[editKey] instead of the read-only value.
-  editKey?: string;
-  edit?: EditCtx;
 }) {
-  if (edit?.editing && editKey) {
-    return (
-      <div>
-        <p className={CAPTION}>{label}</p>
-        <Input
-          value={edit.form[editKey] ?? ''}
-          onChange={(e) => edit.setField(editKey, e.target.value)}
-          className="text-sm"
-        />
-      </div>
-    );
-  }
   const content = children ?? value;
   if (!content || content === 'N/A') return null;
   return (
@@ -131,27 +110,11 @@ function Field({
 }
 
 function TextBlock({
-  label, value, editKey, edit, rows = 4,
+  label, value,
 }: {
   label: string;
   value?: string;
-  editKey?: string;
-  edit?: EditCtx;
-  rows?: number;
 }) {
-  if (edit?.editing && editKey) {
-    return (
-      <div>
-        {label && <p className={CAPTION}>{label}</p>}
-        <Textarea
-          rows={rows}
-          value={edit.form[editKey] ?? ''}
-          onChange={(e) => edit.setField(editKey, e.target.value)}
-          className="text-sm"
-        />
-      </div>
-    );
-  }
   if (!value) return null;
   return (
     <div>
@@ -203,57 +166,10 @@ export default function IncidentDetail() {
   const [updateNote, setUpdateNote] = useState('');
   const [savingUpdate, setSavingUpdate] = useState(false);
 
-  // Advanced edit dialog (full IncidentForm — keeps status-machine + dropdown logic)
+  // All incident editing routes through the full IncidentForm modal, which owns
+  // the status-machine validation + FK/enum dropdown logic. There is no inline
+  // edit path (it would bypass that validation).
   const [formOpen,    setFormOpen]    = useState(false);
-
-  // Inline edit (core free-text fields). Constrained/status fields stay in the
-  // Advanced Edit modal so we don't duplicate the status-machine + lookup logic.
-  const [editing, setEditing] = useState(false);
-  const [saving,  setSaving]  = useState(false);
-  const [form,    setForm]    = useState<any>({});
-  const setField = (name: string, value: any) => setForm((p: any) => ({ ...p, [name]: value }));
-
-  // Free-text fields safe to edit inline (no constrained options, no status logic).
-  const INLINE_KEYS = [
-    'well_name', 'stage#', 'so#', 'operating_company',
-    'xc_rep', 'xc_district', 'customer_rep', 'ep_rep',
-    'incident_description', 'investigation', 'root_cause',
-    'corrective_action', 'preventive_action', 'action_assigned_to', 'notes',
-  ] as const;
-
-  const editCtx = { editing, form, setField };
-
-  const handleEnterEdit = () => {
-    if (!incident) return;
-    const next: any = {};
-    INLINE_KEYS.forEach((k) => { next[k] = incident[k] ?? ''; });
-    setForm(next);
-    setEditing(true);
-  };
-
-  const handleCancelEdit = () => {
-    setForm({});
-    setEditing(false);
-  };
-
-  const handleSaveInline = async () => {
-    if (!incident) return;
-    setSaving(true);
-    try {
-      const payload: any = {};
-      INLINE_KEYS.forEach((k) => { payload[k] = form[k] ?? null; });
-      await incidentApi.update(incident.row_id, payload, accessToken!);
-      toast.success('Incident updated');
-      setEditing(false);
-      setForm({});
-      await loadAll();
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err.message || 'Failed to save incident');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   // PDF state
   const [generatingPDF,  setGeneratingPDF]  = useState<string | null>(null);
@@ -709,27 +625,11 @@ export default function IncidentDetail() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {editing ? (
-                <>
-                  <Button onClick={handleSaveInline} disabled={saving} className="gap-2">
-                    {saving
-                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-                      : <><Save className="w-4 h-4" /> Save</>}
-                  </Button>
-                  <Button variant="outline" onClick={handleCancelEdit} disabled={saving} className="gap-2">
-                    <X className="w-4 h-4" /> Cancel
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button onClick={handleEnterEdit} className="gap-2">
-                    <Edit className="w-4 h-4" /> Edit
-                  </Button>
-                  <Button variant="outline" onClick={() => setFormOpen(true)} className="gap-2">
-                    <SlidersHorizontal className="w-4 h-4" /> Advanced Edit
-                  </Button>
-                </>
-              )}
+              {/* Single Edit entry point — opens the full IncidentForm modal so the
+                  status-machine + FK/enum logic always applies. */}
+              <Button onClick={() => setFormOpen(true)} className="gap-2">
+                <Edit className="w-4 h-4" /> Edit
+              </Button>
             </div>
           </div>
         </div>
@@ -822,11 +722,11 @@ export default function IncidentDetail() {
               <Field label="District" value={districtDisplay} />
               <Field label="Date" value={fmtLocalDate(incident.date_incident)} />
               <Field label="Status" value={incident.incident_status} />
-              <Field label="Operating Company" value={incident.operating_company} editKey="operating_company" edit={editCtx} />
+              <Field label="Operating Company" value={incident.operating_company} />
               <Field label="Field / Facility" value={incident.field_facility} />
-              <Field label="Well Name" value={incident.well_name} editKey="well_name" edit={editCtx} />
-              <Field label="Stage #" value={incident['stage#']} editKey="stage#" edit={editCtx} />
-              <Field label="SO #" value={incident['so#']} editKey="so#" edit={editCtx} />
+              <Field label="Well Name" value={incident.well_name} />
+              <Field label="Stage #" value={incident['stage#']} />
+              <Field label="SO #" value={incident['so#']} />
               <Field label="Field Visit">
                 {incident.field_visit_id ? (
                   linkedVisitRowId ? (
@@ -853,10 +753,10 @@ export default function IncidentDetail() {
           <Card>
             <CardHeader><CardTitle>Personnel</CardTitle></CardHeader>
             <CardContent className="grid md:grid-cols-3 gap-4">
-              <Field label="XC Representative" value={incident.xc_rep} editKey="xc_rep" edit={editCtx} />
-              <Field label="XC District" value={incident.xc_district} editKey="xc_district" edit={editCtx} />
-              <Field label="Customer Representative" value={incident.customer_rep} editKey="customer_rep" edit={editCtx} />
-              <Field label="EP Representative" value={incident.ep_rep} editKey="ep_rep" edit={editCtx} />
+              <Field label="XC Representative" value={incident.xc_rep} />
+              <Field label="XC District" value={incident.xc_district} />
+              <Field label="Customer Representative" value={incident.customer_rep} />
+              <Field label="EP Representative" value={incident.ep_rep} />
             </CardContent>
           </Card>
 
@@ -880,26 +780,26 @@ export default function IncidentDetail() {
           </Card>
 
           {/* ── Incident Narrative ── */}
-          {(editing || incident.incident_description || incident.investigation || incident.root_cause) && (
+          {(incident.incident_description || incident.investigation || incident.root_cause) && (
             <Card>
               <CardHeader><CardTitle>Incident Narrative</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <TextBlock label="Incident Description" value={incident.incident_description} editKey="incident_description" edit={editCtx} />
-                <TextBlock label="Investigation Findings" value={incident.investigation} editKey="investigation" edit={editCtx} />
-                <TextBlock label="Root Cause" value={incident.root_cause} editKey="root_cause" edit={editCtx} />
+                <TextBlock label="Incident Description" value={incident.incident_description} />
+                <TextBlock label="Investigation Findings" value={incident.investigation} />
+                <TextBlock label="Root Cause" value={incident.root_cause} />
               </CardContent>
             </Card>
           )}
 
           {/* ── Corrective & Preventive Actions ── */}
-          {(editing || incident.corrective_action || incident.preventive_action || incident.action_assigned_to || incident.action_due_date || incident.action_status) && (
+          {(incident.corrective_action || incident.preventive_action || incident.action_assigned_to || incident.action_due_date || incident.action_status) && (
             <Card>
               <CardHeader><CardTitle>Corrective &amp; Preventive Actions</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <TextBlock label="Corrective Action" value={incident.corrective_action} editKey="corrective_action" edit={editCtx} />
-                <TextBlock label="Preventive Action" value={incident.preventive_action} editKey="preventive_action" edit={editCtx} />
+                <TextBlock label="Corrective Action" value={incident.corrective_action} />
+                <TextBlock label="Preventive Action" value={incident.preventive_action} />
                 <div className="grid md:grid-cols-3 gap-4 pt-2">
-                  <Field label="Assigned To" value={incident.action_assigned_to} editKey="action_assigned_to" edit={editCtx} />
+                  <Field label="Assigned To" value={incident.action_assigned_to} />
                   <Field label="Due Date" value={incident.action_due_date ? fmtLocalDate(incident.action_due_date) : null} />
                   <Field label="Action Status" value={(() => {
                     const a = normalizeActionStatus(incident.action_status);
@@ -922,11 +822,11 @@ export default function IncidentDetail() {
           )}
 
           {/* ── Notes ── */}
-          {(editing || incident.notes) && (
+          {incident.notes && (
             <Card>
               <CardHeader><CardTitle>Additional Notes</CardTitle></CardHeader>
               <CardContent>
-                <TextBlock label="" value={incident.notes} editKey="notes" edit={editCtx} />
+                <TextBlock label="" value={incident.notes} />
               </CardContent>
             </Card>
           )}
