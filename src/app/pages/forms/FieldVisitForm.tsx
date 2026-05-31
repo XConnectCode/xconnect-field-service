@@ -23,10 +23,10 @@ import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import { getSerial } from '../../lib/serialUtils';
-import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
+import { getAuthHeaders } from '../../lib/authHeaders';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
-const headers  = { 'Authorization': `Bearer ${publicAnonKey}`, 'Content-Type': 'application/json' };
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 const VISIT_PURPOSE_OPTS  = ['XFire Installation', 'Training', 'Sales', 'R&D', 'Incident', 'Impromptu', 'Follow Up/Check Up', 'Delivery/Pickup'];
@@ -73,6 +73,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   const [nextVisitId,   setNextVisitId]   = useState<string>('');
   const [locating,      setLocating]      = useState(false);
   const [latLngValue,   setLatLngValue]   = useState('');
+  const [xcRep,         setXcRep]         = useState('');
 
   // Fetch next available Visit ID
   useEffect(() => {
@@ -123,6 +124,17 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     else setCustId('');
   }, [visit, open]);
 
+  // XC Rep: on edit keep the stored rep; on create auto-pull the logged-in
+  // user. The field is a constrained dropdown of SQM reps, so only pre-select
+  // the user's name when it actually matches a valid option; otherwise leave it
+  // for the user to pick. Runs once reps load / dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    if (editing) { setXcRep(visit?.xc_rep || ''); return; }
+    const me = currentUser?.name || '';
+    setXcRep(me && sqmReps.includes(me) ? me : '');
+  }, [open, editing, visit, currentUser, sqmReps]);
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSaving(true);
@@ -157,7 +169,8 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
         : `${baseUrl}/fieldvisits`;
       const res = await fetch(url, {
         method: editing ? 'PUT' : 'POST',
-        headers,
+        // Forward the live session token (edge routes require a real user).
+        headers: await getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed'); }
@@ -187,7 +200,17 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           <Section title="Visit Info" />
 
           <F label="Visit ID" required>
-            <Input name="field_visit_id" defaultValue={visit?.field_visit_id || ''} required placeholder="e.g. 1518" />
+            {/* Auto-populated: next sequential ID on create, stored ID on edit.
+                Locked read-only so it can't be hand-edited. readOnly inputs
+                still submit their value via FormData. */}
+            <Input
+              name="field_visit_id"
+              value={editing ? (visit?.field_visit_id || '') : nextVisitId}
+              readOnly
+              required
+              className="bg-gray-50 cursor-not-allowed"
+              title={editing ? 'Visit ID is locked' : 'Auto-assigned. Cannot be edited.'}
+            />
           </F>
 
           <F label="Visit Purpose" required>
@@ -254,7 +277,9 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           <Section title="Personnel" />
 
           <F label="XC Rep (SQM)" required>
-            <select name="xc_rep" defaultValue={visit?.xc_rep || currentUser?.name || ''}
+            {/* Auto-pulled from the logged-in user when their name matches an SQM
+                rep; otherwise selectable. Editable so the rep can be corrected. */}
+            <select name="xc_rep" value={xcRep} onChange={e => setXcRep(e.target.value)}
               className="w-full border border-gray-300 rounded-md p-2 text-sm" required>
               <option value="">— Select —</option>
               {sqmReps.map(r => <option key={r} value={r}>{r}</option>)}

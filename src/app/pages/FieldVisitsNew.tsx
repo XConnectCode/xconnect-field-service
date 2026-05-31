@@ -93,17 +93,21 @@ export default function FieldVisitsNew() {
     if (!accessToken) return;
     setLoading(true);
     try {
+      // Edge data routes require a real user token after the auth lockdown
+      // (anon key returns 401). loadData only runs once accessToken exists.
+      const headers = { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` };
       const [visitsRes, customersRes, districtsRes] = await Promise.all([
-        fetch(`${baseUrl}/fieldvisits`,  { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
-        fetch(`${baseUrl}/customers`,    { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
-        fetch(`${baseUrl}/districts`,    { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
+        fetch(`${baseUrl}/fieldvisits`,  { headers }),
+        fetch(`${baseUrl}/customers`,    { headers }),
+        fetch(`${baseUrl}/districts`,    { headers }),
       ]);
       const [visitsData, customersData, districtsData] = await Promise.all([
         visitsRes.json(), customersRes.json(), districtsRes.json(),
       ]);
-      setVisits(visitsData || []);
-      setCustomers(customersData || []);
-      setDistricts(districtsData || []);
+      // Guard against non-array error responses so visits.filter never crashes.
+      setVisits(Array.isArray(visitsData)       ? visitsData    : []);
+      setCustomers(Array.isArray(customersData) ? customersData : []);
+      setDistricts(Array.isArray(districtsData) ? districtsData : []);
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Failed to load data');
