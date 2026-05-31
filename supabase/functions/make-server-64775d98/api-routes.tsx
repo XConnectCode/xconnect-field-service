@@ -711,26 +711,35 @@ apiRoutes.delete("/incidents/:id", requireAdmin, async (c) => {
 
 apiRoutes.get("/sales", async (c) => {
   try {
-    // Fetch barrels data
-    const { data: barrelsData, error: barrelsError } = await supabase
-      .from('sales_volume')
-      .select('*')
-      .eq('metric_type', 'barrels');
+    // PostgREST caps a single select at 1000 rows; sales_volume has >1000 rows per
+    // metric_type, so page through with .range() to fetch ALL rows (else totals are short).
+    const fetchAllByMetric = async (metric: string) => {
+      const PAGE = 1000;
+      let from = 0;
+      const all: any[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from('sales_volume')
+          .select('*')
+          .eq('metric_type', metric)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = data || [];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
+    };
 
-    if (barrelsError) {
-      console.error('Error fetching barrels:', barrelsError);
-      return c.json({ error: barrelsError.message }, 500);
-    }
-
-    // Fetch stages data
-    const { data: stagesData, error: stagesError } = await supabase
-      .from('sales_volume')
-      .select('*')
-      .eq('metric_type', 'stages');
-
-    if (stagesError) {
-      console.error('Error fetching stages:', stagesError);
-      return c.json({ error: stagesError.message }, 500);
+    let barrelsData: any[];
+    let stagesData: any[];
+    try {
+      barrelsData = await fetchAllByMetric('barrels');
+      stagesData = await fetchAllByMetric('stages');
+    } catch (err: any) {
+      console.error('Error fetching sales_volume:', err);
+      return c.json({ error: err?.message || String(err) }, 500);
     }
 
     // Combine data by date and customer/district
