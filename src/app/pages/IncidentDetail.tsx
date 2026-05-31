@@ -1,14 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { detailApi } from '../lib/api';
+import { detailApi, incidentApi } from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import {
   ArrowLeft, Edit, FileText, Download, Send, CheckCircle2,
-  RefreshCw, Eye, X, ExternalLink, Clock, Plus,
+  RefreshCw, Eye, X, ExternalLink, Clock, Plus, Save, Loader2, SlidersHorizontal,
 } from 'lucide-react';
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
@@ -87,22 +87,75 @@ function XcCausedBadge({ caused }: { caused?: string }) {
   return <Badge variant="outline">{caused}</Badge>;
 }
 
-function Field({ label, value, children }: { label: string; value?: string | null; children?: React.ReactNode }) {
+// Inline-edit context passed down to Field / TextBlock so they can swap between
+// a read-only view and a bound input without changing call sites everywhere.
+type EditCtx = {
+  editing: boolean;
+  form: any;
+  setField: (name: string, value: any) => void;
+};
+
+const CAPTION = 'text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1';
+
+function Field({
+  label, value, children, editKey, edit,
+}: {
+  label: string;
+  value?: string | null;
+  children?: React.ReactNode;
+  // When editKey + edit are provided and edit.editing is true, render a text input
+  // bound to edit.form[editKey] instead of the read-only value.
+  editKey?: string;
+  edit?: EditCtx;
+}) {
+  if (edit?.editing && editKey) {
+    return (
+      <div>
+        <p className={CAPTION}>{label}</p>
+        <Input
+          value={edit.form[editKey] ?? ''}
+          onChange={(e) => edit.setField(editKey, e.target.value)}
+          className="text-sm"
+        />
+      </div>
+    );
+  }
   const content = children ?? value;
   if (!content || content === 'N/A') return null;
   return (
     <div>
-      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">{label}</p>
+      <p className={CAPTION}>{label}</p>
       <div className="text-sm text-gray-900">{content}</div>
     </div>
   );
 }
 
-function TextBlock({ label, value }: { label: string; value?: string }) {
+function TextBlock({
+  label, value, editKey, edit, rows = 4,
+}: {
+  label: string;
+  value?: string;
+  editKey?: string;
+  edit?: EditCtx;
+  rows?: number;
+}) {
+  if (edit?.editing && editKey) {
+    return (
+      <div>
+        {label && <p className={CAPTION}>{label}</p>}
+        <Textarea
+          rows={rows}
+          value={edit.form[editKey] ?? ''}
+          onChange={(e) => edit.setField(editKey, e.target.value)}
+          className="text-sm"
+        />
+      </div>
+    );
+  }
   if (!value) return null;
   return (
     <div>
-      {label && <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">{label}</p>}
+      {label && <p className={CAPTION}>{label}</p>}
       <p className="text-sm text-gray-700 bg-gray-50 border border-gray-100 rounded-lg p-3 whitespace-pre-wrap leading-relaxed">{value}</p>
     </div>
   );
@@ -150,8 +203,57 @@ export default function IncidentDetail() {
   const [updateNote, setUpdateNote] = useState('');
   const [savingUpdate, setSavingUpdate] = useState(false);
 
-  // Edit dialog
+  // Advanced edit dialog (full IncidentForm — keeps status-machine + dropdown logic)
   const [formOpen,    setFormOpen]    = useState(false);
+
+  // Inline edit (core free-text fields). Constrained/status fields stay in the
+  // Advanced Edit modal so we don't duplicate the status-machine + lookup logic.
+  const [editing, setEditing] = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [form,    setForm]    = useState<any>({});
+  const setField = (name: string, value: any) => setForm((p: any) => ({ ...p, [name]: value }));
+
+  // Free-text fields safe to edit inline (no constrained options, no status logic).
+  const INLINE_KEYS = [
+    'well_name', 'stage#', 'so#', 'operating_company',
+    'xc_rep', 'xc_district', 'customer_rep', 'ep_rep',
+    'incident_description', 'investigation', 'root_cause',
+    'corrective_action', 'preventive_action', 'action_assigned_to', 'notes',
+  ] as const;
+
+  const editCtx = { editing, form, setField };
+
+  const handleEnterEdit = () => {
+    if (!incident) return;
+    const next: any = {};
+    INLINE_KEYS.forEach((k) => { next[k] = incident[k] ?? ''; });
+    setForm(next);
+    setEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setForm({});
+    setEditing(false);
+  };
+
+  const handleSaveInline = async () => {
+    if (!incident) return;
+    setSaving(true);
+    try {
+      const payload: any = {};
+      INLINE_KEYS.forEach((k) => { payload[k] = form[k] ?? null; });
+      await incidentApi.update(incident.row_id, payload, accessToken!);
+      toast.success('Incident updated');
+      setEditing(false);
+      setForm({});
+      await loadAll();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Failed to save incident');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // PDF state
   const [generatingPDF,  setGeneratingPDF]  = useState<string | null>(null);
@@ -581,24 +683,52 @@ export default function IncidentDetail() {
     <div className="p-8">
       <div className="max-w-5xl mx-auto">
 
-        {/* ── Header ── */}
-        <div className="mb-6">
-          <Button variant="ghost" onClick={() => navigate('/incidents')} className="mb-4">
+        {/* ── Hero Header ── */}
+        <div className="mb-6 rounded-xl border bg-gradient-to-br from-slate-50 to-white p-6 shadow-sm">
+          <Button variant="ghost" onClick={() => navigate('/incidents')} className="mb-4 -ml-2">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Incidents
           </Button>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Incident Details</h1>
-              <p className="text-gray-600 mt-1">Event #{incident.event_id || 'N/A'}</p>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-3xl font-bold text-gray-900 truncate">
+                Incident #{incident.event_id || 'N/A'}
+              </h1>
+              <p className="text-gray-600 mt-1">
+                {customerDisplay !== 'N/A' ? customerDisplay : 'Incident'}
+                {incident.well_name ? ` • ${incident.well_name}` : ''}
+              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                <StatusBadge status={incident.incident_status} />
+                <SeverityBadge severity={incident.incident_severity} />
+                {incident.xc_caused && (
+                  <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                    XC Caused: <XcCausedBadge caused={incident.xc_caused} />
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <StatusBadge status={incident.incident_status} />
-              <SeverityBadge severity={incident.incident_severity} />
-              {incident.xc_caused && (
-                <Badge variant={incident.xc_caused === 'Yes' ? 'destructive' : 'outline'}>
-                  XC: <XcCausedBadge caused={incident.xc_caused} />
-                </Badge>
+              {editing ? (
+                <>
+                  <Button onClick={handleSaveInline} disabled={saving} className="gap-2">
+                    {saving
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+                      : <><Save className="w-4 h-4" /> Save</>}
+                  </Button>
+                  <Button variant="outline" onClick={handleCancelEdit} disabled={saving} className="gap-2">
+                    <X className="w-4 h-4" /> Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button onClick={handleEnterEdit} className="gap-2">
+                    <Edit className="w-4 h-4" /> Edit
+                  </Button>
+                  <Button variant="outline" onClick={() => setFormOpen(true)} className="gap-2">
+                    <SlidersHorizontal className="w-4 h-4" /> Advanced Edit
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -608,10 +738,6 @@ export default function IncidentDetail() {
         <Card className="mb-6">
           <CardContent className="pt-4 pb-4">
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="outline" onClick={() => setFormOpen(true)} className="gap-2">
-                <Edit className="w-4 h-4" /> Edit Incident
-              </Button>
-
               {(['preliminary', 'final'] as const).map(version => {
                 const slot   = pdfs[version];
                 const has    = !!(slot.row || slot.legacyUrl);
@@ -696,11 +822,11 @@ export default function IncidentDetail() {
               <Field label="District" value={districtDisplay} />
               <Field label="Date" value={fmtLocalDate(incident.date_incident)} />
               <Field label="Status" value={incident.incident_status} />
-              <Field label="Operating Company" value={incident.operating_company} />
+              <Field label="Operating Company" value={incident.operating_company} editKey="operating_company" edit={editCtx} />
               <Field label="Field / Facility" value={incident.field_facility} />
-              <Field label="Well Name" value={incident.well_name} />
-              <Field label="Stage #" value={incident['stage#']} />
-              <Field label="SO #" value={incident['so#']} />
+              <Field label="Well Name" value={incident.well_name} editKey="well_name" edit={editCtx} />
+              <Field label="Stage #" value={incident['stage#']} editKey="stage#" edit={editCtx} />
+              <Field label="SO #" value={incident['so#']} editKey="so#" edit={editCtx} />
               <Field label="Field Visit">
                 {incident.field_visit_id ? (
                   linkedVisitRowId ? (
@@ -727,10 +853,10 @@ export default function IncidentDetail() {
           <Card>
             <CardHeader><CardTitle>Personnel</CardTitle></CardHeader>
             <CardContent className="grid md:grid-cols-3 gap-4">
-              <Field label="XC Representative" value={incident.xc_rep} />
-              <Field label="XC District" value={incident.xc_district} />
-              <Field label="Customer Representative" value={incident.customer_rep} />
-              <Field label="EP Representative" value={incident.ep_rep} />
+              <Field label="XC Representative" value={incident.xc_rep} editKey="xc_rep" edit={editCtx} />
+              <Field label="XC District" value={incident.xc_district} editKey="xc_district" edit={editCtx} />
+              <Field label="Customer Representative" value={incident.customer_rep} editKey="customer_rep" edit={editCtx} />
+              <Field label="EP Representative" value={incident.ep_rep} editKey="ep_rep" edit={editCtx} />
             </CardContent>
           </Card>
 
@@ -754,26 +880,26 @@ export default function IncidentDetail() {
           </Card>
 
           {/* ── Incident Narrative ── */}
-          {(incident.incident_description || incident.investigation || incident.root_cause) && (
+          {(editing || incident.incident_description || incident.investigation || incident.root_cause) && (
             <Card>
               <CardHeader><CardTitle>Incident Narrative</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <TextBlock label="Incident Description" value={incident.incident_description} />
-                <TextBlock label="Investigation Findings" value={incident.investigation} />
-                <TextBlock label="Root Cause" value={incident.root_cause} />
+                <TextBlock label="Incident Description" value={incident.incident_description} editKey="incident_description" edit={editCtx} />
+                <TextBlock label="Investigation Findings" value={incident.investigation} editKey="investigation" edit={editCtx} />
+                <TextBlock label="Root Cause" value={incident.root_cause} editKey="root_cause" edit={editCtx} />
               </CardContent>
             </Card>
           )}
 
           {/* ── Corrective & Preventive Actions ── */}
-          {(incident.corrective_action || incident.preventive_action || incident.action_assigned_to || incident.action_due_date || incident.action_status) && (
+          {(editing || incident.corrective_action || incident.preventive_action || incident.action_assigned_to || incident.action_due_date || incident.action_status) && (
             <Card>
               <CardHeader><CardTitle>Corrective &amp; Preventive Actions</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <TextBlock label="Corrective Action" value={incident.corrective_action} />
-                <TextBlock label="Preventive Action" value={incident.preventive_action} />
+                <TextBlock label="Corrective Action" value={incident.corrective_action} editKey="corrective_action" edit={editCtx} />
+                <TextBlock label="Preventive Action" value={incident.preventive_action} editKey="preventive_action" edit={editCtx} />
                 <div className="grid md:grid-cols-3 gap-4 pt-2">
-                  <Field label="Assigned To" value={incident.action_assigned_to} />
+                  <Field label="Assigned To" value={incident.action_assigned_to} editKey="action_assigned_to" edit={editCtx} />
                   <Field label="Due Date" value={incident.action_due_date ? fmtLocalDate(incident.action_due_date) : null} />
                   <Field label="Action Status" value={(() => {
                     const a = normalizeActionStatus(incident.action_status);
@@ -796,11 +922,11 @@ export default function IncidentDetail() {
           )}
 
           {/* ── Notes ── */}
-          {incident.notes && (
+          {(editing || incident.notes) && (
             <Card>
               <CardHeader><CardTitle>Additional Notes</CardTitle></CardHeader>
               <CardContent>
-                <TextBlock label="" value={incident.notes} />
+                <TextBlock label="" value={incident.notes} editKey="notes" edit={editCtx} />
               </CardContent>
             </Card>
           )}
