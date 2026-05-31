@@ -172,10 +172,19 @@ export default function Reports() {
         return q;
       };
 
+      // Panels are a current-fleet snapshot (no event date), so we filter by customer/
+      // district only — NOT the report timeframe. (The table has no created_at column.)
+      const panelQuery = (() => {
+        let q = supabase.from('panels').select('panel_type,panel_status').in('panel_status', ['Leased', 'Loaned', 'Sold']);
+        if (selectedCustomer) q = q.eq('customer', selectedCustomer);
+        if (selectedDistrict) q = q.eq('customer_district', selectedDistrict);
+        return q;
+      })();
+
       const [visitData, incData, panels, barrels, stages] = await Promise.all([
         fetchAll(applyFilters(supabase.from('fieldvisits').select('arrival_date,visit_purpose,visit_duration'), 'arrival_date')),
         fetchAll(applyFilters(supabase.from('incidents').select('date_incident,incident_status,incident_severity,xc_caused,event_category'), 'date_incident')),
-        fetchAll(applyFilters(supabase.from('panels').select('panel_type,panel_status').in('panel_status', ['Leased', 'Loaned', 'Sold']), 'created_at')),
+        fetchAll(panelQuery),
         fetchAll((() => {
           let q = supabase.from('sales_volume').select('date,quantity').eq('metric_type', 'barrels');
           if (start) q = q.gte('date', start); if (end) q = q.lte('date', end);
