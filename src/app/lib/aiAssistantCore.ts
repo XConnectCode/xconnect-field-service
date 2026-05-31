@@ -11,7 +11,7 @@
  * outside this file.
  */
 
-export type AIAction = 'polish' | 'expand' | 'customer_rewrite' | 'review';
+export type AIAction = 'polish' | 'expand' | 'customer_rewrite' | 'review' | 'summarize';
 
 export const ASSISTANT_FIELDS = [
   'incident_description',
@@ -143,6 +143,72 @@ If the report is clean, return { "findings": [] }. Output JSON only.
 
 export function reviewSystemPrompt(): string {
   return REVIEW_SYSTEM_PROMPT;
+}
+
+// ── Summarize ───────────────────────────────────────────────────────────────
+// Produces a short, neutral prose summary of an incident for the dashboard
+// cards / Monday-meeting list. One LLM call, cached to incidents.ai_summary.
+
+const SUMMARIZE_SYSTEM_PROMPT = [
+  `You are a quality manager writing a one-glance summary of an oil & gas`,
+  `field-service incident for a dashboard card. Write 1 to 2 short sentences`,
+  `(max ~40 words total) capturing WHAT happened, the component/system`,
+  `involved, and the current disposition (fault attribution + status) when`,
+  `those are present. Lead with the failure/event itself, not the customer`,
+  `name. Do NOT restate the incident ID, date, or customer name — those are`,
+  `already shown on the card. Never invent facts not present in the input.`,
+  `If the input is too sparse, summarize only what is given.`,
+  ``,
+  STYLE_GUIDE,
+].join('\n');
+
+export function summarizeSystemPrompt(): string {
+  return SUMMARIZE_SYSTEM_PROMPT;
+}
+
+/** Fields used to build the summarization context, in priority order. */
+export const SUMMARIZE_CONTEXT_FIELDS = [
+  'incident_description',
+  'investigation',
+  'root_cause',
+  'notes',
+] as const;
+
+/**
+ * Build the user-side message for a summarize request. Serializes the free
+ * text plus a compact line of structured context (category, component,
+ * well/stage, fault, status) so the model can mention disposition.
+ */
+export function buildSummarizeUserMessage(incident: Record<string, unknown>): string {
+  const lines: string[] = ['Summarize the following incident.'];
+
+  const ctx: string[] = [];
+  const pushCtx = (label: string, key: string) => {
+    const v = incident[key];
+    if (v === undefined || v === null || v === '') return;
+    ctx.push(`${label}: ${String(v)}`);
+  };
+  pushCtx('Category', 'event_category');
+  pushCtx('Severity', 'incident_severity');
+  pushCtx('Failed Component', 'failed_component_label');
+  pushCtx('Failure Type', 'failure_type_label');
+  pushCtx('Well', 'well_name');
+  pushCtx('Stage', 'stage#');
+  pushCtx('XC Caused', 'xc_caused');
+  pushCtx('Vendor Caused', 'vendor_caused');
+  pushCtx('Status', 'incident_status');
+  if (ctx.length) lines.push('', `Context: ${ctx.join(' · ')}`);
+
+  const push = (label: string, key: string) => {
+    const v = incident[key];
+    if (v === undefined || v === null || v === '') return;
+    lines.push('', `--- ${label} (${key}) ---`, String(v));
+  };
+  for (const f of SUMMARIZE_CONTEXT_FIELDS) {
+    push(FIELD_LABELS[f as AssistantField] ?? f, f);
+  }
+
+  return lines.join('\n');
 }
 
 /**
