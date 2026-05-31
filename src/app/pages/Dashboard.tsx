@@ -12,10 +12,14 @@ import {
   statusOptionsForRole,
   isGatedStatus,
   CLOSED_STATUS,
+  FINAL_REVIEW_STATUS,
   ACTION_STATUS_COMPLETE,
   needsReview,
   isReviewed,
+  getReviewSteps,
+  type ReviewStep,
 } from "../lib/incidentWorkflow";
+import { useNavigate } from "react-router";
 import {
   resolveFailedComponentLabel,
   resolveFailureTypeLabel,
@@ -207,18 +211,133 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident
   );
 }
 
+// ── Inline free-text editor (saves on blur) ──────────────────────────────────
+// Used for gated text fields (root cause, product line) so the reviewer can
+// fix them without leaving the modal. Lookups (failed component, failure type)
+// stay in the full editor and are surfaced via the checklist instead.
+function InlineText({ value, field, rowId, onUpdated, isDark, placeholder, multiline }: {
+  value: string; field: string; rowId: string;
+  onUpdated: (rowId: string, field: string, value: string) => void;
+  isDark: boolean; placeholder?: string; multiline?: boolean;
+}) {
+  const [val, setVal] = useState(value ?? "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setVal(value ?? ""); }, [value]);
+
+  const commit = async () => {
+    const next = val.trim();
+    if (next === (value ?? "").trim()) return;
+    setSaving(true);
+    const { error } = await supabase.from("incidents").update({ [field]: next }).eq("row_id", rowId);
+    setSaving(false);
+    if (error) { toast.error(error.message || "Failed to save"); setVal(value ?? ""); return; }
+    onUpdated(rowId, field, next);
+  };
+
+  const baseStyle: React.CSSProperties = {
+    width: "100%", boxSizing: "border-box", fontSize: 13, fontFamily: "inherit",
+    padding: "8px 10px", borderRadius: 6, outline: "none",
+    border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+    background: isDark ? "#0f172a" : "#fff", color: isDark ? "#f1f5f9" : "#0f172a",
+    opacity: saving ? 0.6 : 1,
+  };
+  return multiline ? (
+    <textarea value={val} placeholder={placeholder} disabled={saving} rows={3}
+      onChange={e => setVal(e.target.value)} onBlur={commit} style={{ ...baseStyle, resize: "vertical", lineHeight: 1.5 }} />
+  ) : (
+    <input type="text" value={val} placeholder={placeholder} disabled={saving}
+      onChange={e => setVal(e.target.value)} onBlur={commit} style={baseStyle} />
+  );
+}
+
+// ── Review progress checklist (the ordered, hard-gated flow) ──────────────────
+// Renders the 4 review steps with done / next / blocked states and the action
+// button for the step that is currently actionable. Steps unlock in order:
+//   fields → director review → send to customer → close.
+function ReviewProgress({ steps, isDark, onMarkReviewed, onSendToCustomer, onCloseIncident, busy }: {
+  steps: ReviewStep[]; isDark: boolean;
+  onMarkReviewed: () => void; onSendToCustomer: () => void; onCloseIncident: () => void;
+  busy: boolean;
+}) {
+  const txtPrimary = isDark ? "#f1f5f9" : "#0f172a";
+  const txtSubtle = isDark ? "#94a3b8" : "#64748b";
+  const cardBg = isDark ? "#0f172a" : "#f8fafc";
+  const border = isDark ? "#334155" : "#e2e8f0";
+
+  const actionFor = (id: string) => {
+    if (id === "review") return { label: "✓ Mark Reviewed", fn: onMarkReviewed, bg: "#16a34a" };
+    if (id === "sent")   return { label: "Send to Customer ↗", fn: onSendToCustomer, bg: "#4A154B" };
+    if (id === "closed") return { label: "Close Incident", fn: onCloseIncident, bg: "#475569" };
+    return null;
+  };
+
+  return (
+    <div style={{ margin: "0 0 18px", border: `1px solid ${border}`, borderRadius: 10, background: cardBg, overflow: "hidden" }}>
+      <div style={{ padding: "10px 14px", borderBottom: `1px solid ${border}`, fontSize: 12, fontWeight: 700, color: txtPrimary, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        Review Progress
+      </div>
+      <div>
+        {steps.map((s, i) => {
+          const isLast = i === steps.length - 1;
+          const action = actionFor(s.id);
+          const showAction = !!action && s.actionable && s.allowedForRole;
+          // Circle: done = green check, actionable = blue numbered, blocked = grey.
+          const circleBg = s.done ? "#16a34a" : (s.actionable ? "#3b82f6" : (isDark ? "#334155" : "#e2e8f0"));
+          const circleColor = s.done || s.actionable ? "#fff" : (isDark ? "#64748b" : "#94a3b8");
+          return (
+            <div key={s.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", borderBottom: isLast ? "none" : `1px solid ${border}` }}>
+              <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", background: circleBg, color: circleColor, fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
+                {s.done ? "✓" : i + 1}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: s.done ? txtSubtle : txtPrimary }}>
+                  {s.label}
+                  {s.actionable && !s.done && (
+                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 20, background: "#3b82f6", color: "#fff", textTransform: "uppercase", letterSpacing: "0.04em" }}>Next</span>
+                  )}
+                </div>
+                {/* Missing-field detail for the fields step. */}
+                {s.id === "fields" && !s.done && s.missing.length > 0 && (
+                  <div style={{ fontSize: 11.5, color: isDark ? "#fca5a5" : "#b91c1c", marginTop: 3, lineHeight: 1.5 }}>
+                    Missing: {s.missing.join(", ")}
+                  </div>
+                )}
+                {/* Why this step is blocked. */}
+                {!s.done && !s.actionable && s.blockedReason && (
+                  <div style={{ fontSize: 11.5, color: txtSubtle, marginTop: 3 }}>{s.blockedReason}</div>
+                )}
+                {/* Role-not-allowed note when actionable but wrong role. */}
+                {!s.done && s.actionable && !s.allowedForRole && s.blockedReason && (
+                  <div style={{ fontSize: 11.5, color: txtSubtle, marginTop: 3 }}>{s.blockedReason}</div>
+                )}
+              </div>
+              {showAction && (
+                <button onClick={action!.fn} disabled={busy} style={{ flexShrink: 0, padding: "5px 12px", borderRadius: 6, border: "none", background: action!.bg, color: "#fff", fontSize: 11.5, fontWeight: 600, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1, whiteSpace: "nowrap" }}>
+                  {action!.label}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Full incident popup modal ─────────────────────────────────────────────────
-function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, onUpdated, role, isDark = false }: {
+function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, onUpdated, onMarkReviewed, role, isDark = false }: {
   incident: any;
   listMap: Record<string, any>;
   componentsMap: Record<string, { failed_component: string }>;
   vendorMap: Record<string, string>;
   onClose: () => void;
   onUpdated: (rowId: string, field: string, value: string) => void;
+  onMarkReviewed: (inc: any) => Promise<void> | void;
   role?: 'admin' | 'sqm';
   isDark?: boolean;
 }) {
   const r = incident;
+  const navigate = useNavigate();
   const modal = makeModal(isDark);
   const txtPrimary = isDark ? "#f1f5f9" : "#0f172a";
   const txtSubtle = isDark ? "#94a3b8" : "#64748b";
@@ -227,6 +346,42 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
   const failedComp  = resolveFailedComponentLabel(r.failed_component, componentsMap, '') || null;
   const failureType = resolveFailureTypeLabel(r.failure_type, listMap, '') || null;
   const vendorName  = vendorMap[r.vendor] || r.vendor || null;
+
+  // Ordered review checklist for this incident (fields → review → sent → close).
+  const reviewSteps = getReviewSteps(r, role);
+  const [busy, setBusy] = useState(false);
+
+  const goToFullEditor = () => navigate(`/incidents/${r.row_id}`);
+
+  const handleReview = async () => {
+    setBusy(true);
+    await onMarkReviewed(r);
+    setBusy(false);
+  };
+
+  // Sending the report to the customer (email + attachment) lives in the full
+  // Incident Detail page — navigate there so the reviewer completes the last
+  // task with the real send flow. This is always the final task before close.
+  const handleSend = () => goToFullEditor();
+
+  // Closing requires fields + review + sent, then sets status Closed and forces
+  // action_status Complete (so the cover can't contradict the DB CHECK).
+  const handleCloseIncident = async () => {
+    const missing = validateForStatus(r, CLOSED_STATUS);
+    if (missing.length) {
+      toast.error(`Cannot close — missing: ${missing.join(", ")}.`, { duration: 6000 });
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.from("incidents")
+      .update({ incident_status: CLOSED_STATUS, action_status: ACTION_STATUS_COMPLETE })
+      .eq("row_id", r.row_id);
+    setBusy(false);
+    if (error) { toast.error(error.message || "Failed to close incident"); return; }
+    onUpdated(r.row_id, "incident_status", CLOSED_STATUS);
+    onUpdated(r.row_id, "action_status", ACTION_STATUS_COMPLETE);
+    toast.success("Incident closed.");
+  };
 
   return (
     <div style={modal.overlay} onClick={onClose}>
@@ -269,6 +424,27 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
 
         {/* Scrollable content */}
         <div style={modal.body}>
+          {/* Ordered review checklist + last-task gating. Hidden once the
+              incident is fully closed (all steps complete). */}
+          {!reviewSteps.every(s => s.done) && (
+            <ReviewProgress
+              steps={reviewSteps}
+              isDark={isDark}
+              onMarkReviewed={handleReview}
+              onSendToCustomer={handleSend}
+              onCloseIncident={handleCloseIncident}
+              busy={busy}
+            />
+          )}
+
+          {/* Edit the full incident (lookups like Failed Component / Failure
+              Type, and any field not inline-editable here). */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+            <button onClick={goToFullEditor} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`, background: isDark ? "#334155" : "#fff", color: isDark ? "#e2e8f0" : "#334155", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+              ✎ Edit full incident
+            </button>
+          </div>
+
           {/* Info grid */}
           <div style={modal.grid}>
             {r.customerName  && <InfoItem label="Customer"        value={r.customerName} isDark={isDark} />}
@@ -277,7 +453,16 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
             {r.customer_rep  && <InfoItem label="Customer Rep"    value={r.customer_rep} isDark={isDark} />}
             {r.ep_rep        && <InfoItem label="EP Rep"          value={r.ep_rep} isDark={isDark} />}
             {r.event_category && <InfoItem label="Category"       value={r.event_category} isDark={isDark} />}
-            {r.product_line  && <InfoItem label="Product Line"    value={r.product_line} isDark={isDark} />}
+            {/* Product Line is a gated field — inline-editable so the reviewer
+                can fill/fix it without leaving the modal. */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Product Line</div>
+              {role ? (
+                <InlineText value={r.product_line || ""} field="product_line" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} placeholder="Enter product line…" />
+              ) : (
+                <div style={{ fontSize: 13, color: isDark ? "#f1f5f9" : "#0f172a" }}>{r.product_line || "—"}</div>
+              )}
+            </div>
             {r.firing_system && <InfoItem label="Firing System"   value={r.firing_system} isDark={isDark} />}
             {r.field_facility && <InfoItem label="Field/Facility" value={r.field_facility} isDark={isDark} />}
             {r.well_name     && <InfoItem label="Well Name"       value={r.well_name} isDark={isDark} />}
@@ -288,18 +473,28 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
             {vendorName      && <InfoItem label="Vendor"          value={vendorName} isDark={isDark} />}
           </div>
 
-          {/* Text blocks */}
+          {/* Read-only narrative blocks. */}
           {[
             { label: "Notes",          text: r.notes },
             { label: "Description",    text: r.incident_description },
             { label: "Investigation",  text: r.investigation },
-            { label: "Root Cause",     text: r.root_cause },
           ].filter(b => b.text).map(({ label, text }) => (
             <div key={label} style={{ marginBottom: 14 }}>
               <div style={modal.blockLabel}>{label}</div>
               <div style={modal.blockText}>{text}</div>
             </div>
           ))}
+
+          {/* Root Cause is a gated field — always shown and inline-editable so a
+              missing conclusion can be filled in during review. */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={modal.blockLabel}>Root Cause / Conclusion</div>
+            {role ? (
+              <InlineText value={r.root_cause || ""} field="root_cause" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} placeholder="Enter the root cause / conclusion…" multiline />
+            ) : (
+              <div style={modal.blockText}>{r.root_cause || "—"}</div>
+            )}
+          </div>
 
           {/* Images — photos live in images_legacy keyed by event_id (incidents
               image1/image2 are unused). Shared component renders nothing if none. */}
@@ -442,6 +637,15 @@ export default function Dashboard() {
   const handleMarkReviewed = useCallback(async (inc: any) => {
     if (role !== "admin") {
       toast.error("Only the director/admin can mark an incident reviewed.");
+      return;
+    }
+    // Hard gate: required fields must be complete before director sign-off.
+    const missing = validateForStatus(inc, FINAL_REVIEW_STATUS);
+    if (missing.length) {
+      toast.error(
+        `Cannot mark reviewed — complete these first: ${missing.join(", ")}.`,
+        { duration: 6000 },
+      );
       return;
     }
     const reviewer = user?.name || user?.email || "Director";
@@ -729,8 +933,29 @@ export default function Dashboard() {
                   {inc.xc_caused && (
                     <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: "#fee2e2", color: "#b91c1c" }}>XC: {inc.xc_caused}</span>
                   )}
-                  <button onClick={() => setModalIncident(inc)} style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${isDark ? "#475569" : "#e2e8f0"}`, background: isDark ? "#334155" : "#fff", cursor: "pointer", fontSize: 11, color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500 }}>View</button>
-                  <button onClick={() => handleMarkReviewed(inc)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "#16a34a", cursor: "pointer", fontSize: 11, color: "#fff", fontWeight: 600 }}>✓ Mark Reviewed</button>
+                  {(() => {
+                    // Reflect the hard gate: only offer one-click review when the
+                    // required fields are complete. Otherwise prompt to open the
+                    // incident and finish the missing fields first.
+                    const missing = validateForStatus(inc, FINAL_REVIEW_STATUS);
+                    const ready = missing.length === 0;
+                    return (
+                      <>
+                        <button onClick={() => setModalIncident(inc)} style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${isDark ? "#475569" : "#e2e8f0"}`, background: isDark ? "#334155" : "#fff", cursor: "pointer", fontSize: 11, color: isDark ? "#cbd5e1" : "#475569", fontWeight: 500 }}>Open</button>
+                        {ready ? (
+                          <button onClick={() => handleMarkReviewed(inc)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "#16a34a", cursor: "pointer", fontSize: 11, color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}>✓ Mark Reviewed</button>
+                        ) : (
+                          <button
+                            onClick={() => setModalIncident(inc)}
+                            title={`Complete required fields first: ${missing.join(", ")}`}
+                            style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${isDark ? "#475569" : "#e2e8f0"}`, background: isDark ? "#1e293b" : "#f8fafc", cursor: "pointer", fontSize: 11, color: isDark ? "#94a3b8" : "#64748b", fontWeight: 600, whiteSpace: "nowrap" }}
+                          >
+                            Complete fields →
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -992,6 +1217,7 @@ export default function Dashboard() {
           vendorMap={vendorMap}
           onClose={() => setModalIncident(null)}
           onUpdated={handleUpdated}
+          onMarkReviewed={handleMarkReviewed}
           role={role}
           isDark={isDark}
         />
