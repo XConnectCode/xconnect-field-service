@@ -77,7 +77,9 @@ export default function PanelsNew() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const headers = { 'Authorization': `Bearer ${publicAnonKey}` };
+      // Edge data routes require a real user token after the auth lockdown
+      // (anon key returns 401). loadData only runs once accessToken exists.
+      const headers = { 'Authorization': `Bearer ${accessToken ?? publicAnonKey}` };
       const [panelsRes, customersRes, districtsRes, fwRes] = await Promise.all([
         fetch(`${baseUrl}/panels`,    { headers }),
         fetch(`${baseUrl}/customers`, { headers }),
@@ -89,9 +91,10 @@ export default function PanelsNew() {
       ]);
       // Show all panels in the table (Verified column reflects status).
       // KPI cards below are computed from verified-only panels.
-      setPanels(panelsData || []);
-      setCustomers(customersData || []);
-      setDistricts(districtsData || []);
+      // Guard against non-array error responses so the page never crashes.
+      setPanels(Array.isArray(panelsData)       ? panelsData       : []);
+      setCustomers(Array.isArray(customersData) ? customersData : []);
+      setDistricts(Array.isArray(districtsData) ? districtsData : []);
       setFirmwareTargets(fwData && typeof fwData === 'object' && !fwData.error ? fwData : {});
     } catch (err) {
       console.error('Error loading panels:', err);
@@ -209,7 +212,7 @@ export default function PanelsNew() {
       const res = await fetch(`${baseUrl}/firmware-targets`, {
         method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          'Authorization': `Bearer ${accessToken ?? publicAnonKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ ...next, updated_by: user?.email ?? user?.name ?? null }),

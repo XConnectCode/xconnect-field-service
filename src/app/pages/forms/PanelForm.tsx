@@ -24,7 +24,15 @@ import { toast } from 'sonner';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
-const headers  = { 'Authorization': `Bearer ${publicAnonKey}`, 'Content-Type': 'application/json' };
+
+// The edge data routes require a real user token after the auth lockdown
+// (anon key returns 401). Resolve the live session token at request time and
+// fall back to the anon key only if there's no session.
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token || publicAnonKey;
+  return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
 
 // ── Fixed value dropdowns ─────────────────────────────────────────────────────
 const PANEL_TYPE_OPTS   = ['Surface Tester', 'Master Safe Panel', 'Digital Shooting Panel', 'P1000', 'P2000', 'P2500', 'Toolstring Simulator', 'Pressure Box'];
@@ -152,7 +160,7 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
         : `${baseUrl}/panels`;
       const res = await fetch(url, {
         method: editing ? 'PUT' : 'POST',
-        headers,
+        headers: await authHeaders(),
         body: JSON.stringify(payload),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed'); }

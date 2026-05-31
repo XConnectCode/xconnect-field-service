@@ -208,11 +208,17 @@ export default function IncidentsNew() {
     setLoading(true);
     try {
       const restBase    = `https://${projectId}.supabase.co/rest/v1`;
-      const restHeaders = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${publicAnonKey}` };
+      // After the edge auth lockdown, the edge data routes require a real user
+      // token (anon key returns 401). Forward the logged-in user's session
+      // token; loadData only runs once accessToken exists. REST reads still use
+      // the anon apikey + the user token so RLS sees the authenticated user.
+      const token       = accessToken ?? publicAnonKey;
+      const edgeHeaders = { 'Authorization': `Bearer ${token}` };
+      const restHeaders = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${token}` };
       const [incRes, custRes, distRes, listsRes, vendorsRes, compRes] = await Promise.all([
-        fetch(`${baseUrl}/incidents`,  { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
-        fetch(`${baseUrl}/customers`,  { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
-        fetch(`${baseUrl}/districts`,  { headers: { 'Authorization': `Bearer ${publicAnonKey}` } }),
+        fetch(`${baseUrl}/incidents`,  { headers: edgeHeaders }),
+        fetch(`${baseUrl}/customers`,  { headers: edgeHeaders }),
+        fetch(`${baseUrl}/districts`,  { headers: edgeHeaders }),
         fetch(`${restBase}/lists?select=row_id,failed_component,failure_type`, { headers: restHeaders }),
         fetch(`${restBase}/vendors?select=row_id,vendor`, { headers: restHeaders }),
         fetch(`${restBase}/components?select=row_id,failed_component`, { headers: restHeaders }),
@@ -220,15 +226,17 @@ export default function IncidentsNew() {
       const [incData, custData, distData] = await Promise.all([
         incRes.json(), custRes.json(), distRes.json(),
       ]);
-      setIncidents(incData  || []);
-      setCustomers(custData || []);
-      setDistricts(distData || []);
-      if (listsRes.ok)   setLists(await listsRes.json()   || []);
-      if (vendorsRes.ok) setVendors(await vendorsRes.json() || []);
-      if (compRes.ok)    setComponents(await compRes.json() || []);
+      // Guard: an error response is a non-array object; never let it reach the
+      // array consumers (e.g. customers.forEach) and crash the page.
+      setIncidents(Array.isArray(incData)  ? incData  : []);
+      setCustomers(Array.isArray(custData) ? custData : []);
+      setDistricts(Array.isArray(distData) ? distData : []);
+      if (listsRes.ok)   { const d = await listsRes.json();   setLists(Array.isArray(d) ? d : []); }
+      if (vendorsRes.ok) { const d = await vendorsRes.json(); setVendors(Array.isArray(d) ? d : []); }
+      if (compRes.ok)    { const d = await compRes.json();    setComponents(Array.isArray(d) ? d : []); }
 
       // Load shared incident reports (PDFs) from Supabase Storage
-      const eventIds = (incData || []).map((i: any) => i.event_id).filter(Boolean);
+      const eventIds = (Array.isArray(incData) ? incData : []).map((i: any) => i.event_id).filter(Boolean);
       const reports  = await listIncidentReportsForEvents(eventIds);
       setReportsByEvent(reports);
     } catch (err) {
