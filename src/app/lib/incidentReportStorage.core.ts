@@ -42,7 +42,20 @@ export const sanitizeEventId = (eventId: string) =>
   String(eventId).replace(/[^A-Za-z0-9_-]/g, '_');
 
 /**
+ * report_type written for native AppSheet reports migrated from Drive.
+ * These are treated as the "Final" report so they surface in the main
+ * Final slot, while ALSO continuing to appear in the Archive list
+ * (the archive filter only excludes 'Preliminary'/'Final').
+ */
+export const APPSHEET_ORIGINAL_TYPE = 'AppSheet Original';
+
+/**
  * Convenience: find the current Preliminary or Final row in a list of reports.
+ *
+ * Fallback: when asking for the Final report and no app-generated Final
+ * exists, surface a migrated native 'AppSheet Original' report instead so
+ * incidents that already had a report attached in AppSheet show it in the
+ * main Final slot (it also remains visible in the Archive section).
  */
 export function pickReport(
   reports: IncidentReportRow[] | undefined,
@@ -50,5 +63,10 @@ export function pickReport(
 ): IncidentReportRow | undefined {
   if (!reports) return undefined;
   const target = reportTypeFor(version);
-  return reports.find(r => r.report_type === target);
+  const exact = reports.find(r => r.report_type === target);
+  if (exact) return exact;
+  if (version === 'final') {
+    return reports.find(r => r.report_type === APPSHEET_ORIGINAL_TYPE);
+  }
+  return undefined;
 }
