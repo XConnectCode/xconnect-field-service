@@ -145,6 +145,25 @@ export const driverLoadApi = {
     apiRequest(`/driver-loads/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }, token),
 };
 
+// QC Pallet APIs (perforating gun inspection)
+export const qcPalletApi = {
+  getAll: (token?: string) => apiRequest('/qc-pallets', {}, token),
+  getPassed: (token?: string) => apiRequest('/qc-pallets/passed', {}, token),
+  get: (id: string, token?: string) => apiRequest(`/qc-pallets/${id}`, {}, token),
+  create: (pallet: any, token?: string) =>
+    apiRequest('/qc-pallets', { method: 'POST', body: JSON.stringify(pallet) }, token),
+  update: (id: string, updates: any, token?: string) =>
+    apiRequest(`/qc-pallets/${id}`, { method: 'PUT', body: JSON.stringify(updates) }, token),
+  remove: (id: string, token?: string) =>
+    apiRequest(`/qc-pallets/${id}`, { method: 'DELETE' }, token),
+  initGuns: (id: string, gunsTotal: number, token?: string) =>
+    apiRequest(`/qc-pallets/${id}/guns`, { method: 'POST', body: JSON.stringify({ guns_total: gunsTotal }) }, token),
+  saveGun: (gunId: string, payload: any, token?: string) =>
+    apiRequest(`/qc-guns/${gunId}`, { method: 'PUT', body: JSON.stringify(payload) }, token),
+  signoff: (id: string, signedOffBy: string, token?: string) =>
+    apiRequest(`/qc-pallets/${id}/signoff`, { method: 'POST', body: JSON.stringify({ signed_off_by: signedOffBy }) }, token),
+};
+
 // Auth APIs
 export const authApi = {
   signup: (userData: { email: string; password: string; name: string; role: string }) => 

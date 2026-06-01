@@ -26,6 +26,8 @@ import TechnicalBulletinSetup from './pages/TechnicalBulletinSetup';
 import Executive from './pages/Executive';
 import DriverLoads from './pages/DriverLoads';
 import DriverLoadDetail from './pages/DriverLoadDetail';
+import QcPallets from './pages/QcPallets';
+import QcPalletDetail from './pages/QcPalletDetail';
 
 type Role = 'admin' | 'sqm' | 'ops';
 
@@ -54,16 +56,6 @@ function RequireRole({ roles, children }: { roles: Role[]; children: React.React
   return <>{children}</>;
 }
 
-// Placeholder page for the QC module (real pages land in PR 4).
-function QcPlaceholder() {
-  return (
-    <div className="p-8">
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">QC</h1>
-      <p className="text-gray-600 dark:text-gray-300 mt-2">Coming soon — perforating gun QC inspection.</p>
-    </div>
-  );
-}
-
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -90,7 +82,8 @@ export const router = createBrowserRouter([
       { path: "debug", element: <AdminOnly><Debug /></AdminOnly> },
       { path: "driver",     element: <RequireRole roles={['admin','ops']}><DriverLoads /></RequireRole> },
       { path: "driver/:id", element: <RequireRole roles={['admin','ops']}><DriverLoadDetail /></RequireRole> },
-      { path: "qc",         element: <RequireRole roles={['admin','ops']}><QcPlaceholder /></RequireRole> },
+      { path: "qc",         element: <RequireRole roles={['admin','ops']}><QcPallets /></RequireRole> },
+      { path: "qc/:id",     element: <RequireRole roles={['admin','ops']}><QcPalletDetail /></RequireRole> },
       { path: "*", Component: NotFound },
     ],
   },

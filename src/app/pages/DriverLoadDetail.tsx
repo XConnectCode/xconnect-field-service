@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { driverLoadApi } from '../lib/api';
+import { driverLoadApi, qcPalletApi } from '../lib/api';
 import { XC_BASES } from '../lib/xcLocations';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import ImageUpload, { ImageRecord } from '../components/ImageUpload';
@@ -51,6 +51,7 @@ export default function DriverLoadDetail() {
   const [load, setLoad] = useState<any>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [images, setImages] = useState<ImageRecord[]>([]);
+  const [passedPallets, setPassedPallets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -97,6 +98,41 @@ export default function DriverLoadDetail() {
   useEffect(() => {
     fetchLoad();
   }, [id, accessToken]);
+
+  // QC-passed pallets are selectable as load line items (the QC→Driver link).
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await qcPalletApi.getPassed(accessToken || undefined);
+        setPassedPallets(Array.isArray(data) ? data : []);
+      } catch { /* non-fatal */ }
+    })();
+  }, [accessToken]);
+
+  const addPalletItem = (palletRowId: string) => {
+    const p = passedPallets.find((x) => x.row_id === palletRowId);
+    if (!p) return;
+    // Auto-fill customer + customer district + destination from the pallet paperwork.
+    setLoad((prev: any) => ({
+      ...prev,
+      customer: prev.customer || p.customer || null,
+      destination: prev.destination || p.destination || null,
+    }));
+    setItems((prev) => [
+      ...prev,
+      {
+        pallet_build_no: p.build_no ?? '',
+        description: `Perforating guns (${p.load_type})`,
+        qty_expected: p.guns_total ?? '',
+        qty_loaded: '',
+        destination: p.destination ?? '',
+        checked: false,
+        note: '',
+        source_pallet_row_id: p.row_id,
+      },
+    ]);
+    toast.success(`Added pallet ${p.build_no || ''}`);
+  };
 
   // ── field helpers ───────────────────────────────────────────────────────────
   const setField = (key: string, value: any) => setLoad((prev: any) => ({ ...prev, [key]: value }));
@@ -373,7 +409,21 @@ export default function DriverLoadDetail() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-lg">2. Load / Cargo</CardTitle>
-            <Button variant="outline" size="sm" onClick={addItem}><Plus className="w-4 h-4 mr-1" /> Add pallet</Button>
+            <div className="flex items-center gap-2">
+              {passedPallets.length > 0 && (
+                <Select value="" onValueChange={addPalletItem}>
+                  <SelectTrigger className="w-56"><SelectValue placeholder="Add QC-passed pallet" /></SelectTrigger>
+                  <SelectContent>
+                    {passedPallets.map((p) => (
+                      <SelectItem key={p.row_id} value={p.row_id}>
+                        {p.build_no || p.row_id.slice(0, 8)} {p.customer ? `· ${p.customer}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button variant="outline" size="sm" onClick={addItem}><Plus className="w-4 h-4 mr-1" /> Add row</Button>
+            </div>
           </CardHeader>
           <CardContent>
             {items.length === 0 ? (

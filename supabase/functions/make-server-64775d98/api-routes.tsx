@@ -1249,6 +1249,243 @@ apiRoutes.post("/driver-loads/:id/items", async (c) => {
   }
 });
 
+// ============ QC PALLETS (perforating gun inspection) ============
+
+const QC_PALLET_FIELDS = [
+  'build_no','customer','destination','load_type','guns_total',
+  'status','signed_off_by','signed_off_at','notes','updated_by',
+];
+function pickQcPallet(body: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const k of QC_PALLET_FIELDS) if (k in body) out[k] = body[k];
+  return out;
+}
+
+const QC_CHECK_KEYS = ['parts','orientation','charges','detcord','wiring','build'];
+
+// List pallets (most recent first).
+apiRoutes.get("/qc-pallets", async (c) => {
+  try {
+    const { data, error } = await supabase
+      .from('qc_pallets').select('*').order('created_at', { ascending: false });
+    if (error) {
+      console.error('Error fetching qc pallets:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    // Attach per-pallet gun pass counts so the list can show progress.
+    const pallets = data || [];
+    for (const p of pallets) {
+      const { data: guns } = await supabase
+        .from('qc_guns').select('result').eq('pallet_row_id', p.row_id);
+      const all = guns || [];
+      (p as Record<string, unknown>).guns_passed = all.filter((g: any) => g.result === 'pass').length;
+      (p as Record<string, unknown>).guns_failed = all.filter((g: any) => g.result === 'fail').length;
+      (p as Record<string, unknown>).guns_count = all.length;
+    }
+    return c.json(pallets);
+  } catch (error) {
+    console.error('Error in qc-pallets list endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// QC-passed pallets — used by the driver module to populate load line items.
+apiRoutes.get("/qc-pallets/passed", async (c) => {
+  try {
+    const { data, error } = await supabase
+      .from('qc_pallets').select('*').eq('status', 'passed').order('created_at', { ascending: false });
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json(data || []);
+  } catch (error) {
+    console.error('Error in qc-pallets passed endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Detail: pallet + its guns (each with its checks).
+apiRoutes.get("/qc-pallets/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { data: pallet, error } = await supabase
+      .from('qc_pallets').select('*').eq('row_id', id).single();
+    if (error) {
+      console.error('Error fetching qc pallet:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    const { data: guns } = await supabase
+      .from('qc_guns').select('*').eq('pallet_row_id', id).order('gun_index');
+    const gunList = guns || [];
+    for (const g of gunList) {
+      const { data: checks } = await supabase
+        .from('qc_gun_checks').select('*').eq('gun_row_id', g.row_id);
+      (g as Record<string, unknown>).checks = checks || [];
+    }
+    return c.json({ ...pallet, guns: gunList });
+  } catch (error) {
+    console.error('Error in qc-pallet detail endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.post("/qc-pallets", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { data, error } = await supabase
+      .from('qc_pallets').insert(pickQcPallet(body)).select().single();
+    if (error) {
+      console.error('Error creating qc pallet:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in create qc pallet endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.put("/qc-pallets/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const patch = pickQcPallet(body);
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('qc_pallets').update(patch).eq('row_id', id).select().single();
+    if (error) {
+      console.error('Error updating qc pallet:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in update qc pallet endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.delete("/qc-pallets/:id", requireAdmin, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { error } = await supabase.from('qc_pallets').delete().eq('row_id', id);
+    if (error) {
+      console.error('Error deleting qc pallet:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error in delete qc pallet endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Initialise N guns for a pallet (idempotent: replaces the gun set).
+// Each gun gets the six default check rows in 'pass' state; QC flips to fail/na.
+apiRoutes.post("/qc-pallets/:id/guns", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const count = Math.max(0, Math.min(1000, Number(body.guns_total) || 0));
+    // Wipe existing guns (checks cascade) then re-create.
+    await supabase.from('qc_guns').delete().eq('pallet_row_id', id);
+    const created: any[] = [];
+    for (let i = 1; i <= count; i++) {
+      const { data: gun, error: gErr } = await supabase
+        .from('qc_guns').insert({ pallet_row_id: id, gun_index: i, result: 'pending' }).select().single();
+      if (gErr) {
+        console.error('Error inserting qc gun:', gErr);
+        return c.json({ error: gErr.message }, 500);
+      }
+      const checkRows = QC_CHECK_KEYS.map((k) => ({ gun_row_id: gun.row_id, item_key: k, state: 'pass' }));
+      await supabase.from('qc_gun_checks').insert(checkRows);
+      created.push(gun);
+    }
+    await supabase.from('qc_pallets')
+      .update({ guns_total: count, status: count > 0 ? 'in_progress' : 'open', updated_at: new Date().toISOString() })
+      .eq('row_id', id);
+    return c.json({ guns_total: count, guns: created });
+  } catch (error) {
+    console.error('Error in qc-pallet guns init endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Record a gun's checks + result. Body: { checks: [{item_key,state,note}], serial, notes, inspected_by }
+apiRoutes.put("/qc-guns/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const checks: any[] = Array.isArray(body.checks) ? body.checks : [];
+    // Replace checks for this gun.
+    await supabase.from('qc_gun_checks').delete().eq('gun_row_id', id);
+    if (checks.length) {
+      const rows = checks
+        .filter((ck) => QC_CHECK_KEYS.includes(ck.item_key))
+        .map((ck) => ({
+          gun_row_id: id,
+          item_key: ck.item_key,
+          state: ['pass','fail','na'].includes(ck.state) ? ck.state : 'pass',
+          note: ck.note ?? null,
+        }));
+      if (rows.length) await supabase.from('qc_gun_checks').insert(rows);
+    }
+    // A gun fails if any check is 'fail'; otherwise it passes (na counts as ok).
+    const anyFail = checks.some((ck) => ck.state === 'fail');
+    const result = anyFail ? 'fail' : 'pass';
+    const { data: gun, error } = await supabase
+      .from('qc_guns').update({
+        result,
+        serial: body.serial ?? null,
+        notes: body.notes ?? null,
+        inspected_by: body.inspected_by ?? null,
+        inspected_at: new Date().toISOString(),
+      }).eq('row_id', id).select().single();
+    if (error) {
+      console.error('Error updating qc gun:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(gun);
+  } catch (error) {
+    console.error('Error in qc-gun update endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Sign off a pallet. Only allowed when every gun has passed (and there is >=1 gun).
+apiRoutes.post("/qc-pallets/:id/signoff", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const user = c.get('user');
+    const { data: guns } = await supabase
+      .from('qc_guns').select('result').eq('pallet_row_id', id);
+    const all = guns || [];
+    const total = all.length;
+    const passed = all.filter((g: any) => g.result === 'pass').length;
+    if (total === 0) {
+      return c.json({ error: 'Cannot sign off: no guns have been inspected on this pallet.' }, 400);
+    }
+    if (passed !== total) {
+      return c.json({ error: `Cannot sign off: ${total - passed} of ${total} guns have not passed.` }, 400);
+    }
+    const signer = body.signed_off_by || user?.email || null;
+    const { data, error } = await supabase
+      .from('qc_pallets').update({
+        status: 'passed',
+        signed_off_by: signer,
+        signed_off_at: new Date().toISOString(),
+        updated_by: signer,
+        updated_at: new Date().toISOString(),
+      }).eq('row_id', id).select().single();
+    if (error) {
+      console.error('Error signing off qc pallet:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in qc-pallet signoff endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // ============ FILE UPLOADS FOR INCIDENTS ============
 
 // Upload incident image
