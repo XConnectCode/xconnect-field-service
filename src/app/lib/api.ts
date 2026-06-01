@@ -219,6 +219,32 @@ export const qcPalletFileApi = {
     apiRequest(`/images/${encodeURIComponent(imageId)}`, { method: 'DELETE' }, token),
 };
 
+// ── Driver-load file/image helpers (polymorphic images table) ──────────────────
+// Mirrors qcPalletFileApi but targets the driver_loads parent. Used by the
+// packing-slip PDF auto-import flow to attach the parsed PDF to its SO group.
+export const driverLoadFileApi = {
+  list: (loadId: string, token?: string) =>
+    apiRequest(`/images/driver_loads/${encodeURIComponent(loadId)}`, {}, token),
+
+  upload: async (loadId: string, file: File, fieldName: string, token?: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('fieldName', fieldName);
+    const resp = await fetch(
+      `${API_BASE_URL}/images/driver_loads/${encodeURIComponent(loadId)}`,
+      { method: 'POST', headers: { Authorization: await authHeader(token) }, body: fd },
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `Upload failed (HTTP ${resp.status})`);
+    }
+    return resp.json();
+  },
+
+  remove: (imageId: string, token?: string) =>
+    apiRequest(`/images/${encodeURIComponent(imageId)}`, { method: 'DELETE' }, token),
+};
+
 // Auth APIs
 export const authApi = {
   signup: (userData: { email: string; password: string; name: string; role: string }) => 

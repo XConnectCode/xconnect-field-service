@@ -1323,7 +1323,19 @@ function parseSlipText(text: string) {
   const doc_type = /Pallet Build Slip/i.test(clean) ? 'build_slip'
     : /Packing Slip/i.test(clean) ? 'packing_slip' : 'unknown';
 
-  return { doc_type, sales_order, fulfillment_ids, customer, operator, destination, date, gun_qty, load_type };
+  // Packing slip number. NetSuite embeds it in the title line, e.g.
+  // "Packing Slip - Sales Order #SO4698-PS-8455" -> PS-8455. Also handle a
+  // standalone "Packing Slip #PS-8455" form and a generic "PS-####" fallback.
+  let packing_slip_no: string | null = null;
+  if (doc_type === 'packing_slip') {
+    const norm = (s: string) => s.toUpperCase().replace(/^PS-?/, 'PS-');
+    const m = clean.match(/SO\d+-(PS-?\d+)/i)
+      || clean.match(/Packing Slip[^\n]*#?\s*(PS-?\d+)/i)
+      || clean.match(/\b(PS-?\d+)\b/i);
+    if (m) packing_slip_no = norm(m[1]);
+  }
+
+  return { doc_type, sales_order, packing_slip_no, fulfillment_ids, customer, operator, destination, date, gun_qty, load_type };
 }
 
 // POST /qc-slip/parse  body: { text }  -> parsed fields (no DB writes)

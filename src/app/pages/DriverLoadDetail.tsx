@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { driverLoadApi, qcPalletApi, qcPalletFileApi } from '../lib/api';
+import { driverLoadApi, qcPalletApi, qcPalletFileApi, driverLoadFileApi } from '../lib/api';
+import { extractPdfText } from '../lib/pdfText';
 import { XC_BASES } from '../lib/xcLocations';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import ImageUpload, { ImageRecord } from '../components/ImageUpload';
@@ -60,6 +61,8 @@ export default function DriverLoadDetail() {
   const [palletMeta, setPalletMeta] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // true while a packing-slip PDF is being parsed + auto-attached.
+  const [importingSlip, setImportingSlip] = useState(false);
 
   const isAdmin = user?.role === 'admin';
 
@@ -244,6 +247,54 @@ export default function DriverLoadDetail() {
     (load?.packing_slips_by_so && typeof load.packing_slips_by_so === 'object'
       ? load.packing_slips_by_so[so]
       : '') || '';
+
+  // Auto-import a packing slip PDF: extract text -> parse SO# + packing slip # on
+  // the server -> match to an SO group on this load -> fill the slip # and attach
+  // the PDF as that group's packing slip document (no manual typing).
+  const handleImportPackingSlip = async (file: File | null) => {
+    if (!file || !id) return;
+    setImportingSlip(true);
+    try {
+      const text = await extractPdfText(file);
+      const parsed = await qcPalletApi.parseSlip(text, accessToken || undefined);
+      if (parsed?.doc_type !== 'packing_slip') {
+        toast.error('That PDF does not look like a packing slip (it may be a pallet build slip).');
+        return;
+      }
+      const so = String(parsed?.sales_order || '').trim();
+      const slipNo = String(parsed?.packing_slip_no || '').trim();
+      if (!so) {
+        toast.error('Could not read a Sales Order number from the PDF.');
+        return;
+      }
+      // The Sales Order must already be on the load (via a linked QC-passed pallet).
+      const group = soGroups.find((g) => g.so === so);
+      if (!group) {
+        const known = soGroups.map((g) => g.so).filter((s) => s !== '(no SO)');
+        toast.error(
+          `Packing slip is for ${so}, which is not on this load.` +
+          (known.length ? ` Loaded Sales Orders: ${known.join(', ')}.` : ' Add its QC-passed pallets first.')
+        );
+        return;
+      }
+      const field = slipPhotoField(so);
+      // Attach the PDF as the SO group's packing slip document.
+      const rec = await driverLoadFileApi.upload(id, file, field, accessToken || undefined);
+      setImages((p) => [
+        ...p,
+        { id: rec.id, url: rec.url, storagePath: rec.storagePath, fieldName: field, mimeType: file.type || 'application/pdf' },
+      ]);
+      // Auto-fill the packing slip number for the matching SO group.
+      if (slipNo) setSlipNoFor(so, slipNo);
+      toast.success(
+        `Packing slip attached to ${so}` + (slipNo ? ` (#${slipNo})` : ' (no slip # found — enter manually)')
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to import packing slip PDF.');
+    } finally {
+      setImportingSlip(false);
+    }
+  };
 
   const correlation = useMemo(() => {
     const checks: { ok: boolean; label: string; detail?: string }[] = [];
@@ -652,7 +703,29 @@ export default function DriverLoadDetail() {
 
             {/* Packing slips — one per Sales Order on this load. */}
             <div className="space-y-3">
-              <Label className="font-medium">Packing Slips (one per Sales Order)</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="font-medium">Packing Slips (one per Sales Order)</Label>
+                <Button asChild variant="outline" size="sm" disabled={importingSlip || soGroups.length === 0}>
+                  <label className="cursor-pointer">
+                    <FileText className="w-4 h-4 mr-1" />
+                    {importingSlip ? 'Reading PDF…' : 'Import Packing Slip PDF'}
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      className="hidden"
+                      disabled={importingSlip || soGroups.length === 0}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        e.target.value = '';
+                        handleImportPackingSlip(f);
+                      }}
+                    />
+                  </label>
+                </Button>
+              </div>
+              <p className="text-xs text-gray-400">
+                Import a NetSuite packing slip PDF and the Sales Order # and packing slip # are read automatically and attached to the matching Sales Order below.
+              </p>
               {soGroups.length === 0 ? (
                 <p className="text-xs text-gray-400">Add QC-passed pallets above; a packing slip section appears per Sales Order.</p>
               ) : soGroups.map((g) => {
