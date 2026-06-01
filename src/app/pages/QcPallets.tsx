@@ -187,6 +187,7 @@ export default function QcPallets() {
                       <TableCell className="capitalize">{p.load_type || '-'}</TableCell>
                       <TableCell>
                         {(p.guns_passed ?? 0)}/{(p.guns_total ?? p.guns_count ?? 0)}
+                        {p.guns_in_pallet ? <span className="text-gray-400"> · of {p.guns_in_pallet}</span> : null}
                         {p.guns_failed ? <span className="text-red-600"> ({p.guns_failed} failed)</span> : null}
                       </TableCell>
                       <TableCell>{getStatusBadge(p.status)}</TableCell>

@@ -1253,6 +1253,7 @@ apiRoutes.post("/driver-loads/:id/items", async (c) => {
 
 const QC_PALLET_FIELDS = [
   'build_no','customer','destination','load_type','guns_total',
+  'guns_in_pallet','sample_size',
   'status','signed_off_by','signed_off_at','notes','updated_by',
 ];
 function pickQcPallet(body: Record<string, unknown>) {
@@ -1262,6 +1263,27 @@ function pickQcPallet(body: Record<string, unknown>) {
 }
 
 const QC_CHECK_KEYS = ['parts','orientation','charges','detcord','wiring','build'];
+
+// AQL ANSI/ASQC Z1.4 — General Inspection Level II.
+// Maps a lot size (total guns in the pallet) to the suggested inspection sample size.
+// Sample is inspector-editable on the front end; this is only the default suggestion.
+function aqlSampleSize(lot: number): number {
+  const n = Math.max(0, Math.floor(Number(lot) || 0));
+  if (n <= 1) return n;            // inspect the single gun
+  if (n <= 8) return 2;
+  if (n <= 15) return 3;
+  if (n <= 25) return 5;
+  if (n <= 50) return 8;
+  if (n <= 90) return 13;
+  if (n <= 150) return 20;         // 91–150 → 20 (a 100-gun pallet samples 20)
+  if (n <= 280) return 32;
+  if (n <= 500) return 50;
+  if (n <= 1200) return 80;
+  if (n <= 3200) return 125;
+  if (n <= 10000) return 200;
+  if (n <= 35000) return 315;
+  return 500;
+}
 
 // List pallets (most recent first).
 apiRoutes.get("/qc-pallets", async (c) => {
@@ -1377,13 +1399,28 @@ apiRoutes.delete("/qc-pallets/:id", requireAdmin, async (c) => {
   }
 });
 
+// Suggest an AQL Level II sample size for a given lot (total guns in pallet).
+// GET /qc-aql?lot=100  ->  { lot: 100, sample_size: 20 }
+apiRoutes.get("/qc-aql", (c) => {
+  const lot = Number(c.req.query('lot')) || 0;
+  return c.json({ lot, sample_size: aqlSampleSize(lot) });
+});
+
 // Initialise N guns for a pallet (idempotent: replaces the gun set).
+// N = the sample size to inspect. Optionally records guns_in_pallet (lot total)
+// and sample_size so the pallet captures its sampling context (e.g. 20 of 100).
 // Each gun gets the six default check rows in 'pass' state; QC flips to fail/na.
 apiRoutes.post("/qc-pallets/:id/guns", async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const count = Math.max(0, Math.min(1000, Number(body.guns_total) || 0));
+    // Sample size = number of gun records to create. Accept sample_size or
+    // (back-compat) guns_total from the body.
+    const count = Math.max(0, Math.min(1000, Number(body.sample_size ?? body.guns_total) || 0));
+    const lotRaw = body.guns_in_pallet;
+    const lot = lotRaw === undefined || lotRaw === null || lotRaw === ''
+      ? undefined
+      : Math.max(0, Math.min(100000, Number(lotRaw) || 0));
     // Wipe existing guns (checks cascade) then re-create.
     await supabase.from('qc_guns').delete().eq('pallet_row_id', id);
     const created: any[] = [];
@@ -1398,10 +1435,15 @@ apiRoutes.post("/qc-pallets/:id/guns", async (c) => {
       await supabase.from('qc_gun_checks').insert(checkRows);
       created.push(gun);
     }
-    await supabase.from('qc_pallets')
-      .update({ guns_total: count, status: count > 0 ? 'in_progress' : 'open', updated_at: new Date().toISOString() })
-      .eq('row_id', id);
-    return c.json({ guns_total: count, guns: created });
+    const patch: Record<string, unknown> = {
+      guns_total: count,
+      sample_size: count,
+      status: count > 0 ? 'in_progress' : 'open',
+      updated_at: new Date().toISOString(),
+    };
+    if (lot !== undefined) patch.guns_in_pallet = lot;
+    await supabase.from('qc_pallets').update(patch).eq('row_id', id);
+    return c.json({ guns_total: count, sample_size: count, guns_in_pallet: lot ?? null, guns: created });
   } catch (error) {
     console.error('Error in qc-pallet guns init endpoint:', error);
     return c.json({ error: String(error) }, 500);

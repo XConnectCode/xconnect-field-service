@@ -156,8 +156,15 @@ export const qcPalletApi = {
     apiRequest(`/qc-pallets/${id}`, { method: 'PUT', body: JSON.stringify(updates) }, token),
   remove: (id: string, token?: string) =>
     apiRequest(`/qc-pallets/${id}`, { method: 'DELETE' }, token),
-  initGuns: (id: string, gunsTotal: number, token?: string) =>
-    apiRequest(`/qc-pallets/${id}/guns`, { method: 'POST', body: JSON.stringify({ guns_total: gunsTotal }) }, token),
+  // sampleSize = number of guns to inspect; gunsInPallet = total lot size (optional, for record).
+  initGuns: (id: string, sampleSize: number, gunsInPallet?: number, token?: string) =>
+    apiRequest(`/qc-pallets/${id}/guns`, {
+      method: 'POST',
+      body: JSON.stringify({ sample_size: sampleSize, guns_in_pallet: gunsInPallet }),
+    }, token),
+  // Suggested AQL Level II sample size for a given lot total.
+  aql: (lot: number, token?: string) =>
+    apiRequest(`/qc-aql?lot=${encodeURIComponent(lot)}`, {}, token),
   saveGun: (gunId: string, payload: any, token?: string) =>
     apiRequest(`/qc-guns/${gunId}`, { method: 'PUT', body: JSON.stringify(payload) }, token),
   signoff: (id: string, signedOffBy: string, token?: string) =>

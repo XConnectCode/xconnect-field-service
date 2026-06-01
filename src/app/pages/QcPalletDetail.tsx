@@ -50,9 +50,33 @@ export default function QcPalletDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [gunCountInput, setGunCountInput] = useState('');
+  const [lotInput, setLotInput] = useState('');
 
   const isAdmin = user?.role === 'admin';
   const isUnloaded = pallet?.load_type === 'unloaded';
+
+  // AQL ANSI/ASQC Z1.4 — General Inspection Level II. Lot size → suggested sample.
+  const aqlSampleSize = (lot: number): number => {
+    const n = Math.max(0, Math.floor(Number(lot) || 0));
+    if (n <= 1) return n;
+    if (n <= 8) return 2;
+    if (n <= 15) return 3;
+    if (n <= 25) return 5;
+    if (n <= 50) return 8;
+    if (n <= 90) return 13;
+    if (n <= 150) return 20;
+    if (n <= 280) return 32;
+    if (n <= 500) return 50;
+    if (n <= 1200) return 80;
+    if (n <= 3200) return 125;
+    if (n <= 10000) return 200;
+    if (n <= 35000) return 315;
+    return 500;
+  };
+  const suggestedSample = useMemo(() => {
+    const lot = Number(lotInput);
+    return Number.isFinite(lot) && lot > 0 ? aqlSampleSize(lot) : null;
+  }, [lotInput]);
 
   const fetchPallet = async () => {
     if (!id) return;
@@ -73,7 +97,8 @@ export default function QcPalletDetail() {
         }),
       }));
       setGuns(gunList);
-      setGunCountInput(String(data.guns_total ?? gunList.length ?? ''));
+      setGunCountInput(String(data.sample_size ?? data.guns_total ?? gunList.length ?? ''));
+      setLotInput(data.guns_in_pallet != null ? String(data.guns_in_pallet) : '');
     } catch (error: any) {
       console.error('Error loading QC pallet:', error);
       toast.error('Failed to load pallet');
@@ -97,10 +122,16 @@ export default function QcPalletDetail() {
       return;
     }
     if (guns.length > 0 && !confirm(`This will reset all ${guns.length} existing gun records. Continue?`)) return;
+    const lot = Number(lotInput);
+    const lotVal = Number.isFinite(lot) && lot > 0 ? lot : undefined;
+    if (lotVal !== undefined && n > lotVal) {
+      toast.error('Sample size cannot exceed total guns in the pallet');
+      return;
+    }
     setSaving(true);
     try {
-      await qcPalletApi.initGuns(id, n, accessToken || undefined);
-      toast.success(`Initialised ${n} guns`);
+      await qcPalletApi.initGuns(id, n, lotVal, accessToken || undefined);
+      toast.success(lotVal ? `Inspecting ${n} of ${lotVal} guns` : `Initialised ${n} guns`);
       await fetchPallet();
     } catch (error: any) {
       toast.error(error.message || 'Failed to initialise guns');
@@ -299,19 +330,51 @@ export default function QcPalletDetail() {
           </CardContent>
         </Card>
 
-        {/* Gun count */}
+        {/* Gun sampling */}
         <Card>
-          <CardHeader><CardTitle className="text-lg">Guns on Pallet</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-lg">Sampling &amp; Guns</CardTitle></CardHeader>
           <CardContent>
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap items-end gap-3">
               <div className="w-40">
-                <Label>Number of guns</Label>
+                <Label>Total guns in pallet</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  placeholder="e.g. 100"
+                  value={lotInput}
+                  onChange={(e) => setLotInput(e.target.value)}
+                />
+              </div>
+              <div className="w-40">
+                <Label>Sample to inspect</Label>
                 <Input type="number" min={1} value={gunCountInput} onChange={(e) => setGunCountInput(e.target.value)} />
               </div>
+              {suggestedSample != null && String(suggestedSample) !== gunCountInput && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-blue-600"
+                  onClick={() => setGunCountInput(String(suggestedSample))}
+                >
+                  Use AQL suggestion ({suggestedSample})
+                </Button>
+              )}
               <Button variant="outline" onClick={handleInitGuns} disabled={saving}>
                 {guns.length > 0 ? 'Reset & re-init guns' : 'Initialise guns'}
               </Button>
             </div>
+            {suggestedSample != null && (
+              <p className="text-xs text-gray-500 mt-2">
+                AQL Level II suggests inspecting <span className="font-medium">{suggestedSample}</span>
+                {' '}of {lotInput} guns.
+              </p>
+            )}
+            {pallet?.guns_in_pallet != null && guns.length > 0 && (
+              <p className="text-sm text-gray-700 mt-1">
+                Inspecting <span className="font-medium">{guns.length}</span> of{' '}
+                <span className="font-medium">{pallet.guns_in_pallet}</span> guns (AQL Level II sample).
+              </p>
+            )}
             {isUnloaded && (
               <p className="text-xs text-gray-500 mt-2">
                 Unloaded pallet — shaped charges and det cord default to N/A.
