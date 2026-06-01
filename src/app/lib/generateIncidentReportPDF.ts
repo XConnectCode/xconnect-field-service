@@ -416,5 +416,9 @@ export async function generateIncidentReportPDF(opts: IncidentReportOptions): Pr
   drawFooters(doc);
 
   if (returnBlob) return doc.output('blob') as Blob;
-  doc.save(`Incident_${r.event_id || 'XC'}_Report.pdf`);
+  // Naming convention: Event_{EventID}_Final / Event_{EventID}_Preliminary.
+  const versionLabel = String(r.report_version || '').toLowerCase() === 'preliminary'
+    ? 'Preliminary'
+    : 'Final';
+  doc.save(`Event_${r.event_id || 'XC'}_${versionLabel}.pdf`);
 }

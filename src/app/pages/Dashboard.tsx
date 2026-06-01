@@ -251,12 +251,13 @@ function InlineText({ value, field, rowId, onUpdated, isDark, placeholder, multi
 }
 
 // ── Review progress checklist (the ordered, hard-gated flow) ──────────────────
-// Renders the 4 review steps with done / next / blocked states and the action
+// Renders the review steps with done / next / blocked states and the action
 // button for the step that is currently actionable. Steps unlock in order:
-//   fields → director review → send to customer → close.
-function ReviewProgress({ steps, isDark, onMarkReviewed, onSendToCustomer, onCloseIncident, busy }: {
+//   fields → director review → generate report → send to customer → close.
+// The generate + send steps only appear for XC-caused / Inconclusive incidents.
+function ReviewProgress({ steps, isDark, onMarkReviewed, onGenerateReport, onSendToCustomer, onCloseIncident, busy }: {
   steps: ReviewStep[]; isDark: boolean;
-  onMarkReviewed: () => void; onSendToCustomer: () => void; onCloseIncident: () => void;
+  onMarkReviewed: () => void; onGenerateReport: () => void; onSendToCustomer: () => void; onCloseIncident: () => void;
   busy: boolean;
 }) {
   const txtPrimary = isDark ? "#f1f5f9" : "#0f172a";
@@ -265,9 +266,10 @@ function ReviewProgress({ steps, isDark, onMarkReviewed, onSendToCustomer, onClo
   const border = isDark ? "#334155" : "#e2e8f0";
 
   const actionFor = (id: string) => {
-    if (id === "review") return { label: "✓ Mark Reviewed", fn: onMarkReviewed, bg: "#16a34a" };
-    if (id === "sent")   return { label: "Send to Customer ↗", fn: onSendToCustomer, bg: "#4A154B" };
-    if (id === "closed") return { label: "Close Incident", fn: onCloseIncident, bg: "#475569" };
+    if (id === "review")   return { label: "✓ Mark Reviewed", fn: onMarkReviewed, bg: "#16a34a" };
+    if (id === "generate") return { label: "Generate Report ↗", fn: onGenerateReport, bg: "#2563eb" };
+    if (id === "sent")     return { label: "Send to Customer ↗", fn: onSendToCustomer, bg: "#4A154B" };
+    if (id === "closed")   return { label: "Close Incident", fn: onCloseIncident, bg: "#475569" };
     return null;
   };
 
@@ -347,9 +349,11 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
   const failureType = resolveFailureTypeLabel(r.failure_type, listMap, '') || null;
   const vendorName  = vendorMap[r.vendor] || r.vendor || null;
 
-  // Ordered review checklist for this incident (fields → review → sent → close).
+  // Ordered review checklist for this incident
+  // (fields → review → generate → sent → close; generate/sent are XC-only).
   const reviewSteps = getReviewSteps(r, role);
   const [busy, setBusy] = useState(false);
+  const { user } = useAuth();
 
   const goToFullEditor = () => navigate(`/incidents/${r.row_id}`);
 
@@ -357,6 +361,25 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
     setBusy(true);
     await onMarkReviewed(r);
     setBusy(false);
+  };
+
+  // Generate report (XC-caused / Inconclusive only). Stamps report_generated_at
+  // + report_generated_by so the customer report is marked as produced. The
+  // actual PDF (named Event_{EventID}_Final / _Preliminary) is built/sent from
+  // the full Incident Detail page; this records that generation has happened so
+  // the send + close steps unlock.
+  const handleGenerateReport = async () => {
+    setBusy(true);
+    const stamp = new Date().toISOString();
+    const by = user?.email || user?.name || null;
+    const { error } = await supabase.from("incidents")
+      .update({ report_generated_at: stamp, report_generated_by: by })
+      .eq("row_id", r.row_id);
+    setBusy(false);
+    if (error) { toast.error(error.message || "Failed to mark report generated"); return; }
+    onUpdated(r.row_id, "report_generated_at", stamp);
+    onUpdated(r.row_id, "report_generated_by", by || "");
+    toast.success("Report marked generated. You can now send it to the customer.");
   };
 
   // Sending the report to the customer (email + attachment) lives in the full
@@ -431,6 +454,7 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
               steps={reviewSteps}
               isDark={isDark}
               onMarkReviewed={handleReview}
+              onGenerateReport={handleGenerateReport}
               onSendToCustomer={handleSend}
               onCloseIncident={handleCloseIncident}
               busy={busy}

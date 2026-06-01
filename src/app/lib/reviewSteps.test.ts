@@ -5,8 +5,10 @@ function assert(cond: boolean, msg: string) {
   else console.log('ok:', msg);
 }
 
-// A fully-populated incident (all required fields present).
-const complete = {
+// A fully-populated XC-caused incident (all required fields present).
+// xc_caused = 'Yes' → report generate + send steps apply.
+// Steps for this incident: [fields, review, generate, sent, closed]  (5 steps)
+const completeXC = {
   xc_caused: 'Yes',
   vendor_caused: 'No',
   failed_component: 'comp1',
@@ -16,56 +18,118 @@ const complete = {
   root_cause: 'because reasons',
 };
 
-// 1) Empty incident as admin: only step 1 is actionable, rest blocked.
-{
-  const steps = getReviewSteps({}, 'admin');
-  assert(steps[0].id === 'fields' && !steps[0].done && steps[0].actionable, 'empty: fields step actionable');
-  assert(steps[0].missing.length > 0, 'empty: fields step lists missing');
-  assert(!steps[1].actionable && steps[1].blockedReason.includes('required fields'), 'empty: review blocked on fields');
-  assert(!steps[2].actionable, 'empty: sent blocked');
-  assert(!steps[3].actionable, 'empty: close blocked');
+// A fully-populated NON-XC incident (xc_caused = 'No').
+// No report steps → sequence is [fields, review, closed]  (3 steps).
+const completeNonXC = { ...completeXC, xc_caused: 'No' };
+
+// Helper to find a step by id (indices shift between XC / non-XC incidents).
+function step(steps: ReturnType<typeof getReviewSteps>, id: string) {
+  const s = steps.find(x => x.id === id);
+  if (!s) throw new Error(`step ${id} not found`);
+  return s;
 }
 
-// 2) Fields complete, not reviewed (admin): review becomes actionable, sent/close blocked.
+// ── XC-caused incident: 5-step sequence ──────────────────────────────────────
+
+// 1) Empty incident as admin: only fields actionable, everything else blocked.
 {
-  const steps = getReviewSteps(complete, 'admin');
-  assert(steps[0].done, 'complete: fields done');
-  assert(steps[1].actionable && !steps[1].done, 'complete: review actionable');
-  assert(!steps[2].actionable && steps[2].blockedReason.includes('review'), 'complete: sent blocked on review');
-  assert(!steps[3].actionable, 'complete: close blocked');
+  const steps = getReviewSteps({ xc_caused: 'Yes' }, 'admin');
+  assert(steps.length === 5, 'XC empty: 5 steps (fields/review/generate/sent/closed)');
+  assert(steps.map(s => s.id).join(',') === 'fields,review,generate,sent,closed', 'XC empty: step order');
+  const fields = step(steps, 'fields');
+  assert(!fields.done && fields.actionable, 'XC empty: fields actionable');
+  assert(fields.missing.length > 0, 'XC empty: fields lists missing');
+  assert(!step(steps, 'review').actionable && step(steps, 'review').blockedReason.includes('required fields'), 'XC empty: review blocked on fields');
+  assert(!step(steps, 'generate').actionable, 'XC empty: generate blocked');
+  assert(!step(steps, 'sent').actionable, 'XC empty: sent blocked');
+  assert(!step(steps, 'closed').actionable, 'XC empty: close blocked');
 }
 
-// 3) Fields + reviewed, not sent (admin): sent actionable, close blocked.
+// 2) Fields complete, not reviewed (admin): review actionable; generate/sent/close blocked.
 {
-  const inc = { ...complete, reviewed_at: '2026-05-31T00:00:00Z', reviewed_by: 'Dir' };
+  const steps = getReviewSteps(completeXC, 'admin');
+  assert(step(steps, 'fields').done, 'XC complete: fields done');
+  assert(step(steps, 'review').actionable && !step(steps, 'review').done, 'XC complete: review actionable');
+  assert(!step(steps, 'generate').actionable && step(steps, 'generate').blockedReason.includes('review'), 'XC complete: generate blocked on review');
+  assert(!step(steps, 'sent').actionable, 'XC complete: sent blocked');
+  assert(!step(steps, 'closed').actionable, 'XC complete: close blocked');
+}
+
+// 3) Fields + reviewed, no report yet (admin): generate actionable; sent/close blocked.
+{
+  const inc = { ...completeXC, reviewed_at: '2026-05-31T00:00:00Z', reviewed_by: 'Dir' };
   const steps = getReviewSteps(inc, 'admin');
-  assert(steps[1].done, 'reviewed: review done');
-  assert(steps[2].actionable && !steps[2].done, 'reviewed: sent actionable');
-  assert(!steps[3].actionable && steps[3].blockedReason.includes('Send'), 'reviewed: close blocked on sent');
+  assert(step(steps, 'review').done, 'XC reviewed: review done');
+  assert(step(steps, 'generate').actionable && !step(steps, 'generate').done, 'XC reviewed: generate actionable');
+  assert(!step(steps, 'sent').actionable && step(steps, 'sent').blockedReason.includes('Generate'), 'XC reviewed: sent blocked on generate');
+  assert(!step(steps, 'closed').actionable && step(steps, 'closed').blockedReason.includes('Generate'), 'XC reviewed: close blocked on generate');
 }
 
-// 4) Fields + reviewed + sent (admin): close actionable.
+// 4) Fields + reviewed + generated, not sent (admin): sent actionable; close blocked on sent.
 {
-  const inc = { ...complete, reviewed_at: 'x', report_sent: '2026-05-31T01:00:00Z' };
+  const inc = { ...completeXC, reviewed_at: 'x', report_generated_at: '2026-05-31T00:30:00Z' };
   const steps = getReviewSteps(inc, 'admin');
-  assert(steps[2].done, 'sent: sent done');
-  assert(steps[3].actionable && !steps[3].done, 'sent: close actionable');
+  assert(step(steps, 'generate').done, 'XC generated: generate done');
+  assert(step(steps, 'sent').actionable && !step(steps, 'sent').done, 'XC generated: sent actionable');
+  assert(!step(steps, 'closed').actionable && step(steps, 'closed').blockedReason.includes('Send'), 'XC generated: close blocked on sent');
 }
 
-// 5) Closed incident: all done.
+// 5) Fields + reviewed + generated + sent (admin): close actionable.
 {
-  const inc = { ...complete, reviewed_at: 'x', report_sent: 'x', incident_status: 'Closed' };
+  const inc = { ...completeXC, reviewed_at: 'x', report_generated_at: 'x', report_sent: '2026-05-31T01:00:00Z' };
   const steps = getReviewSteps(inc, 'admin');
-  assert(steps.every(s => s.done), 'closed: all steps done');
+  assert(step(steps, 'sent').done, 'XC sent: sent done');
+  assert(step(steps, 'closed').actionable && !step(steps, 'closed').done, 'XC sent: close actionable');
 }
 
-// 6) Role gating: SQM can complete fields but not review/send/close.
+// 6) Closed XC incident: all done.
 {
-  const steps = getReviewSteps(complete, 'sqm');
-  assert(steps[0].allowedForRole, 'sqm: allowed to complete fields');
-  assert(!steps[1].allowedForRole, 'sqm: not allowed to review');
-  assert(!steps[2].allowedForRole, 'sqm: not allowed to send');
-  assert(!steps[3].allowedForRole, 'sqm: not allowed to close');
+  const inc = { ...completeXC, reviewed_at: 'x', report_generated_at: 'x', report_sent: 'x', incident_status: 'Closed' };
+  const steps = getReviewSteps(inc, 'admin');
+  assert(steps.every(s => s.done), 'XC closed: all steps done');
+}
+
+// 7) Role gating (XC): SQM can complete fields but not review/generate/send/close.
+{
+  const steps = getReviewSteps(completeXC, 'sqm');
+  assert(step(steps, 'fields').allowedForRole, 'XC sqm: allowed to complete fields');
+  assert(!step(steps, 'review').allowedForRole, 'XC sqm: not allowed to review');
+  assert(!step(steps, 'generate').allowedForRole, 'XC sqm: not allowed to generate');
+  assert(!step(steps, 'sent').allowedForRole, 'XC sqm: not allowed to send');
+  assert(!step(steps, 'closed').allowedForRole, 'XC sqm: not allowed to close');
+}
+
+// ── Non-XC incident: 3-step sequence (no report steps) ───────────────────────
+
+// 8) Non-XC incident skips generate + sent entirely.
+{
+  const steps = getReviewSteps(completeNonXC, 'admin');
+  assert(steps.length === 3, 'nonXC: 3 steps (fields/review/closed)');
+  assert(steps.map(s => s.id).join(',') === 'fields,review,closed', 'nonXC: step order, no report steps');
+  assert(!steps.some(s => s.id === 'generate'), 'nonXC: no generate step');
+  assert(!steps.some(s => s.id === 'sent'), 'nonXC: no sent step');
+}
+
+// 9) Non-XC: fields + reviewed → close actionable immediately (no report gate).
+{
+  const inc = { ...completeNonXC, reviewed_at: 'x' };
+  const steps = getReviewSteps(inc, 'admin');
+  assert(step(steps, 'review').done, 'nonXC reviewed: review done');
+  assert(step(steps, 'closed').actionable && !step(steps, 'closed').done, 'nonXC reviewed: close actionable right after review');
+}
+
+// 10) Non-XC: fields complete, not reviewed → close blocked on review (not on a report).
+{
+  const steps = getReviewSteps(completeNonXC, 'admin');
+  assert(!step(steps, 'closed').actionable && step(steps, 'closed').blockedReason.includes('review'), 'nonXC: close blocked on review');
+}
+
+// 11) Inconclusive is treated like XC-caused (report required).
+{
+  const inc = { ...completeXC, xc_caused: 'Inconclusive' };
+  const steps = getReviewSteps(inc, 'admin');
+  assert(steps.length === 5, 'inconclusive: 5 steps (report required)');
+  assert(steps.some(s => s.id === 'generate') && steps.some(s => s.id === 'sent'), 'inconclusive: has generate + sent steps');
 }
 
 console.log('done');

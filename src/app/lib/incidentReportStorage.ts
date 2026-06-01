@@ -61,7 +61,8 @@ export async function uploadIncidentReport(params: {
 
   const reportType = reportTypeFor(version);
   const safeEventId = sanitizeEventId(eventId);
-  const fileName = `Incident_${safeEventId}_${reportType}.pdf`;
+  // Naming convention: Event_{EventID}_Final / Event_{EventID}_Preliminary.
+  const fileName = `Event_${safeEventId}_${reportType}.pdf`;
   const path = `${safeEventId}/${version}-${Date.now()}.pdf`;
 
   const { error: uploadErr } = await supabase
