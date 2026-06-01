@@ -149,6 +149,8 @@ export const driverLoadApi = {
 export const qcPalletApi = {
   getAll: (token?: string) => apiRequest('/qc-pallets', {}, token),
   getPassed: (token?: string) => apiRequest('/qc-pallets/passed', {}, token),
+  // QC-passed / no-QC pallets that are NOT yet on any driver load (ready to load).
+  getReady: (token?: string) => apiRequest('/qc-pallets/ready', {}, token),
   get: (id: string, token?: string) => apiRequest(`/qc-pallets/${id}`, {}, token),
   create: (pallet: any, token?: string) =>
     apiRequest('/qc-pallets', { method: 'POST', body: JSON.stringify(pallet) }, token),

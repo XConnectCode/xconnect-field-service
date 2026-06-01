@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { driverLoadApi } from '../lib/api';
+import { driverLoadApi, qcPalletApi } from '../lib/api';
 import { XC_BASES } from '../lib/xcLocations';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -11,7 +11,7 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Plus, Truck } from 'lucide-react';
+import { Plus, Truck, ClipboardCheck, PackageCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -26,6 +26,7 @@ export default function DriverLoads() {
   const { accessToken, user } = useAuth();
   const navigate = useNavigate();
   const [loads, setLoads] = useState<any[]>([]);
+  const [readyPallets, setReadyPallets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -42,9 +43,33 @@ export default function DriverLoads() {
     }
   };
 
+  // QC-passed / no-QC pallets not yet on any load — "ready to load".
+  const loadReady = async () => {
+    try {
+      const data = await qcPalletApi.getReady(accessToken || undefined);
+      setReadyPallets(Array.isArray(data) ? data : []);
+    } catch { /* non-fatal */ }
+  };
+
   useEffect(() => {
     loadData();
+    loadReady();
   }, [accessToken]);
+
+  // Group ready pallets by Sales Order so dispatch sees whole orders waiting.
+  const readyGroups = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const p of readyPallets) {
+      const key = (p.sales_order || '').trim() || 'Ungrouped';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(p);
+    }
+    return [...map.entries()].sort((a, b) => {
+      if (a[0] === 'Ungrouped') return 1;
+      if (b[0] === 'Ungrouped') return -1;
+      return b[0].localeCompare(a[0]);
+    });
+  }, [readyPallets]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,6 +162,60 @@ export default function DriverLoads() {
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* Ready to load — QC-passed / no-QC pallets not yet on any load, by Sales Order. */}
+        {readyPallets.length > 0 && (
+          <Card className="mb-6 border-green-300 dark:border-green-800">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <PackageCheck className="w-5 h-5 text-green-600" />
+                Ready to load
+                <Badge variant="secondary">{readyPallets.length} pallet{readyPallets.length === 1 ? '' : 's'}</Badge>
+                <Badge variant="outline">{readyGroups.length} Sales Order{readyGroups.length === 1 ? '' : 's'}</Badge>
+              </CardTitle>
+              <p className="text-sm text-gray-500 mt-1">
+                QC-passed and no-QC hardware pallets waiting to be loaded. Create or open a load, then pick these from the
+                {' '}“Add QC-passed pallet” list — each pallet drops off here once it’s added to a load.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {readyGroups.map(([so, items]) => {
+                const allPassed = items.every((p) => p.status === 'passed' || p.requires_qc === false);
+                const customer = items.find((p) => p.customer)?.customer || '';
+                const destination = items.find((p) => p.destination)?.destination || '';
+                return (
+                  <div key={so} className="rounded-md border border-gray-200 dark:border-gray-700 px-4 py-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <ClipboardCheck className="w-4 h-4 text-gray-400" />
+                        <span className="font-medium">
+                          {so === 'Ungrouped' ? 'Ungrouped (no Sales Order)' : `Sales Order ${so}`}
+                        </span>
+                        <Badge variant="secondary">{items.length} pallet{items.length === 1 ? '' : 's'}</Badge>
+                        {allPassed
+                          ? <Badge variant="default">All ready</Badge>
+                          : <Badge variant="outline">Partial</Badge>}
+                      </div>
+                      {(customer || destination) && (
+                        <span className="text-sm text-gray-500">
+                          {customer}{customer && destination ? ' · ' : ''}{destination}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {items.map((p) => (
+                        <Badge key={p.row_id} variant="outline" className="font-mono text-[11px]">
+                          {p.build_no || p.fulfillment_id || p.row_id.slice(0, 8)}
+                          {p.requires_qc === false ? ' · hardware' : ''}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

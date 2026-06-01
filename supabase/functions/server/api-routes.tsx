@@ -1503,6 +1503,42 @@ apiRoutes.get("/qc-pallets/passed", async (c) => {
   }
 });
 
+// "Ready to load": QC-passed (or no-QC hardware) pallets that are NOT already
+// linked to any driver load. The Driver page uses this to show what's waiting to
+// be loaded, grouped by Sales Order. A pallet drops off this list the moment it
+// is added to a load (its row_id appears in driver_load_items.source_pallet_row_id).
+// NOTE: must be declared before "/qc-pallets/:id" so "ready" isn't captured as an id.
+apiRoutes.get("/qc-pallets/ready", async (c) => {
+  try {
+    const { data: pallets, error } = await supabase
+      .from('qc_pallets').select('*')
+      .or('status.eq.passed,requires_qc.eq.false')
+      .order('created_at', { ascending: false });
+    if (error) return c.json({ error: error.message }, 500);
+
+    // Collect every pallet row_id already linked to a load line item.
+    const { data: linkedRows, error: linkErr } = await supabase
+      .from('driver_load_items')
+      .select('source_pallet_row_id')
+      .not('source_pallet_row_id', 'is', null);
+    if (linkErr) {
+      console.error('Error fetching linked load items:', linkErr);
+      return c.json({ error: linkErr.message }, 500);
+    }
+    const linked = new Set(
+      (linkedRows || [])
+        .map((r: Record<string, unknown>) => r.source_pallet_row_id as string)
+        .filter(Boolean)
+    );
+
+    const ready = (pallets || []).filter((p: Record<string, unknown>) => !linked.has(p.row_id as string));
+    return c.json(ready);
+  } catch (error) {
+    console.error('Error in qc-pallets ready endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Detail: pallet + its guns (each with its checks).
 apiRoutes.get("/qc-pallets/:id", async (c) => {
   try {
