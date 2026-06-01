@@ -20,7 +20,7 @@ interface User {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'sqm';
+  role: 'admin' | 'sqm' | 'ops';
 }
 
 interface AuthContextType {
@@ -41,7 +41,10 @@ function userFromSession(session: Session): User {
   const su = session.user;
   const meta = (su.user_metadata ?? {}) as Record<string, unknown>;
   const appMeta = (su.app_metadata ?? {}) as Record<string, unknown>;
-  const role = (appMeta.role ?? meta.role) === 'admin' ? 'admin' : 'sqm';
+  // Roles: 'admin' (full), 'ops' (Driver + QC modules), else 'sqm' (least-privilege default).
+  const rawRole = appMeta.role ?? meta.role;
+  const role: User['role'] =
+    rawRole === 'admin' ? 'admin' : rawRole === 'ops' ? 'ops' : 'sqm';
   const name =
     (typeof meta.name === 'string' && meta.name) ||
     (typeof meta.full_name === 'string' && meta.full_name) ||

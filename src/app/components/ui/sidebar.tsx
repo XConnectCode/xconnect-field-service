@@ -19,9 +19,10 @@ import {
   LayoutDashboard, Users, ClipboardList, AlertTriangle,
   Cpu, TrendingUp, FileBarChart,
   Sun, Moon, LogOut, Map, FileText, BarChart3,
+  Truck, ClipboardCheck,
 } from 'lucide-react';
 
-type Role = 'admin' | 'sqm';
+type Role = 'admin' | 'sqm' | 'ops';
 
 // ── Nav structure ─────────────────────────────────────────────────────────────
 const NAV_GROUPS = [
@@ -48,6 +49,13 @@ const NAV_GROUPS = [
       { path: '/sales',               label: 'Sales',          icon: TrendingUp,   roles: ['admin'] as Role[] },
       { path: '/reports',             label: 'Reports',        icon: FileBarChart, roles: ['admin'] as Role[] },
       { path: '/technical-bulletins', label: 'Tech Bulletins', icon: FileText,     roles: ['admin', 'sqm'] as Role[] },
+    ],
+  },
+  {
+    label: 'Production',
+    items: [
+      { path: '/driver', label: 'Driver Loads', icon: Truck,           roles: ['admin', 'ops'] as Role[] },
+      { path: '/qc',     label: 'QC',           icon: ClipboardCheck,  roles: ['admin', 'ops'] as Role[] },
     ],
   },
 ];

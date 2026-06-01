@@ -25,8 +25,12 @@ import TechnicalBulletins from './pages/TechnicalBulletins';
 import TechnicalBulletinSetup from './pages/TechnicalBulletinSetup';
 import Executive from './pages/Executive';
 
+type Role = 'admin' | 'sqm' | 'ops';
+
 function DashboardSwitch() {
   const { user } = useAuth();
+  // 'ops' users (Driver + QC) have no dashboard — send them to their area.
+  if (user?.role === 'ops') return <Navigate to="/driver" replace />;
   return user?.role === 'sqm' ? <SQMDashboard /> : <Dashboard />;
 }
 
@@ -36,6 +40,34 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
     return <Navigate to="/technical-bulletins" replace />;
   }
   return <>{children}</>;
+}
+
+// Generalized role guard. Redirects unauthorized users to a sensible home for
+// their role ('ops' -> /driver, everyone else -> /).
+function RequireRole({ roles, children }: { roles: Role[]; children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user || !roles.includes(user.role)) {
+    return <Navigate to={user?.role === 'ops' ? '/driver' : '/'} replace />;
+  }
+  return <>{children}</>;
+}
+
+// Placeholder pages for the Production modules (real pages land in later PRs).
+function DriverPlaceholder() {
+  return (
+    <div className="p-8">
+      <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Driver Loads</h1>
+      <p className="text-gray-600 dark:text-gray-300 mt-2">Coming soon — hotshot driver load checklist.</p>
+    </div>
+  );
+}
+function QcPlaceholder() {
+  return (
+    <div className="p-8">
+      <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">QC</h1>
+      <p className="text-gray-600 dark:text-gray-300 mt-2">Coming soon — perforating gun QC inspection.</p>
+    </div>
+  );
 }
 
 export const router = createBrowserRouter([
@@ -62,6 +94,8 @@ export const router = createBrowserRouter([
       { path: "technical-bulletin-setup", element: <AdminOnly><TechnicalBulletinSetup /></AdminOnly> },
       { path: "diagnostics", element: <AdminOnly><DiagnosticsPage /></AdminOnly> },
       { path: "debug", element: <AdminOnly><Debug /></AdminOnly> },
+      { path: "driver", element: <RequireRole roles={['admin','ops']}><DriverPlaceholder /></RequireRole> },
+      { path: "qc",     element: <RequireRole roles={['admin','ops']}><QcPlaceholder /></RequireRole> },
       { path: "*", Component: NotFound },
     ],
   },
