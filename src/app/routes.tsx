@@ -24,6 +24,8 @@ import TechnicalBulletin from './pages/TechnicalBulletin';
 import TechnicalBulletins from './pages/TechnicalBulletins';
 import TechnicalBulletinSetup from './pages/TechnicalBulletinSetup';
 import Executive from './pages/Executive';
+import DriverLoads from './pages/DriverLoads';
+import DriverLoadDetail from './pages/DriverLoadDetail';
 
 type Role = 'admin' | 'sqm' | 'ops';
 
@@ -52,15 +54,7 @@ function RequireRole({ roles, children }: { roles: Role[]; children: React.React
   return <>{children}</>;
 }
 
-// Placeholder pages for the Production modules (real pages land in later PRs).
-function DriverPlaceholder() {
-  return (
-    <div className="p-8">
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Driver Loads</h1>
-      <p className="text-gray-600 dark:text-gray-300 mt-2">Coming soon — hotshot driver load checklist.</p>
-    </div>
-  );
-}
+// Placeholder page for the QC module (real pages land in PR 4).
 function QcPlaceholder() {
   return (
     <div className="p-8">
@@ -94,8 +88,9 @@ export const router = createBrowserRouter([
       { path: "technical-bulletin-setup", element: <AdminOnly><TechnicalBulletinSetup /></AdminOnly> },
       { path: "diagnostics", element: <AdminOnly><DiagnosticsPage /></AdminOnly> },
       { path: "debug", element: <AdminOnly><Debug /></AdminOnly> },
-      { path: "driver", element: <RequireRole roles={['admin','ops']}><DriverPlaceholder /></RequireRole> },
-      { path: "qc",     element: <RequireRole roles={['admin','ops']}><QcPlaceholder /></RequireRole> },
+      { path: "driver",     element: <RequireRole roles={['admin','ops']}><DriverLoads /></RequireRole> },
+      { path: "driver/:id", element: <RequireRole roles={['admin','ops']}><DriverLoadDetail /></RequireRole> },
+      { path: "qc",         element: <RequireRole roles={['admin','ops']}><QcPlaceholder /></RequireRole> },
       { path: "*", Component: NotFound },
     ],
   },

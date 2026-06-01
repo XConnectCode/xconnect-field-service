@@ -1103,6 +1103,152 @@ apiRoutes.delete("/panels/:id", requireAdmin, async (c) => {
   }
 });
 
+// ============ DRIVER LOADS (hotshot checklist) ============
+
+// Whitelist of columns writable from the client, to avoid mass-assignment.
+const DRIVER_LOAD_FIELDS = [
+  'load_number','delivery_date','origin_district','customer','customer_district',
+  'destination','packing_slip_no','mode_of_delivery','trailer_connected','driver_type',
+  'driver','driver_name','driver_company','hazmat_load','hardware_present',
+  'ancillary_explosives','explosive_types','document_correlation','items_secure',
+  'driver_sig_url','inspector_name','inspector_sig_url','manager_name','manager_sig_url',
+  'status','departed_by','departed_at','notes','updated_by',
+];
+function pickDriverLoad(body: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const k of DRIVER_LOAD_FIELDS) if (k in body) out[k] = body[k];
+  return out;
+}
+
+// List loads. Admins see all; non-admins see only their own (by driver email).
+apiRoutes.get("/driver-loads", async (c) => {
+  try {
+    const user = c.get('user');
+    let q = supabase.from('driver_loads').select('*').order('created_at', { ascending: false });
+    if (user?.role !== 'admin' && user?.email) {
+      q = q.eq('driver', user.email);
+    }
+    const { data, error } = await q;
+    if (error) {
+      console.error('Error fetching driver loads:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data || []);
+  } catch (error) {
+    console.error('Error in driver-loads list endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Detail: a load + its items.
+apiRoutes.get("/driver-loads/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { data: load, error } = await supabase
+      .from('driver_loads').select('*').eq('row_id', id).single();
+    if (error) {
+      console.error('Error fetching driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    const { data: items } = await supabase
+      .from('driver_load_items').select('*').eq('load_row_id', id).order('created_at');
+    return c.json({ ...load, items: items || [] });
+  } catch (error) {
+    console.error('Error in driver-load detail endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.post("/driver-loads", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { data, error } = await supabase
+      .from('driver_loads').insert(pickDriverLoad(body)).select().single();
+    if (error) {
+      console.error('Error creating driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in create driver load endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.put("/driver-loads/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const patch = pickDriverLoad(body);
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('driver_loads').update(patch).eq('row_id', id).select().single();
+    if (error) {
+      console.error('Error updating driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in update driver load endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.delete("/driver-loads/:id", requireAdmin, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { error } = await supabase.from('driver_loads').delete().eq('row_id', id);
+    if (error) {
+      console.error('Error deleting driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error in delete driver load endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Replace the full set of line items for a load (simplest reliable sync).
+apiRoutes.post("/driver-loads/:id/items", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const items = Array.isArray(body.items) ? body.items : [];
+    // Wipe and re-insert.
+    const { error: delErr } = await supabase
+      .from('driver_load_items').delete().eq('load_row_id', id);
+    if (delErr) {
+      console.error('Error clearing driver load items:', delErr);
+      return c.json({ error: delErr.message }, 500);
+    }
+    if (items.length) {
+      const rows = items.map((it: Record<string, unknown>) => ({
+        load_row_id: id,
+        pallet_build_no: it.pallet_build_no ?? null,
+        description: it.description ?? null,
+        qty_expected: it.qty_expected ?? 0,
+        qty_loaded: it.qty_loaded ?? 0,
+        destination: it.destination ?? null,
+        checked: it.checked ?? false,
+        note: it.note ?? null,
+        source_pallet_row_id: it.source_pallet_row_id ?? null,
+      }));
+      const { error: insErr } = await supabase.from('driver_load_items').insert(rows);
+      if (insErr) {
+        console.error('Error inserting driver load items:', insErr);
+        return c.json({ error: insErr.message }, 500);
+      }
+    }
+    const { data: saved } = await supabase
+      .from('driver_load_items').select('*').eq('load_row_id', id).order('created_at');
+    return c.json({ items: saved || [] });
+  } catch (error) {
+    console.error('Error in driver-load items endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // ============ FILE UPLOADS FOR INCIDENTS ============
 
 // Upload incident image

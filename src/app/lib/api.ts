@@ -131,6 +131,20 @@ export const kpiApi = {
   getCompanyKPI: (token?: string) => apiRequest('/kpi/company/summary', {}, token),
 };
 
+// Driver Loads APIs (hotshot driver checklist)
+export const driverLoadApi = {
+  getAll: (token?: string) => apiRequest('/driver-loads', {}, token),
+  get: (id: string, token?: string) => apiRequest(`/driver-loads/${id}`, {}, token),
+  create: (load: any, token?: string) =>
+    apiRequest('/driver-loads', { method: 'POST', body: JSON.stringify(load) }, token),
+  update: (id: string, updates: any, token?: string) =>
+    apiRequest(`/driver-loads/${id}`, { method: 'PUT', body: JSON.stringify(updates) }, token),
+  remove: (id: string, token?: string) =>
+    apiRequest(`/driver-loads/${id}`, { method: 'DELETE' }, token),
+  saveItems: (id: string, items: any[], token?: string) =>
+    apiRequest(`/driver-loads/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }, token),
+};
+
 // Auth APIs
 export const authApi = {
   signup: (userData: { email: string; password: string; name: string; role: string }) => 
