@@ -63,6 +63,8 @@ export default function DriverLoadDetail() {
   const [saving, setSaving] = useState(false);
   // true while a packing-slip PDF is being parsed + auto-attached.
   const [importingSlip, setImportingSlip] = useState(false);
+  // All loads (used only to compute the next per-day sequence for the Load #).
+  const [allLoads, setAllLoads] = useState<any[]>([]);
 
   const isAdmin = user?.role === 'admin';
 
@@ -118,6 +120,16 @@ export default function DriverLoadDetail() {
     })();
   }, [accessToken]);
 
+  // All loads — used to compute the daily sequence number for an auto Load #.
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await driverLoadApi.getAll(accessToken || undefined);
+        setAllLoads(Array.isArray(data) ? data : []);
+      } catch { /* non-fatal */ }
+    })();
+  }, [accessToken]);
+
   // Roll up documents from each linked QC pallet so the driver can view the
   // pallet build slip PDF + QC photos right on the load. Refetches when the set
   // of linked pallets changes.
@@ -135,9 +147,14 @@ export default function DriverLoadDetail() {
           try {
             const res = await qcPalletFileApi.list(pid, accessToken || undefined);
             const files: any[] = Array.isArray(res?.files) ? res.files : [];
-            // Only surface build slip PDFs and QC photos (not the verification selfie).
+            // Only surface slip PDFs and QC photos (not the verification selfie).
+            // build_slip_pdf / packing_slip_pdf / slip_pdf are all labeled by type below.
             nextDocs[pid] = files.filter(
-              (f) => f.field_name === 'build_slip_pdf' || f.field_name === 'slip_pdf' || f.field_name === 'qc_photo'
+              (f) =>
+                f.field_name === 'build_slip_pdf' ||
+                f.field_name === 'packing_slip_pdf' ||
+                f.field_name === 'slip_pdf' ||
+                f.field_name === 'qc_photo'
             );
           } catch { nextDocs[pid] = []; }
           try {
@@ -178,6 +195,52 @@ export default function DriverLoadDetail() {
 
   // ── field helpers ───────────────────────────────────────────────────────────
   const setField = (key: string, value: any) => setLoad((prev: any) => ({ ...prev, [key]: value }));
+
+  // Auto Load # = <BASECODE>-<YYYYMMDD>-<NN>.
+  //   BASECODE: first 4 letters of the origin XC base, uppercased (e.g. Williston
+  //             -> WILL, Midland -> MIDL); falls back to 'LOAD' before a base is
+  //             chosen. NN: zero-padded daily sequence (count of loads sharing the
+  //             same base+date prefix, + 1), so the second load that day is -02.
+  const baseCode = (base?: string | null) => {
+    const code = String(base || '').replace(/[^a-zA-Z]/g, '').slice(0, 4).toUpperCase();
+    return code || 'LOAD';
+  };
+  const ymd = (dateStr?: string | null) => {
+    const d = dateStr ? new Date(dateStr) : new Date();
+    const valid = !isNaN(d.getTime()) ? d : new Date();
+    const y = valid.getFullYear();
+    const m = String(valid.getMonth() + 1).padStart(2, '0');
+    const day = String(valid.getDate()).padStart(2, '0');
+    return `${y}${m}${day}`;
+  };
+  const genLoadNumber = () => {
+    const code = baseCode(load?.origin_district);
+    const datePart = ymd(load?.delivery_date);
+    const prefix = `${code}-${datePart}-`;
+    // Count existing loads that already use this prefix (excluding this one).
+    let maxSeq = 0;
+    for (const l of allLoads) {
+      if (l?.row_id === id) continue;
+      const ln = String(l?.load_number || '');
+      if (!ln.startsWith(prefix)) continue;
+      const n = parseInt(ln.slice(prefix.length), 10);
+      if (!isNaN(n) && n > maxSeq) maxSeq = n;
+    }
+    const seq = String(maxSeq + 1).padStart(2, '0');
+    return `${prefix}${seq}`;
+  };
+  const handleGenerateLoadNumber = () => setField('load_number', genLoadNumber());
+
+  // Auto-fill the Load # once, when it is empty and we have what we need to build
+  // a meaningful number (origin base chosen + loads list fetched for sequencing).
+  // We never overwrite a number the user already has.
+  useEffect(() => {
+    if (!load) return;
+    if (String(load.load_number || '').trim()) return;
+    if (!load.origin_district) return;        // wait for a base so the prefix is real
+    setField('load_number', genLoadNumber());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load?.origin_district, load?.delivery_date, allLoads.length]);
 
   // Set the packing slip number for a specific Sales Order group.
   const setSlipNoFor = (so: string, value: string) =>
@@ -524,7 +587,19 @@ export default function DriverLoadDetail() {
           <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label>Load #</Label>
-              <Input value={load.load_number || ''} onChange={(e) => setField('load_number', e.target.value)} />
+              <div className="flex gap-2">
+                <Input
+                  value={load.load_number || ''}
+                  onChange={(e) => setField('load_number', e.target.value)}
+                  placeholder="auto: WILL-20260601-01"
+                />
+                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={handleGenerateLoadNumber}>
+                  Generate
+                </Button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Auto-fills from origin base + date once a base is selected. Format: BASE-YYYYMMDD-NN.
+              </p>
             </div>
             <div>
               <Label>Delivery Date</Label>
@@ -610,10 +685,10 @@ export default function DriverLoadDetail() {
                   <TableRow>
                     <TableHead>Build #</TableHead>
                     <TableHead>Description</TableHead>
-                    <TableHead className="w-20">Exp</TableHead>
-                    <TableHead className="w-20">Loaded</TableHead>
+                    <TableHead className="w-24" title="Quantity expected on this pallet (from QC)">Expected qty</TableHead>
+                    <TableHead className="w-24" title="Quantity actually loaded onto the truck">Loaded qty</TableHead>
                     <TableHead>Destination</TableHead>
-                    <TableHead className="w-16">Loaded?</TableHead>
+                    <TableHead className="w-16" title="Confirm this item is physically loaded">Loaded?</TableHead>
                     <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -645,8 +720,17 @@ export default function DriverLoadDetail() {
                 {items.filter((it) => it.source_pallet_row_id).map((it, i) => {
                   const pid = it.source_pallet_row_id as string;
                   const docs = palletDocs[pid] || [];
-                  const pdfs = docs.filter((d) => d.field_name === 'build_slip_pdf' || d.field_name === 'slip_pdf');
+                  const pdfs = docs.filter(
+                    (d) =>
+                      d.field_name === 'build_slip_pdf' ||
+                      d.field_name === 'packing_slip_pdf' ||
+                      d.field_name === 'slip_pdf'
+                  );
                   const photos = docs.filter((d) => d.field_name === 'qc_photo');
+                  // Label each PDF by its true document type so a packing slip
+                  // never shows up under a "Build slip PDF" link (and vice-versa).
+                  const pdfLabel = (fieldName: string) =>
+                    fieldName === 'packing_slip_pdf' ? 'Packing slip PDF' : 'Build slip PDF';
                   return (
                     <div key={`${pid}-${i}`} className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
                       <div className="text-sm font-medium mb-2">
@@ -662,7 +746,7 @@ export default function DriverLoadDetail() {
                             rel="noopener noreferrer"
                             className="text-blue-600 hover:underline inline-flex items-center gap-1"
                           >
-                            <FileText className="w-4 h-4" /> Build slip PDF
+                            <FileText className="w-4 h-4" /> {pdfLabel(f.field_name)}
                           </a>
                         )) : <span className="text-xs text-gray-400 inline-flex items-center gap-1"><FileText className="w-4 h-4" /> No build slip</span>}
                       </div>

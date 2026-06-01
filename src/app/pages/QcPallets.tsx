@@ -242,16 +242,22 @@ export default function QcPallets() {
           madeTotal += res?.created?.length ?? 0;
           skippedTotal += res?.skipped?.length ?? 0;
 
-          // Attach this file's PDF to each pallet it created so the inspector can
-          // reference the exact build slip it came from.
-          const createdPallets: any[] = Array.isArray(res?.created) ? res.created : [];
-          for (const p of createdPallets) {
-            if (!p?.row_id) continue;
-            try {
-              await qcPalletFileApi.upload(p.row_id, s.file, 'build_slip_pdf', accessToken || undefined);
-              savedPdfTotal++;
-            } catch (err) {
-              console.error('Failed to attach slip PDF to pallet', p.row_id, err);
+          // Attach the build slip PDF to each pallet it created so the inspector
+          // can reference the exact build slip it came from. A *packing* slip is
+          // an order-level document (it belongs on the driver load, per Sales
+          // Order) and is NOT attached to individual pallets here — otherwise the
+          // pallet's "Build slip PDF" link would actually open a packing slip.
+          const isPackingSlip = parsed.doc_type === 'packing_slip';
+          if (!isPackingSlip) {
+            const createdPallets: any[] = Array.isArray(res?.created) ? res.created : [];
+            for (const p of createdPallets) {
+              if (!p?.row_id) continue;
+              try {
+                await qcPalletFileApi.upload(p.row_id, s.file, 'build_slip_pdf', accessToken || undefined);
+                savedPdfTotal++;
+              } catch (err) {
+                console.error('Failed to attach build slip PDF to pallet', p.row_id, err);
+              }
             }
           }
         } catch (err: any) {
