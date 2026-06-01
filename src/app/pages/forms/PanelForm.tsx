@@ -22,6 +22,7 @@ import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
+import { XC_PANEL_BASES } from '../../lib/xcLocations';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -45,7 +46,7 @@ const showGui          = (type: string, status: string) => GUI_TYPES.includes(ty
 const showSurfaceFw    = (type: string) => type === 'Surface Tester';
 const showShootingFw   = (type: string) => type === 'Digital Shooting Panel';
 const PANEL_STATUS_OPTS = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold'];
-const XC_BASE_OPTS      = ['Denver', 'Midland', 'Williston'];
+const XC_BASE_OPTS      = XC_PANEL_BASES; // shared list (Denver kept for Panels inventory)
 const YES_NO_OPTS       = ['Yes', 'No'];
 const VERIFIED_OPTS     = ['Y', 'N'];
 const ACTIVITY_OPTS     = ['Y', 'N'];

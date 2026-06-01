@@ -13,6 +13,7 @@ import { ArrowLeft, Pencil, Save, X, Loader2, History } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+import { XC_PANEL_BASES } from '../lib/xcLocations';
 
 // ── Option arrays ──────────────────────────────────────────────────────────────
 const PANEL_TYPE_OPTS = [
@@ -34,7 +35,7 @@ const PANEL_STATUS_OPTS = [
   'Sold',
 ];
 
-const XC_BASE_OPTS = ['Denver', 'Midland', 'Williston'];
+const XC_BASE_OPTS = XC_PANEL_BASES; // shared list (Denver kept for Panels inventory)
 const YES_NO_OPTS = ['Yes', 'No'];
 const YN_OPTS = ['Y', 'N'];
 

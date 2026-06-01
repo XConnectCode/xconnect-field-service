@@ -42,6 +42,7 @@ import {
 } from '../../lib/incidentWorkflow';
 import ImageUpload from '../../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
+import { XC_BASES } from '../../lib/xcLocations';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -740,11 +741,26 @@ export default function IncidentForm({
             </F>
 
             <F label="XC District">
-              <Input
+              <Sel
                 name="xc_district"
                 defaultValue={incident?.xc_district || ''}
-                placeholder="e.g. Permian Basin"
-              />
+              >
+                <option value="">— Select —</option>
+                {XC_BASES.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+                {/* Preserve any legacy free-text value (e.g. "Permian Basin")
+                    so historical incidents keep displaying; only new entries
+                    are constrained to the standard XC base list. */}
+                {incident?.xc_district &&
+                  !XC_BASES.includes(incident.xc_district as any) && (
+                    <option value={incident.xc_district}>
+                      {incident.xc_district} (legacy)
+                    </option>
+                  )}
+              </Sel>
             </F>
 
             <F label="Customer Rep">
