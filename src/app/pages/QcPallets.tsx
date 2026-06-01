@@ -11,7 +11,7 @@ import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Plus, ClipboardCheck, Upload, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, ClipboardCheck, Upload, ChevronDown, ChevronRight, FileText, X, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STATUS_BADGE: Record<string, { variant: any; label: string }> = {
@@ -20,6 +20,20 @@ const STATUS_BADGE: Record<string, { variant: any; label: string }> = {
   passed: { variant: 'default', label: 'Passed' },
   failed: { variant: 'destructive', label: 'Failed' },
 };
+
+// One dropped slip file and its parse/review state.
+type SlipEntry = {
+  id: string;                              // local unique key
+  file: File;                              // the PDF
+  status: 'parsing' | 'ok' | 'error';      // per-file parse status
+  error?: string;                          // failure reason (when status === 'error')
+  parsed?: any;                            // parser result + editable header fields
+  chosen?: Record<string, boolean>;        // selected fulfillment IDs
+  expanded?: boolean;                      // review row open/closed
+};
+
+let __slipSeq = 0;
+const nextSlipId = () => `slip_${Date.now()}_${__slipSeq++}`;
 
 export default function QcPallets() {
   const { accessToken, user } = useAuth();
@@ -30,12 +44,10 @@ export default function QcPallets() {
   const [creating, setCreating] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  // Slip upload / review
+  // Slip upload / review — now multi-file.
   const [slipOpen, setSlipOpen] = useState(false);
-  const [parsing, setParsing] = useState(false);
-  const [parsed, setParsed] = useState<any>(null);   // parsed slip + editable header
-  const [chosenIds, setChosenIds] = useState<Record<string, boolean>>({});
-  const [slipFile, setSlipFile] = useState<File | null>(null); // pallet build slip PDF, saved to each created pallet
+  const [slips, setSlips] = useState<SlipEntry[]>([]);
+  const [dragOver, setDragOver] = useState(false);
 
   const loadData = async () => {
     try {
@@ -69,6 +81,16 @@ export default function QcPallets() {
     });
   }, [pallets]);
 
+  // Derived flags for the multi-file flow. Must be declared before any early
+  // return so hook order stays stable.
+  const anyParsing = useMemo(() => slips.some((s) => s.status === 'parsing'), [slips]);
+  const anyError = useMemo(() => slips.some((s) => s.status === 'error'), [slips]);
+  const readySlips = useMemo(() => slips.filter((s) => s.status === 'ok'), [slips]);
+  const totalChosen = useMemo(
+    () => readySlips.reduce((n, s) => n + Object.values(s.chosen || {}).filter(Boolean).length, 0),
+    [readySlips]
+  );
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
@@ -96,88 +118,164 @@ export default function QcPallets() {
     }
   };
 
-  // ── slip upload → extract text → parse → review ─────────────────────────────
-  const handleSlipFile = async (file: File | null) => {
-    if (!file) return;
-    setParsing(true);
-    setParsed(null);
-    setSlipFile(file);
+  // ── per-file parse: extract text → parse → store on the entry ───────────────
+  const parseEntry = async (entry: SlipEntry) => {
+    const patch = (next: Partial<SlipEntry>) =>
+      setSlips((prev) => prev.map((s) => (s.id === entry.id ? { ...s, ...next } : s)));
     try {
-      const text = await extractPdfText(file);
+      const text = await extractPdfText(entry.file);
       const res = await qcPalletApi.parseSlip(text, accessToken || undefined);
       if (!res || !Array.isArray(res.fulfillment_ids) || res.fulfillment_ids.length === 0) {
-        toast.error('No fulfillment IDs found in this slip');
-        setParsing(false);
+        patch({ status: 'error', error: 'No fulfillment IDs found in this slip.' });
         return;
       }
-      setParsed(res);
-      // Pre-select all detected fulfillment IDs.
-      const sel: Record<string, boolean> = {};
-      for (const id of res.fulfillment_ids) sel[id] = true;
-      setChosenIds(sel);
-      toast.success(`Found ${res.fulfillment_ids.length} fulfillment(s)`);
+      const chosen: Record<string, boolean> = {};
+      for (const id of res.fulfillment_ids) chosen[id] = true;
+      patch({ status: 'ok', parsed: res, chosen, expanded: true, error: undefined });
     } catch (error: any) {
       console.error('Slip parse error:', error);
-      toast.error('Could not read this PDF');
-    } finally {
-      setParsing(false);
+      patch({ status: 'error', error: 'Could not read this PDF.' });
     }
   };
 
-  const handleCreateFromSlip = async () => {
-    if (!parsed) return;
-    const ids = Object.keys(chosenIds).filter((k) => chosenIds[k]);
-    if (!ids.length) {
-      toast.error('Select at least one fulfillment');
+  // Accept a dropped/selected FileList: keep PDFs, append, parse each.
+  const addFiles = (fileList: FileList | File[] | null) => {
+    if (!fileList) return;
+    const incoming = Array.from(fileList);
+    const pdfs = incoming.filter(
+      (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name)
+    );
+    const rejected = incoming.length - pdfs.length;
+    if (rejected > 0) toast.error(`Ignored ${rejected} non-PDF file${rejected === 1 ? '' : 's'}`);
+    if (!pdfs.length) return;
+
+    const entries: SlipEntry[] = pdfs.map((file) => ({
+      id: nextSlipId(),
+      file,
+      status: 'parsing' as const,
+    }));
+    setSlips((prev) => [...prev, ...entries]);
+    // Kick off parsing for each new entry.
+    for (const e of entries) void parseEntry(e);
+  };
+
+  const removeSlip = (id: string) => setSlips((prev) => prev.filter((s) => s.id !== id));
+
+  const retrySlip = (id: string) => {
+    const entry = slips.find((s) => s.id === id);
+    if (!entry) return;
+    setSlips((prev) => prev.map((s) => (s.id === id ? { ...s, status: 'parsing', error: undefined } : s)));
+    void parseEntry({ ...entry, status: 'parsing' });
+  };
+
+  const patchParsed = (id: string, field: string, value: any) =>
+    setSlips((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, parsed: { ...s.parsed, [field]: value } } : s))
+    );
+
+  const toggleChosen = (id: string, fid: string, value: boolean) =>
+    setSlips((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, chosen: { ...(s.chosen || {}), [fid]: value } } : s))
+    );
+
+  const toggleExpanded = (id: string) =>
+    setSlips((prev) => prev.map((s) => (s.id === id ? { ...s, expanded: !s.expanded } : s)));
+
+  const resetSlipDialog = () => {
+    setSlips([]);
+    setDragOver(false);
+  };
+
+  // ── create pallets from every ready slip ────────────────────────────────────
+  const handleCreateAll = async () => {
+    if (!slips.length) {
+      toast.error('Drop at least one slip');
       return;
     }
-    setCreating(true);
-    try {
-      // requires_qc / item_category come from slip detection: gun pallets get QC,
-      // hardware / spare-parts pallets skip it. guns_in_pallet is only the true
-      // per-pallet lot from a build slip (already capped server-side); a packing
-      // slip leaves it unset so the server defaults gun pallets to capacity.
-      const requiresQc = parsed.requires_qc !== false && parsed.is_gun !== false;
-      const res = await qcPalletApi.createFromSlip(
-        {
-          sales_order: parsed.sales_order || null,
-          customer: parsed.customer || null,
-          operator: parsed.operator || null,
-          destination: parsed.destination || null,
-          load_type: parsed.load_type || 'loaded',
-          guns_in_pallet: requiresQc ? (parsed.gun_qty || null) : null,
-          requires_qc: requiresQc,
-          item_category: parsed.item_category || (requiresQc ? 'guns' : 'hardware'),
-          fulfillment_ids: ids,
-          updated_by: user?.email,
-        },
-        accessToken || undefined
-      );
-      const made = res?.created?.length ?? 0;
-      const skipped = res?.skipped?.length ?? 0;
-      toast.success(`Created ${made} pallet(s)${skipped ? `, skipped ${skipped} existing` : ''}`);
+    // Block-until-fixed: nothing is created while any file is still parsing or
+    // failed to parse. The user must resolve/remove those first.
+    if (anyParsing) {
+      toast.error('Still reading some slips — wait for them to finish');
+      return;
+    }
+    if (anyError) {
+      toast.error('Fix or remove the slips that failed to read before creating');
+      return;
+    }
+    if (totalChosen === 0) {
+      toast.error('Select at least one fulfillment to create');
+      return;
+    }
 
-      // Attach the imported pallet build slip PDF to each newly created pallet so
-      // the inspector can reference the exact NetSuite build slip it came from.
-      // (The order packing slip lives on the driver load, not the pallet.)
-      const createdPallets: any[] = Array.isArray(res?.created) ? res.created : [];
-      if (slipFile && createdPallets.length) {
-        let saved = 0;
-        for (const p of createdPallets) {
-          if (!p?.row_id) continue;
-          try {
-            await qcPalletFileApi.upload(p.row_id, slipFile, 'build_slip_pdf', accessToken || undefined);
-            saved++;
-          } catch (err) {
-            console.error('Failed to attach slip PDF to pallet', p.row_id, err);
+    setCreating(true);
+    let madeTotal = 0;
+    let skippedTotal = 0;
+    let savedPdfTotal = 0;
+    let failedFiles = 0;
+
+    try {
+      for (const s of readySlips) {
+        const parsed = s.parsed;
+        const ids = Object.keys(s.chosen || {}).filter((k) => s.chosen![k]);
+        if (!parsed || !ids.length) continue;
+        try {
+          // requires_qc / item_category come from slip detection: gun pallets get
+          // QC, hardware / spare-parts pallets skip it. guns_in_pallet is only the
+          // true per-pallet lot from a build slip (capped server-side); a packing
+          // slip leaves it unset so the server defaults gun pallets to capacity.
+          const requiresQc = parsed.requires_qc !== false && parsed.is_gun !== false;
+          const res = await qcPalletApi.createFromSlip(
+            {
+              sales_order: parsed.sales_order || null,
+              customer: parsed.customer || null,
+              operator: parsed.operator || null,
+              destination: parsed.destination || null,
+              load_type: parsed.load_type || 'loaded',
+              guns_in_pallet: requiresQc ? (parsed.gun_qty || null) : null,
+              requires_qc: requiresQc,
+              item_category: parsed.item_category || (requiresQc ? 'guns' : 'hardware'),
+              fulfillment_ids: ids,
+              updated_by: user?.email,
+            },
+            accessToken || undefined
+          );
+          madeTotal += res?.created?.length ?? 0;
+          skippedTotal += res?.skipped?.length ?? 0;
+
+          // Attach this file's PDF to each pallet it created so the inspector can
+          // reference the exact build slip it came from.
+          const createdPallets: any[] = Array.isArray(res?.created) ? res.created : [];
+          for (const p of createdPallets) {
+            if (!p?.row_id) continue;
+            try {
+              await qcPalletFileApi.upload(p.row_id, s.file, 'build_slip_pdf', accessToken || undefined);
+              savedPdfTotal++;
+            } catch (err) {
+              console.error('Failed to attach slip PDF to pallet', p.row_id, err);
+            }
           }
+        } catch (err: any) {
+          console.error('Failed to create from slip', s.file.name, err);
+          failedFiles++;
         }
-        if (saved) toast.success(`Saved build slip PDF to ${saved} pallet(s)`);
       }
 
-      setSlipOpen(false);
-      setParsed(null);
-      setSlipFile(null);
+      if (madeTotal > 0) {
+        toast.success(
+          `Created ${madeTotal} pallet(s)` +
+            (skippedTotal ? `, skipped ${skippedTotal} existing` : '') +
+            (savedPdfTotal ? ` · saved ${savedPdfTotal} slip PDF(s)` : '')
+        );
+      } else if (skippedTotal > 0) {
+        toast.info(`No new pallets — ${skippedTotal} already existed`);
+      }
+      if (failedFiles > 0) toast.error(`${failedFiles} slip(s) failed to import`);
+
+      // Only close if everything that should create did so.
+      if (failedFiles === 0) {
+        setSlipOpen(false);
+        resetSlipDialog();
+      }
       loadData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to create pallets');
@@ -216,108 +314,200 @@ export default function QcPallets() {
             </p>
           </div>
           <div className="flex gap-2">
-            {/* Upload Slip */}
-            <Dialog open={slipOpen} onOpenChange={(o) => { setSlipOpen(o); if (!o) { setParsed(null); setSlipFile(null); } }}>
+            {/* Upload Slip(s) */}
+            <Dialog open={slipOpen} onOpenChange={(o) => { setSlipOpen(o); if (!o) resetSlipDialog(); }}>
               <DialogTrigger asChild>
                 <Button variant="outline">
                   <Upload className="w-4 h-4 mr-2" />
-                  Upload Slip
+                  Upload Slips
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-lg">
+              <DialogContent className="max-w-2xl">
                 <DialogHeader>
-                  <DialogTitle>Create pallets from a slip</DialogTitle>
+                  <DialogTitle>Create pallets from slips</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="slip_file">Packing slip or pallet build slip (PDF)</Label>
+                  {/* Drag-and-drop zone (also click-to-browse). */}
+                  <label
+                    htmlFor="slip_files"
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragOver(false);
+                      addFiles(e.dataTransfer?.files || null);
+                    }}
+                    className={[
+                      'flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center cursor-pointer transition-colors',
+                      dragOver
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30'
+                        : 'border-gray-300 dark:border-gray-700 hover:border-gray-400',
+                    ].join(' ')}
+                  >
+                    <Upload className="w-6 h-6 text-gray-400" />
+                    <div className="text-sm font-medium">
+                      Drag &amp; drop one or more PDFs here
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      or click to browse — packing slips and pallet build slips, guns or hardware
+                    </div>
                     <Input
-                      id="slip_file"
+                      id="slip_files"
                       type="file"
                       accept="application/pdf"
-                      onChange={(e) => handleSlipFile(e.target.files?.[0] || null)}
-                      disabled={parsing || creating}
+                      multiple
+                      className="hidden"
+                      onChange={(e) => { addFiles(e.target.files); e.currentTarget.value = ''; }}
+                      disabled={creating}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      The slip is read in your browser; we detect the Sales Order and each Order Fulfillment.
-                    </p>
-                  </div>
+                  </label>
 
-                  {parsing && <p className="text-sm text-gray-500">Reading slip…</p>}
+                  {slips.length > 0 && (
+                    <div className="space-y-2 max-h-[26rem] overflow-auto pr-1">
+                      {slips.map((s) => {
+                        const p = s.parsed;
+                        const chosenCount = Object.values(s.chosen || {}).filter(Boolean).length;
+                        return (
+                          <div
+                            key={s.id}
+                            className="rounded-md border border-gray-200 dark:border-gray-700"
+                          >
+                            {/* Row header */}
+                            <div className="flex items-center gap-2 px-3 py-2">
+                              {s.status === 'ok' && (
+                                <button
+                                  type="button"
+                                  className="text-gray-500"
+                                  onClick={() => toggleExpanded(s.id)}
+                                  aria-label={s.expanded ? 'Collapse' : 'Expand'}
+                                >
+                                  {s.expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                </button>
+                              )}
+                              {s.status === 'parsing' && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
+                              {s.status === 'error' && <AlertTriangle className="w-4 h-4 text-red-500" />}
+                              {s.status === 'ok' && <CheckCircle2 className="w-4 h-4 text-green-600" />}
+                              <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+                              <span className="text-sm truncate flex-1" title={s.file.name}>{s.file.name}</span>
 
-                  {parsed && (
-                    <div className="space-y-3 border-t pt-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <Label>Sales Order</Label>
-                          <Input
-                            value={parsed.sales_order || ''}
-                            onChange={(e) => setParsed({ ...parsed, sales_order: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label>Customer</Label>
-                          <Input
-                            value={parsed.customer || ''}
-                            onChange={(e) => setParsed({ ...parsed, customer: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label>Operator</Label>
-                          <Input
-                            value={parsed.operator || ''}
-                            onChange={(e) => setParsed({ ...parsed, operator: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          <Label>Destination</Label>
-                          <Input
-                            value={parsed.destination || ''}
-                            onChange={(e) => setParsed({ ...parsed, destination: e.target.value })}
-                          />
-                        </div>
-                      </div>
+                              {s.status === 'ok' && p && (
+                                <>
+                                  {p.sales_order && (
+                                    <Badge variant="secondary" className="font-mono">{p.sales_order}</Badge>
+                                  )}
+                                  <Badge variant="outline">
+                                    {p.doc_type === 'packing_slip' ? 'Packing slip' : 'Build slip'}
+                                  </Badge>
+                                  <Badge variant={p.is_gun === false ? 'outline' : 'default'}>
+                                    {p.is_gun === false ? 'Hardware · no QC' : 'Guns'}
+                                  </Badge>
+                                  <span className="text-xs text-gray-500 whitespace-nowrap">
+                                    {chosenCount}/{p.fulfillment_ids.length} sel.
+                                  </span>
+                                </>
+                              )}
+                              {s.status === 'error' && (
+                                <Button variant="ghost" size="sm" onClick={() => retrySlip(s.id)}>Retry</Button>
+                              )}
+                              <button
+                                type="button"
+                                className="text-gray-400 hover:text-red-500"
+                                onClick={() => removeSlip(s.id)}
+                                aria-label="Remove"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
 
-                      {parsed.is_gun === false ? (
-                        <p className="text-xs text-amber-600">
-                          Hardware / spare parts detected — these pallets are <span className="font-medium">not QC'd</span>
-                          {' '}(no gun inspection). They can still be added to a driver load.
-                        </p>
-                      ) : parsed.doc_type === 'packing_slip' ? (
-                        <p className="text-xs text-gray-600">
-                          Packing slip lists the whole-order total
-                          {parsed.order_qty ? <> (<span className="font-medium">{parsed.order_qty}</span> barrels across all fulfillments)</> : null}.
-                          {' '}Each pallet defaults to <span className="font-medium">100</span> guns (max per pallet); the build slip confirms the exact per-pallet count.
-                        </p>
-                      ) : parsed.gun_qty ? (
-                        <p className="text-xs text-gray-600">
-                          Detected per-pallet lot: <span className="font-medium">{parsed.gun_qty}</span> guns
-                          {' '}(max 100; applied to each created pallet).
-                        </p>
-                      ) : (
-                        <p className="text-xs text-gray-500">
-                          No per-pallet gun count on this slip — set the lot size (max 100) on each pallet later.
+                            {s.status === 'error' && (
+                              <div className="px-3 pb-2 text-xs text-red-600">{s.error}</div>
+                            )}
+
+                            {/* Review body */}
+                            {s.status === 'ok' && s.expanded && p && (
+                              <div className="border-t px-3 py-3 space-y-3">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <Label>Sales Order</Label>
+                                    <Input value={p.sales_order || ''} onChange={(e) => patchParsed(s.id, 'sales_order', e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <Label>Customer</Label>
+                                    <Input value={p.customer || ''} onChange={(e) => patchParsed(s.id, 'customer', e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <Label>Operator</Label>
+                                    <Input value={p.operator || ''} onChange={(e) => patchParsed(s.id, 'operator', e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <Label>Destination</Label>
+                                    <Input value={p.destination || ''} onChange={(e) => patchParsed(s.id, 'destination', e.target.value)} />
+                                  </div>
+                                </div>
+
+                                {p.is_gun === false ? (
+                                  <p className="text-xs text-amber-600">
+                                    Hardware / spare parts detected — these pallets are <span className="font-medium">not QC'd</span>
+                                    {' '}(no gun inspection). They can still be added to a driver load.
+                                  </p>
+                                ) : p.doc_type === 'packing_slip' ? (
+                                  <p className="text-xs text-gray-600">
+                                    Packing slip lists the whole-order total
+                                    {p.order_qty ? <> (<span className="font-medium">{p.order_qty}</span> barrels across all fulfillments)</> : null}.
+                                    {' '}Each pallet defaults to <span className="font-medium">100</span> guns (max per pallet); the build slip confirms the exact per-pallet count.
+                                  </p>
+                                ) : p.gun_qty ? (
+                                  <p className="text-xs text-gray-600">
+                                    Detected per-pallet lot: <span className="font-medium">{p.gun_qty}</span> guns
+                                    {' '}(max 100; applied to each created pallet).
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-gray-500">
+                                    No per-pallet gun count on this slip — set the lot size (max 100) on each pallet later.
+                                  </p>
+                                )}
+
+                                <div>
+                                  <Label>Fulfillments to create</Label>
+                                  <div className="mt-1 space-y-1 max-h-40 overflow-auto">
+                                    {p.fulfillment_ids.map((id: string) => (
+                                      <label key={id} className="flex items-center gap-2 text-sm">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!(s.chosen && s.chosen[id])}
+                                          onChange={(e) => toggleChosen(s.id, id, e.target.checked)}
+                                        />
+                                        <span className="font-mono">{id}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {slips.length > 0 && (
+                    <div className="space-y-2 border-t pt-3">
+                      {anyError && (
+                        <p className="text-xs text-red-600 flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          Some slips failed to read. Retry or remove them before creating — nothing is created until every slip is clean.
                         </p>
                       )}
-
-                      <div>
-                        <Label>Fulfillments to create</Label>
-                        <div className="mt-1 space-y-1 max-h-40 overflow-auto">
-                          {parsed.fulfillment_ids.map((id: string) => (
-                            <label key={id} className="flex items-center gap-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={!!chosenIds[id]}
-                                onChange={(e) => setChosenIds({ ...chosenIds, [id]: e.target.checked })}
-                              />
-                              <span className="font-mono">{id}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <Button className="w-full" onClick={handleCreateFromSlip} disabled={creating}>
-                        {creating ? 'Creating…' : 'Create selected pallets'}
+                      <Button
+                        className="w-full"
+                        onClick={handleCreateAll}
+                        disabled={creating || anyParsing || anyError || totalChosen === 0}
+                      >
+                        {creating
+                          ? 'Creating…'
+                          : anyParsing
+                          ? 'Reading slips…'
+                          : `Create ${totalChosen} pallet${totalChosen === 1 ? '' : 's'} from ${readySlips.length} slip${readySlips.length === 1 ? '' : 's'}`}
                       </Button>
                     </div>
                   )}
