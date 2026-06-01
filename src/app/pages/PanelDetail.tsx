@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
-import { ArrowLeft, Pencil, Save, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Pencil, Save, X, Loader2, History } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
@@ -129,6 +129,13 @@ export default function PanelDetail() {
   const [districts,   setDistricts]   = useState<any[]>([]);
   const [epCompanies, setEpCompanies] = useState<string[]>([]);
 
+  // Change history (field-level diffs from panel_change_log).
+  const [history, setHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  // Global id -> name maps so FK changes (customer/district) render readable
+  // values, including historical ones no longer tied to the current customer.
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
+
   useEffect(() => {
     loadPanel();
   }, [id]);
@@ -168,6 +175,58 @@ export default function PanelDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Build a global id -> name map for customers + districts so FK changes in
+  // the change history (which store raw ids) render as readable names.
+  useEffect(() => {
+    if (!accessToken) return;
+    Promise.all([
+      supabase.from('customers').select('row_id,customer'),
+      supabase.from('districts').select('row_id,customer_district'),
+    ]).then(([c, d]) => {
+      const m: Record<string, string> = {};
+      (c.data || []).forEach((r: any) => { if (r.row_id) m[r.row_id] = r.customer; });
+      (d.data || []).forEach((r: any) => { if (r.row_id) m[r.row_id] = r.customer_district; });
+      setNameMap(m);
+    });
+  }, [accessToken]);
+
+  // Load the change history for this panel (by row_id, falling back to serial
+  // so edits made before a row_id existed still surface).
+  const loadHistory = async () => {
+    if (!panel?.row_id || !accessToken) return;
+    setHistoryLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('panel_change_log')
+        .select('id, field, field_label, old_value, new_value, changed_by, changed_at')
+        .or(`panel_row_id.eq.${panel.row_id},serial_number.eq.${panel.serial_number}`)
+        .order('changed_at', { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      setHistory(data || []);
+    } catch (err) {
+      console.error('Error loading panel history:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadHistory();
+    // Reload after a save so the new diffs show without a full page refresh.
+  }, [panel?.row_id, accessToken]);
+
+  // FK fields whose stored value is an id we should resolve to a name.
+  const FK_FIELDS = new Set(['customer', 'customer_district']);
+  const displayValue = (field: string, value: string | null): string => {
+    if (value === null || value === '') return '—';
+    if (FK_FIELDS.has(field)) return nameMap[value] || value;
+    return value;
+  };
+  const fmtWhen = (iso: string): string => {
+    try { return new Date(iso).toLocaleString(); } catch { return iso; }
   };
 
   const setField = (name: string, value: any) => {
@@ -252,6 +311,7 @@ export default function PanelDetail() {
       setEditing(false);
       setFormState({});
       await loadPanel();
+      await loadHistory();
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to save panel');
     } finally {
@@ -634,6 +694,53 @@ export default function PanelDetail() {
                       {panel.comments || '—'}
                     </pre>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Change History — field-level diffs from panel_change_log. */}
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <History className="w-4 h-4 text-gray-500" />
+                  Change History
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {historyLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-500 py-4">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Loading history…
+                  </div>
+                ) : history.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-4">
+                    No changes recorded yet. Edits made from here on are tracked automatically.
+                  </p>
+                ) : (
+                  <ol className="relative border-l border-gray-200 dark:border-gray-700 ml-2 space-y-4">
+                    {history.map((h) => (
+                      <li key={h.id} className="ml-4">
+                        <span className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-blue-500 border-2 border-white dark:border-gray-900" />
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                            {h.field_label}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {fmtWhen(h.changed_at)}
+                            {h.changed_by ? ` · ${h.changed_by}` : ''}
+                          </span>
+                        </div>
+                        <div className="text-sm mt-0.5 flex flex-wrap items-center gap-1.5">
+                          <span className="line-through text-gray-400 break-all">
+                            {displayValue(h.field, h.old_value)}
+                          </span>
+                          <span className="text-gray-400">→</span>
+                          <span className="font-medium text-gray-900 dark:text-gray-100 break-all">
+                            {displayValue(h.field, h.new_value)}
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
                 )}
               </CardContent>
             </Card>

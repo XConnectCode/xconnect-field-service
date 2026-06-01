@@ -114,6 +114,83 @@ export function needsAttention(status: FirmwareStatus): boolean {
   return status === 'behind' || status === 'needs_review';
 }
 
+// ── Per-panel-type firmware applicability ──────────────────────────────────
+// Which firmware fields actually apply to a given panel type/status. These
+// rules mirror the conditional fields in PanelForm / PanelDetail so the
+// panels table, detail page, and edit form all agree on what's relevant.
+//
+//   WL Control FW + Logging FW : every panel type
+//   Surface Test FW            : Surface Tester only
+//   Shooting FW                : Digital Shooting Panel only
+//   GUI                        : P1000 / P2000 / P2500 when Leased or Loaned
+
+const GUI_TYPES = ['P1000', 'P2000', 'P2500'];
+const GUI_STATUSES = ['Leased', 'Loaned'];
+
+// Short labels for compact, stacked display in table cells.
+export const FIRMWARE_SHORT_LABELS: Record<FirmwareField, string> = {
+  gui_version:  'GUI',
+  wl_controlfw: 'WL',
+  surfacefw:    'Surface',
+  shootingfw:   'Shooting',
+  loggingfw:    'Logging',
+};
+
+export function applicableFirmwareFields(
+  panelType: string | null | undefined,
+  panelStatus?: string | null,
+): FirmwareField[] {
+  const type = (panelType ?? '').trim();
+  const status = (panelStatus ?? '').trim();
+  const fields: FirmwareField[] = [];
+
+  // WL Control applies broadly; surface it first for most panels.
+  fields.push('wl_controlfw');
+
+  if (type === 'Surface Tester') fields.push('surfacefw');
+  if (type === 'Digital Shooting Panel') fields.push('shootingfw');
+
+  // Logging FW applies broadly too.
+  fields.push('loggingfw');
+
+  if (GUI_TYPES.includes(type) && GUI_STATUSES.includes(status)) {
+    fields.push('gui_version');
+  }
+  return fields;
+}
+
+export interface FirmwarePart {
+  field: FirmwareField;
+  label: string;
+  value: string;
+}
+
+// Build the list of applicable firmware parts (label + value) for a panel,
+// skipping fields that are empty/N/A so the cell only shows real versions.
+export function panelFirmwareParts(
+  panel: Record<string, unknown>,
+): FirmwarePart[] {
+  const fields = applicableFirmwareFields(
+    panel?.panel_type as string,
+    panel?.panel_status as string,
+  );
+  const parts: FirmwarePart[] = [];
+  for (const f of fields) {
+    const raw = panel?.[f];
+    if (isEmptyValue(raw)) continue;
+    parts.push({ field: f, label: FIRMWARE_SHORT_LABELS[f], value: String(raw).trim() });
+  }
+  return parts;
+}
+
+// Compact single-string form, e.g. "WL: 245 · Logging: 7.2 · GUI: 25.08.1".
+// Returns '' when no applicable firmware has a value.
+export function formatPanelFirmware(panel: Record<string, unknown>): string {
+  return panelFirmwareParts(panel)
+    .map((p) => `${p.label}: ${p.value}`)
+    .join(' · ');
+}
+
 // Map a panel + targets to a per-field status object. Only includes fields
 // that have a value on the panel OR a target set — avoids flagging firmware
 // that doesn't apply to that panel type (e.g. surfacefw on a P2500).

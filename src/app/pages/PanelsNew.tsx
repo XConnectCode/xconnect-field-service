@@ -14,7 +14,7 @@ import { generatePanelListPDF } from '../lib/generatePanelListPDF';
 import { generateMonthlyPanelReport } from '../lib/generateMonthlyPanelReport';
 import { getSerial } from '../lib/serialUtils';
 import FirmwareStatusPanel from '../components/FirmwareStatusPanel';
-import { evaluateFirmware, type FirmwareField, type FirmwareTargets } from '../lib/firmwareVersion';
+import { evaluateFirmware, panelFirmwareParts, formatPanelFirmware, type FirmwareField, type FirmwareTargets } from '../lib/firmwareVersion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import PanelForm from './forms/PanelForm';
 import { toast } from 'sonner';
@@ -190,7 +190,7 @@ export default function PanelsNew() {
     verified:  p => (isVerified(p.verified) ? 1 : (p.verified ? 0 : -1)),
     base:      p => p.xc_base,
     customer:  p => p.customerName,
-    fw:        p => p.wl_controlfw,
+    fw:        p => formatPanelFirmware(p),
     updated:   p => p.date_updated,
   }, { key: 'updated', dir: 'desc' });
 
@@ -550,7 +550,22 @@ export default function PanelsNew() {
                             : <span className="text-gray-400">Not assigned</span>}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{panel.wl_controlfw || '-'}</TableCell>
+                      <TableCell className="text-sm">
+                        {(() => {
+                          const parts = panelFirmwareParts(panel);
+                          if (parts.length === 0) return <span className="text-gray-400">-</span>;
+                          return (
+                            <div className="space-y-0.5">
+                              {parts.map(pt => (
+                                <div key={pt.field} className="whitespace-nowrap">
+                                  <span className="text-gray-500">{pt.label}:</span>{' '}
+                                  <span className="font-medium">{pt.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </TableCell>
                       <TableCell className="text-sm">{panel.date_updated}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
@@ -599,7 +614,7 @@ export default function PanelsNew() {
               <div><strong>XC Base:</strong> {quickPanel?.xc_base || '-'}</div>
               <div><strong>Customer:</strong> {quickPanel?.customerName || 'Not assigned'}</div>
               <div><strong>District:</strong> {quickPanel?.districtName || '-'}</div>
-              <div><strong>FW:</strong> {quickPanel?.wl_controlfw || '-'}</div>
+              <div><strong>FW:</strong> {(quickPanel && formatPanelFirmware(quickPanel)) || '-'}</div>
               <div><strong>Last Updated:</strong> {quickPanel?.date_updated || '-'}</div>
             </div>
           </DialogContent>
