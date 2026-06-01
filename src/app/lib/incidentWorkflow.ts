@@ -78,11 +78,33 @@ export const REQUIRED_FOR_FINAL_REVIEW: RequiredField[] = [
   { key: 'root_cause',       label: 'Root cause / conclusion' },
 ];
 
-// Additional fields required to mark Closed.
+// Additional fields ALWAYS required to mark Closed (regardless of cause).
 export const REQUIRED_FOR_CLOSED_EXTRA: RequiredField[] = [
-  { key: 'report_sent',      label: 'Report sent to customer' },
   { key: 'reviewed_at',      label: 'Director review' },
 ];
+
+// Extra fields required to mark Closed ONLY when the incident is XC-caused
+// (or Inconclusive). For these, a report must be generated AND sent to the
+// customer before the incident can be closed.
+export const REQUIRED_FOR_CLOSED_IF_XC: RequiredField[] = [
+  { key: 'report_generated_at', label: 'Report generated' },
+  { key: 'report_sent',         label: 'Report sent to customer' },
+];
+
+// ── XC-caused report rule ─────────────────────────────────────────────────────
+//
+// When XConnect is responsible for an incident (xc_caused = "Yes") — or the
+// investigation was inconclusive ("Inconclusive") — a customer-facing report
+// MUST be generated and sent before the incident can be closed. Such incidents
+// also stay on the review board until the report is sent, so nothing slips
+// through unsent.
+const XC_REPORT_REQUIRED_VALUES = ['yes', 'inconclusive'];
+
+/** True when this incident's xc_caused requires a generated+sent report. */
+export function requiresCustomerReport(incident: Record<string, any>): boolean {
+  const xc = String(incident?.xc_caused || '').trim().toLowerCase();
+  return XC_REPORT_REQUIRED_VALUES.includes(xc);
+}
 
 // ── Director review ───────────────────────────────────────────────────────────
 //
@@ -96,16 +118,23 @@ export function isReviewed(incident: Record<string, any>): boolean {
 }
 
 /**
- * An incident "needs my review" when it is XC-caused or Critical, not yet
- * reviewed, and not already Closed. This is the director's daily queue.
+ * An incident "needs my review" when it is XC-caused/Inconclusive or Critical
+ * and not already Closed. For incidents that require a customer report
+ * (XC-caused or Inconclusive), it stays on the board until the report has been
+ * SENT — even after director review — so nothing slips through unsent. Other
+ * incidents drop off the board once director-reviewed.
  */
 export function needsReview(incident: Record<string, any>): boolean {
   if (!incident) return false;
-  if (isReviewed(incident)) return false;
   if (normalizeStatus(incident.incident_status) === CLOSED_STATUS) return false;
   const xc  = String(incident.xc_caused || '').toLowerCase();
   const sev = String(incident.incident_severity || '').toLowerCase();
-  return xc === 'yes' || xc === 'inconclusive' || sev === 'critical';
+  const onBoard = xc === 'yes' || xc === 'inconclusive' || sev === 'critical';
+  if (!onBoard) return false;
+  // Report-required incidents linger until the report is sent.
+  if (requiresCustomerReport(incident)) return !isReportSent(incident);
+  // Otherwise the legacy rule: drops off once director-reviewed.
+  return !isReviewed(incident);
 }
 
 // Vendor (the reference link) is only required if vendor_caused is set to "Yes".
@@ -126,7 +155,12 @@ export function validateForStatus(
   if (!GATED_STATUSES.includes(target as IncidentStatus)) return [];
 
   const required = [...REQUIRED_FOR_FINAL_REVIEW];
-  if (target === CLOSED_STATUS) required.push(...REQUIRED_FOR_CLOSED_EXTRA);
+  if (target === CLOSED_STATUS) {
+    required.push(...REQUIRED_FOR_CLOSED_EXTRA);
+    // XC-caused (or Inconclusive) incidents additionally require a generated
+    // AND sent customer report before they can be closed.
+    if (requiresCustomerReport(incident)) required.push(...REQUIRED_FOR_CLOSED_IF_XC);
+  }
 
   const missing: string[] = [];
   for (const f of required) {
@@ -150,13 +184,18 @@ export function validateForStatus(
 //
 //   1. Complete required fields  (failed component, root cause, etc.)
 //   2. Director review           (reviewed_by + reviewed_at)
-//   3. Send report to customer   (report_sent timestamp)  ← always the last task
-//   4. Close the incident        (incident_status = Closed)
+//   3. Generate report           (report_generated_at)   ← XC-caused only
+//   4. Send report to customer   (report_sent timestamp) ← XC-caused only
+//   5. Close the incident        (incident_status = Closed)
+//
+// Steps 3 and 4 only appear when the incident requires a customer report
+// (xc_caused = Yes or Inconclusive). For other incidents the sequence is
+// fields → review → close.
 //
 // `getReviewSteps` returns this sequence as a checklist the UI can render so
 // the user always sees what's done, what's next, and why a step is blocked.
 
-export type ReviewStepId = 'fields' | 'review' | 'sent' | 'closed';
+export type ReviewStepId = 'fields' | 'review' | 'generate' | 'sent' | 'closed';
 
 export interface ReviewStep {
   id: ReviewStepId;
@@ -171,6 +210,12 @@ export interface ReviewStep {
   blockedReason: string;
   /** Missing field labels — only populated for the 'fields' step. */
   missing: string[];
+}
+
+/** True once the report has been generated (PDF built for the customer). */
+export function isReportGenerated(incident: Record<string, any>): boolean {
+  const v = incident?.report_generated_at;
+  return v !== null && v !== undefined && String(v).trim() !== '';
 }
 
 /** True once the report has been sent to the customer. */
@@ -194,6 +239,7 @@ export function getReviewSteps(
   role: UserRole,
 ): ReviewStep[] {
   const isAdmin = role === 'admin';
+  const reportRequired = requiresCustomerReport(incident);
 
   // Step 1 — required fields (same set that gates Final Review).
   const missing = validateForStatus(incident, FINAL_REVIEW_STATUS);
@@ -202,13 +248,18 @@ export function getReviewSteps(
   // Step 2 — director review.
   const reviewDone = isReviewed(incident);
 
-  // Step 3 — report sent to customer.
+  // Steps 3 & 4 — report generated, then sent (XC-caused / Inconclusive only).
+  const generatedDone = isReportGenerated(incident);
   const sentDone = isReportSent(incident);
 
-  // Step 4 — closed.
+  // Step 5 — closed.
   const closedDone = isClosed(incident);
 
-  return [
+  // For non-report incidents, the report steps are skipped, so "ready to close"
+  // depends only on review. For report incidents, the report must be sent.
+  const reportStepsDone = reportRequired ? (generatedDone && sentDone) : true;
+
+  const steps: ReviewStep[] = [
     {
       id: 'fields',
       label: 'Complete required fields',
@@ -229,29 +280,53 @@ export function getReviewSteps(
         : (!isAdmin ? 'Only the director/admin can mark an incident reviewed.' : ''),
       missing: [],
     },
-    {
-      id: 'sent',
-      label: 'Send report to customer',
-      done: sentDone,
-      actionable: fieldsDone && reviewDone && !sentDone,
+  ];
+
+  // Report generation + send only apply to XC-caused / Inconclusive incidents.
+  if (reportRequired) {
+    steps.push({
+      id: 'generate',
+      label: 'Generate report',
+      done: generatedDone,
+      actionable: fieldsDone && reviewDone && !generatedDone,
       allowedForRole: isAdmin,
       blockedReason: !reviewDone
         ? 'Director must review the incident first.'
-        : (!isAdmin ? 'Only the director/admin can send the report.' : ''),
+        : (!isAdmin ? 'Only the director/admin can generate the report.' : ''),
       missing: [],
-    },
-    {
-      id: 'closed',
-      label: 'Close incident',
-      done: closedDone,
-      actionable: fieldsDone && reviewDone && sentDone && !closedDone,
+    });
+    steps.push({
+      id: 'sent',
+      label: 'Send report to customer',
+      done: sentDone,
+      actionable: fieldsDone && reviewDone && generatedDone && !sentDone,
       allowedForRole: isAdmin,
-      blockedReason: !sentDone
-        ? 'Send the report to the customer first.'
-        : (!isAdmin ? 'Only the director/admin can close an incident.' : ''),
+      blockedReason: !reviewDone
+        ? 'Director must review the incident first.'
+        : (!generatedDone
+            ? 'Generate the report first.'
+            : (!isAdmin ? 'Only the director/admin can send the report.' : '')),
       missing: [],
-    },
-  ];
+    });
+  }
+
+  steps.push({
+    id: 'closed',
+    label: 'Close incident',
+    done: closedDone,
+    actionable: fieldsDone && reviewDone && reportStepsDone && !closedDone,
+    allowedForRole: isAdmin,
+    blockedReason: !reviewDone
+      ? 'Director must review the incident first.'
+      : (reportRequired && !generatedDone
+          ? 'Generate the report first.'
+          : (reportRequired && !sentDone
+              ? 'Send the report to the customer first.'
+              : (!isAdmin ? 'Only the director/admin can close an incident.' : ''))),
+    missing: [],
+  });
+
+  return steps;
 }
 
 // ── Action status (corrective/preventive action) ─────────────────────────────
