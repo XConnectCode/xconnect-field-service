@@ -74,4 +74,33 @@ assert.strictEqual(pickReport(undefined, 'final'), undefined);
 // Legacy AppSheet rows keep their real public URL — not a marker.
 assert.strictEqual(isStorageMarker(rows[1].file_url), false);
 
+// pickReport('final') falls back to a migrated 'AppSheet Original' row when
+// no app-generated Final exists, so native reports surface in the main slot.
+const appsheetRows: IncidentReportRow[] = [
+  {
+    row_id: '10',
+    event_id: 'EVT9',
+    report_type: 'AppSheet Original',
+    file_url: buildStorageMarker('EVT9/appsheet-123456.pdf'),
+    file_path: 'EVT9/appsheet-123456.pdf',
+    file_name: 'Event_EVT9_AppSheet_Original.pdf',
+    generated_at: null,
+    generated_by: null,
+  },
+];
+assert.strictEqual(
+  pickReport(appsheetRows, 'final')?.row_id,
+  '10',
+  "final should fall back to AppSheet Original",
+);
+// Preliminary does NOT fall back to AppSheet Original.
+assert.strictEqual(pickReport(appsheetRows, 'preliminary'), undefined);
+// A real Final still wins over an AppSheet Original when both are present.
+const mixed: IncidentReportRow[] = [...appsheetRows, rows[1]];
+assert.strictEqual(
+  pickReport(mixed, 'final')?.row_id,
+  '2',
+  "a real Final should take precedence over AppSheet Original",
+);
+
 console.log('incidentReportStorage tests passed');

@@ -985,6 +985,7 @@ export default function IncidentDetail() {
                 const slot   = pdfs[version];
                 const has    = !!(slot.row || slot.legacyUrl);
                 const isLegacyOnly = !slot.row && !!slot.legacyUrl;
+                const isAppSheetOriginal = slot.row?.report_type === 'AppSheet Original';
                 const label  = version === 'preliminary' ? 'Preliminary' : 'Final';
                 const genKey = `${incident.row_id}-${version}`;
                 const color  = version === 'preliminary' ? 'amber' : 'blue';
@@ -992,7 +993,14 @@ export default function IncidentDetail() {
                   ? 'Not yet generated'
                   : isLegacyOnly
                     ? 'Local-only — regenerate to share with team'
-                    : 'Saved in shared storage';
+                    : isAppSheetOriginal
+                      ? 'Original report from AppSheet'
+                      : 'Saved in shared storage';
+                // For migrated AppSheet originals, keep the source file name
+                // (and its real extension) on download.
+                const downloadName = isAppSheetOriginal && slot.row?.file_name
+                  ? slot.row.file_name
+                  : `Incident_${incident.event_id}_${label}.pdf`;
                 return (
                   <div key={version} className="flex items-center gap-3 px-4 py-3 rounded-lg border dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                     <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold shrink-0
@@ -1011,7 +1019,7 @@ export default function IncidentDetail() {
                             <Eye className="w-3 h-3" /> Preview
                           </Button>
                           <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1"
-                            onClick={() => downloadReport(slot, `Incident_${incident.event_id}_${label}.pdf`)}>
+                            onClick={() => downloadReport(slot, downloadName)}>
                             <Download className="w-3 h-3" /> Download
                           </Button>
                         </>
