@@ -492,7 +492,7 @@ export default function IncidentForm({
       // dashboard cards stay current. The user never waits on the LLM.
       const savedRowId = savedRows?.[0]?.row_id ?? (editing ? incident.row_id : null);
       if (savedRowId) {
-        const snap = getIncidentSnapshot();
+        const snap = buildIncidentSnapshot();
         void generateAndStoreIncidentSummary(savedRowId, {
           ...snap,
           well_name: (fd.get('well_name') as string) || null,
