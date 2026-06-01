@@ -711,32 +711,44 @@ apiRoutes.delete("/incidents/:id", requireAdmin, async (c) => {
 
 apiRoutes.get("/sales", async (c) => {
   try {
-    // Fetch barrels data
-    const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
-      .select('*');
+    // PostgREST caps a single select at 1000 rows; sales_volume has >1000 rows per
+    // metric_type, so page through with .range() to fetch ALL rows (else totals are short).
+    const fetchAllByMetric = async (metric: string) => {
+      const PAGE = 1000;
+      let from = 0;
+      const all: any[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from('sales_volume')
+          .select('*')
+          .eq('metric_type', metric)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = data || [];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
+    };
 
-    if (barrelsError) {
-      console.error('Error fetching barrels:', barrelsError);
-      return c.json({ error: barrelsError.message }, 500);
-    }
-
-    // Fetch stages data
-    const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
-      .select('*');
-
-    if (stagesError) {
-      console.error('Error fetching stages:', stagesError);
-      return c.json({ error: stagesError.message }, 500);
+    let barrelsData: any[];
+    let stagesData: any[];
+    try {
+      barrelsData = await fetchAllByMetric('barrels');
+      stagesData = await fetchAllByMetric('stages');
+    } catch (err: any) {
+      console.error('Error fetching sales_volume:', err);
+      return c.json({ error: err?.message || String(err) }, 500);
     }
 
     // Combine data by date and customer/district
     const combinedMap = new Map();
 
-    // Process barrels data
+    // Process barrels data — SUM (not overwrite) when multiple rows share a date+customer+district key
     (barrelsData || []).forEach(barrel => {
       const key = `${barrel.date}-${barrel.customer}-${barrel.customer_district}`;
+      const qty = Number(barrel.quantity) || 0;
       if (!combinedMap.has(key)) {
         combinedMap.set(key, {
           id: barrel.row_id,
@@ -746,20 +758,21 @@ apiRoutes.get("/sales", async (c) => {
           customerName: barrel.customer,
           districtId: barrel.customer_district,
           districtName: barrel.customer_district,
-          barrels: parseInt(barrel.quantity) || 0,
+          barrels: qty,
           stages: 0,
           notes: null,
           enteredBy: null
         });
       } else {
         const existing = combinedMap.get(key);
-        existing.barrels = parseInt(barrel.quantity) || 0;
+        existing.barrels += qty;
       }
     });
 
-    // Process stages data
+    // Process stages data — SUM (not overwrite) when multiple rows share a date+customer+district key
     (stagesData || []).forEach(stage => {
       const key = `${stage.date}-${stage.customer}-${stage.customer_district}`;
+      const qty = Number(stage.quantity) || 0;
       if (!combinedMap.has(key)) {
         combinedMap.set(key, {
           id: stage.row_id,
@@ -770,13 +783,13 @@ apiRoutes.get("/sales", async (c) => {
           districtId: stage.customer_district,
           districtName: stage.customer_district,
           barrels: 0,
-          stages: parseInt(stage.quantity) || 0,
+          stages: qty,
           notes: null,
           enteredBy: null
         });
       } else {
         const existing = combinedMap.get(key);
-        existing.stages = parseInt(stage.quantity) || 0;
+        existing.stages += qty;
       }
     });
 
@@ -818,16 +831,18 @@ apiRoutes.post("/sales", async (c) => {
     const customerName = customer?.customer;
     const districtName = district?.customer_district;
     
-    // Insert into barrels_sold table if barrels > 0
+    // Insert barrels row into sales_volume if barrels > 0
     if (body.barrels && body.barrels > 0) {
       const { error: barrelsError } = await supabase
-        .from('barrels_sold')
+        .from('sales_volume')
         .insert({
+          metric_type: 'barrels',
+          date_text: body.weekEnding,
           date: body.weekEnding,
           quantity: body.barrels.toString(),
           customer_district: districtName,
           customer: customerName,
-          product_line: 'Perforating Guns'
+          category: 'Perforating Guns'
         });
 
       if (barrelsError) {
@@ -836,16 +851,18 @@ apiRoutes.post("/sales", async (c) => {
       }
     }
 
-    // Insert into stages table if stages > 0
+    // Insert stages row into sales_volume if stages > 0
     if (body.stages && body.stages > 0) {
       const { error: stagesError } = await supabase
-        .from('stages')
+        .from('sales_volume')
         .insert({
+          metric_type: 'stages',
+          date_text: body.weekEnding,
           date: body.weekEnding,
           quantity: body.stages.toString(),
           customer_district: districtName,
           customer: customerName,
-          item: 'Stage'
+          category: 'Stage'
         });
 
       if (stagesError) {
@@ -1086,6 +1103,152 @@ apiRoutes.delete("/panels/:id", requireAdmin, async (c) => {
   }
 });
 
+// ============ DRIVER LOADS (hotshot checklist) ============
+
+// Whitelist of columns writable from the client, to avoid mass-assignment.
+const DRIVER_LOAD_FIELDS = [
+  'load_number','delivery_date','origin_district','customer','customer_district',
+  'destination','packing_slip_no','mode_of_delivery','trailer_connected','driver_type',
+  'driver','driver_name','driver_company','hazmat_load','hardware_present',
+  'ancillary_explosives','explosive_types','document_correlation','items_secure',
+  'driver_sig_url','inspector_name','inspector_sig_url','manager_name','manager_sig_url',
+  'status','departed_by','departed_at','notes','updated_by',
+];
+function pickDriverLoad(body: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const k of DRIVER_LOAD_FIELDS) if (k in body) out[k] = body[k];
+  return out;
+}
+
+// List loads. Admins see all; non-admins see only their own (by driver email).
+apiRoutes.get("/driver-loads", async (c) => {
+  try {
+    const user = c.get('user');
+    let q = supabase.from('driver_loads').select('*').order('created_at', { ascending: false });
+    if (user?.role !== 'admin' && user?.email) {
+      q = q.eq('driver', user.email);
+    }
+    const { data, error } = await q;
+    if (error) {
+      console.error('Error fetching driver loads:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data || []);
+  } catch (error) {
+    console.error('Error in driver-loads list endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Detail: a load + its items.
+apiRoutes.get("/driver-loads/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { data: load, error } = await supabase
+      .from('driver_loads').select('*').eq('row_id', id).single();
+    if (error) {
+      console.error('Error fetching driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    const { data: items } = await supabase
+      .from('driver_load_items').select('*').eq('load_row_id', id).order('created_at');
+    return c.json({ ...load, items: items || [] });
+  } catch (error) {
+    console.error('Error in driver-load detail endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.post("/driver-loads", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { data, error } = await supabase
+      .from('driver_loads').insert(pickDriverLoad(body)).select().single();
+    if (error) {
+      console.error('Error creating driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in create driver load endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.put("/driver-loads/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const patch = pickDriverLoad(body);
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('driver_loads').update(patch).eq('row_id', id).select().single();
+    if (error) {
+      console.error('Error updating driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in update driver load endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.delete("/driver-loads/:id", requireAdmin, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { error } = await supabase.from('driver_loads').delete().eq('row_id', id);
+    if (error) {
+      console.error('Error deleting driver load:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error in delete driver load endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Replace the full set of line items for a load (simplest reliable sync).
+apiRoutes.post("/driver-loads/:id/items", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const items = Array.isArray(body.items) ? body.items : [];
+    // Wipe and re-insert.
+    const { error: delErr } = await supabase
+      .from('driver_load_items').delete().eq('load_row_id', id);
+    if (delErr) {
+      console.error('Error clearing driver load items:', delErr);
+      return c.json({ error: delErr.message }, 500);
+    }
+    if (items.length) {
+      const rows = items.map((it: Record<string, unknown>) => ({
+        load_row_id: id,
+        pallet_build_no: it.pallet_build_no ?? null,
+        description: it.description ?? null,
+        qty_expected: it.qty_expected ?? 0,
+        qty_loaded: it.qty_loaded ?? 0,
+        destination: it.destination ?? null,
+        checked: it.checked ?? false,
+        note: it.note ?? null,
+        source_pallet_row_id: it.source_pallet_row_id ?? null,
+      }));
+      const { error: insErr } = await supabase.from('driver_load_items').insert(rows);
+      if (insErr) {
+        console.error('Error inserting driver load items:', insErr);
+        return c.json({ error: insErr.message }, 500);
+      }
+    }
+    const { data: saved } = await supabase
+      .from('driver_load_items').select('*').eq('load_row_id', id).order('created_at');
+    return c.json({ items: saved || [] });
+  } catch (error) {
+    console.error('Error in driver-load items endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // ============ FILE UPLOADS FOR INCIDENTS ============
 
 // Upload incident image
@@ -1294,10 +1457,11 @@ apiRoutes.get("/kpi/:customerId/:districtId", async (c) => {
     const visitCount = visits?.length || 0;
     const totalVisitHours = visits?.reduce((sum, v) => sum + (parseFloat(v.visit_duration) || 0), 0) || 0;
     
-    // Get sales data (barrels from barrels_sold table and stages from stages table) - use NAMES, not row_ids
+    // Get sales data from sales_volume - use NAMES, not row_ids
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'barrels')
       .eq('customer', customerName)
       .eq('customer_district', districtName);
     
@@ -1306,8 +1470,9 @@ apiRoutes.get("/kpi/:customerId/:districtId", async (c) => {
     }
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'stages')
       .eq('customer', customerName)
       .eq('customer_district', districtName);
     
@@ -1393,10 +1558,11 @@ apiRoutes.get("/kpi/:customerId", async (c) => {
     const visitCount = visits?.length || 0;
     const totalVisitHours = visits?.reduce((sum, v) => sum + (parseFloat(v.visit_duration) || 0), 0) || 0;
     
-    // Get sales data (barrels from barrels_sold table and stages from stages table) - use customer NAME, not row_id
+    // Get sales data from sales_volume - use customer NAME, not row_id
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'barrels')
       .eq('customer', customerName);
     
     if (barrelsError) {
@@ -1404,8 +1570,9 @@ apiRoutes.get("/kpi/:customerId", async (c) => {
     }
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity')
+      .eq('metric_type', 'stages')
       .eq('customer', customerName);
     
     if (stagesError) {
@@ -1476,10 +1643,11 @@ apiRoutes.get("/kpi/company/summary", async (c) => {
     const visitCount = visits?.length || 0;
     const totalVisitHours = visits?.reduce((sum, v) => sum + (parseFloat(v.visit_duration) || 0), 0) || 0;
     
-    // Get all sales data (barrels from barrels_sold table and stages from stages table)
+    // Get all sales data from sales_volume
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
-      .select('quantity');
+      .from('sales_volume')
+      .select('quantity')
+      .eq('metric_type', 'barrels');
     
     if (barrelsError) {
       console.error('Error fetching barrels:', barrelsError);
@@ -1487,8 +1655,9 @@ apiRoutes.get("/kpi/company/summary", async (c) => {
     console.log(`Barrels rows: ${barrelsData?.length || 0}`);
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
-      .select('quantity');
+      .from('sales_volume')
+      .select('quantity')
+      .eq('metric_type', 'stages');
     
     if (stagesError) {
       console.error('Error fetching stages:', stagesError);
@@ -1745,8 +1914,9 @@ apiRoutes.get("/customers/:id/details", async (c) => {
 
     // Get sales data - use customer NAME, not row_id
     const { data: barrelsData, error: barrelsError } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity, date, customer_district, customer')
+      .eq('metric_type', 'barrels')
       .eq('customer', customerName);
     
     if (barrelsError) {
@@ -1756,8 +1926,9 @@ apiRoutes.get("/customers/:id/details", async (c) => {
     console.log(`Customer ${customerName} (ID: ${id}) - Barrels data count: ${barrelsData?.length || 0}`);
     
     const { data: stagesData, error: stagesError } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity, date, customer_district, customer')
+      .eq('metric_type', 'stages')
       .eq('customer', customerName);
     
     if (stagesError) {
@@ -1863,13 +2034,15 @@ apiRoutes.get("/districts/:id/details", async (c) => {
 
     // Get sales data - use district NAME, not row_id
     const { data: barrelsData } = await supabase
-      .from('barrels_sold')
+      .from('sales_volume')
       .select('quantity, date')
+      .eq('metric_type', 'barrels')
       .eq('customer_district', districtName);
     
     const { data: stagesData } = await supabase
-      .from('stages')
+      .from('sales_volume')
       .select('quantity, date')
+      .eq('metric_type', 'stages')
       .eq('customer_district', districtName);
     
     const totalBarrels = barrelsData?.reduce((sum, b) => sum + (parseInt(b.quantity) || 0), 0) || 0;
@@ -1933,12 +2106,14 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
   try {
     // Get exact row counts using head: true (doesn't fetch data, just counts)
     const { count: stagesCount } = await supabase
-      .from('stages')
-      .select('*', { count: 'exact', head: true });
+      .from('sales_volume')
+      .select('*', { count: 'exact', head: true })
+      .eq('metric_type', 'stages');
     
     const { count: barrelsCount } = await supabase
-      .from('barrels_sold')
-      .select('*', { count: 'exact', head: true });
+      .from('sales_volume')
+      .select('*', { count: 'exact', head: true })
+      .eq('metric_type', 'barrels');
     
     // Fetch all stages data with pagination to sum quantities
     let allStagesData: any[] = [];
@@ -1946,8 +2121,9 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
     const pageSize = 1000;
     while (true) {
       const { data } = await supabase
-        .from('stages')
+        .from('sales_volume')
         .select('quantity')
+        .eq('metric_type', 'stages')
         .range(stagesPage * pageSize, (stagesPage + 1) * pageSize - 1);
       if (!data || data.length === 0) break;
       allStagesData = [...allStagesData, ...data];
@@ -1961,8 +2137,9 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
     let barrelsPage = 0;
     while (true) {
       const { data } = await supabase
-        .from('barrels_sold')
+        .from('sales_volume')
         .select('quantity')
+        .eq('metric_type', 'barrels')
         .range(barrelsPage * pageSize, (barrelsPage + 1) * pageSize - 1);
       if (!data || data.length === 0) break;
       allBarrelsData = [...allBarrelsData, ...data];
