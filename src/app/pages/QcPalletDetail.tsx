@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { qcPalletApi } from '../lib/api';
+import { qcPalletApi, qcPalletFileApi } from '../lib/api';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import ImageUpload from '../components/ImageUpload';
 import { Button } from '../components/ui/button';
@@ -11,7 +11,7 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Progress } from '../components/ui/progress';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, Save, Trash2, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, CheckCircle2, AlertTriangle, ShieldCheck, FileText, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 
 const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
@@ -51,6 +51,10 @@ export default function QcPalletDetail() {
   const [saving, setSaving] = useState(false);
   const [gunCountInput, setGunCountInput] = useState('');
   const [lotInput, setLotInput] = useState('');
+  // Files attached to this pallet (imported slip PDFs + verification photo presence).
+  const [slipPdfs, setSlipPdfs] = useState<any[]>([]);
+  const [hasVerifyPhoto, setHasVerifyPhoto] = useState(false);
+  const [uploadingSlip, setUploadingSlip] = useState(false);
 
   const isAdmin = user?.role === 'admin';
   const isUnloaded = pallet?.load_type === 'unloaded';
@@ -107,9 +111,55 @@ export default function QcPalletDetail() {
     }
   };
 
+  // Load attached files: the imported slip PDF(s) and whether a physical-slip
+  // verification photo has been attached (gates sign-off).
+  const fetchFiles = async () => {
+    if (!id) return;
+    try {
+      const res = await qcPalletFileApi.list(id, accessToken || undefined);
+      const files: any[] = Array.isArray(res?.files) ? res.files : [];
+      setSlipPdfs(files.filter((f) => f.field_name === 'slip_pdf'));
+      setHasVerifyPhoto(files.some((f) => f.field_name === 'build_slip_photo'));
+    } catch (error) {
+      console.error('Error loading pallet files:', error);
+    }
+  };
+
   useEffect(() => {
     fetchPallet();
+    fetchFiles();
   }, [id, accessToken]);
+
+  // Manual fallback upload for the imported slip PDF (e.g. pallets created
+  // manually, or to attach a corrected slip).
+  const handleSlipPdfUpload = async (file: File | null) => {
+    if (!file || !id) return;
+    if (file.type !== 'application/pdf') {
+      toast.error('Please choose a PDF file');
+      return;
+    }
+    setUploadingSlip(true);
+    try {
+      await qcPalletFileApi.upload(id, file, 'slip_pdf', accessToken || undefined);
+      toast.success('Slip PDF attached');
+      await fetchFiles();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to attach slip PDF');
+    } finally {
+      setUploadingSlip(false);
+    }
+  };
+
+  const handleSlipPdfDelete = async (imageId: string) => {
+    if (!confirm('Remove this attached slip PDF?')) return;
+    try {
+      await qcPalletFileApi.remove(imageId, accessToken || undefined);
+      toast.success('Slip PDF removed');
+      await fetchFiles();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to remove');
+    }
+  };
 
   const setPalletField = (key: string, value: any) => setPallet((prev: any) => ({ ...prev, [key]: value }));
 
@@ -249,7 +299,8 @@ export default function QcPalletDetail() {
   const failedCount = useMemo(() => guns.filter((g) => g.result === 'fail').length, [guns]);
   const pendingCount = useMemo(() => guns.filter((g) => g.result === 'pending').length, [guns]);
   const total = guns.length;
-  const canSignOff = total > 0 && passedCount === total && pallet?.status !== 'passed';
+  const allGunsPassed = total > 0 && passedCount === total;
+  const canSignOff = allGunsPassed && hasVerifyPhoto && pallet?.status !== 'passed';
   const progressPct = total > 0 ? Math.round(((passedCount + failedCount) / total) * 100) : 0;
 
   if (loading) {
@@ -330,16 +381,93 @@ export default function QcPalletDetail() {
                 <Input value={pallet.destination || ''} onChange={(e) => setPalletField('destination', e.target.value)} />
               </div>
             </div>
-            <div>
-              <Label className="mb-1 block">NetSuite paperwork (PDF / photos) — verify the build against this</Label>
+            {/* Imported slip PDF (auto-saved on import; manual fallback below) */}
+            <div className="border-t pt-4">
+              <Label className="mb-1 flex items-center gap-2">
+                <FileText className="w-4 h-4" /> Imported slip (NetSuite PDF)
+              </Label>
+              <p className="text-xs text-gray-500 mb-2">
+                The packing / pallet build slip this pallet was created from. Verify the physical build against it.
+              </p>
+              {slipPdfs.length > 0 ? (
+                <div className="space-y-1">
+                  {slipPdfs.map((f) => (
+                    <div key={f.id} className="flex items-center gap-3 text-sm">
+                      <a
+                        href={f.signedUrl || f.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                      >
+                        <FileText className="w-4 h-4" /> View slip PDF
+                      </a>
+                      <button
+                        type="button"
+                        className="text-red-500 hover:underline text-xs"
+                        onClick={() => handleSlipPdfDelete(f.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">No slip PDF attached yet.</p>
+              )}
+              <div className="mt-2">
+                <Input
+                  type="file"
+                  accept="application/pdf"
+                  disabled={uploadingSlip}
+                  onChange={(e) => handleSlipPdfUpload(e.target.files?.[0] || null)}
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  {uploadingSlip ? 'Uploading…' : 'Attach a slip PDF manually if needed.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Physical pallet build slip verification photo (REQUIRED for sign-off) */}
+            <div className="border-t pt-4">
+              <Label className="mb-1 flex items-center gap-2">
+                <Camera className="w-4 h-4" /> Physical pallet build slip photo
+                <span className="text-red-500">*</span>
+                {hasVerifyPhoto
+                  ? <Badge variant="default" className="ml-1">Attached</Badge>
+                  : <Badge variant="outline" className="ml-1">Required for sign-off</Badge>}
+              </Label>
+              <p className="text-xs text-gray-500 mb-2">
+                Take a photo of the actual paper build slip on the pallet you are inspecting. Required before sign-off.
+              </p>
               <ImageUpload
                 parentTable="qc_pallets"
                 parentRowId={id!}
-                fieldName="netsuite_paperwork"
+                fieldName="build_slip_photo"
                 baseUrl={baseUrl}
                 publicAnonKey={publicAnonKey}
                 autoLoad
-                maxImages={10}
+                maxImages={3}
+                onImageUploaded={() => fetchFiles()}
+                onImageDeleted={() => fetchFiles()}
+              />
+            </div>
+
+            {/* General QC photos (pallet-level evidence / defects) */}
+            <div className="border-t pt-4">
+              <Label className="mb-1 flex items-center gap-2">
+                <Camera className="w-4 h-4" /> QC photos (sampled guns / defects)
+              </Label>
+              <p className="text-xs text-gray-500 mb-2">
+                Optional photos of the sampled guns or any defects found during inspection.
+              </p>
+              <ImageUpload
+                parentTable="qc_pallets"
+                parentRowId={id!}
+                fieldName="qc_photo"
+                baseUrl={baseUrl}
+                publicAnonKey={publicAnonKey}
+                autoLoad
+                maxImages={20}
               />
             </div>
           </CardContent>
@@ -487,7 +615,7 @@ export default function QcPalletDetail() {
                 {canSignOff ? (
                   <div className="flex items-center gap-2 text-green-700 dark:text-green-400 mb-4">
                     <CheckCircle2 className="w-5 h-5" />
-                    <span className="font-medium">All {total} guns passed — ready to sign off.</span>
+                    <span className="font-medium">All {total} guns passed and slip photo attached — ready to sign off.</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 mb-4">
@@ -495,7 +623,9 @@ export default function QcPalletDetail() {
                     <span className="font-medium">
                       {total === 0
                         ? 'Initialise and inspect guns before sign-off.'
-                        : `Cannot sign off — ${total - passedCount} of ${total} guns not yet passed.`}
+                        : !allGunsPassed
+                          ? `Cannot sign off — ${total - passedCount} of ${total} guns not yet passed.`
+                          : 'Cannot sign off — attach a photo of the physical pallet build slip first.'}
                     </span>
                   </div>
                 )}

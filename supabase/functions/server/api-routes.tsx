@@ -1613,6 +1613,17 @@ apiRoutes.post("/qc-pallets/:id/signoff", async (c) => {
     if (passed !== total) {
       return c.json({ error: `Cannot sign off: ${total - passed} of ${total} guns have not passed.` }, 400);
     }
+    // Require a photo of the physical pallet build slip as verification evidence.
+    const { data: verifyPhotos } = await supabase
+      .from('images')
+      .select('id')
+      .eq('parent_table', 'qc_pallets')
+      .eq('parent_row_id', id)
+      .eq('field_name', 'build_slip_photo')
+      .limit(1);
+    if (!verifyPhotos || verifyPhotos.length === 0) {
+      return c.json({ error: 'Cannot sign off: attach a photo of the physical pallet build slip first.' }, 400);
+    }
     const signer = body.signed_off_by || user?.email || null;
     const { data, error } = await supabase
       .from('qc_pallets').update({

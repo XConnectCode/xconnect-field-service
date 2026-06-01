@@ -177,6 +177,48 @@ export const qcPalletApi = {
     apiRequest(`/qc-pallets/${id}/signoff`, { method: 'POST', body: JSON.stringify({ signed_off_by: signedOffBy }) }, token),
 };
 
+// ── QC pallet file/image helpers (polymorphic images table) ────────────────────
+// These talk to POST/GET/DELETE /images/:parentTable/:parentRowId. We do NOT use
+// apiRequest for upload because it forces Content-Type: application/json, which
+// would break the multipart FormData boundary.
+async function authHeader(token?: string): Promise<string> {
+  let t = token;
+  if (!t) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      t = data.session?.access_token;
+    } catch {
+      // ignore
+    }
+  }
+  return `Bearer ${t || publicAnonKey}`;
+}
+
+export const qcPalletFileApi = {
+  // List all images/files attached to a pallet (any field_name).
+  list: (palletId: string, token?: string) =>
+    apiRequest(`/images/qc_pallets/${encodeURIComponent(palletId)}`, {}, token),
+
+  // Upload a file (PDF or image) tagged with a field_name. Returns { id, url, storagePath }.
+  upload: async (palletId: string, file: File, fieldName: string, token?: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('fieldName', fieldName);
+    const resp = await fetch(
+      `${API_BASE_URL}/images/qc_pallets/${encodeURIComponent(palletId)}`,
+      { method: 'POST', headers: { Authorization: await authHeader(token) }, body: fd },
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `Upload failed (HTTP ${resp.status})`);
+    }
+    return resp.json();
+  },
+
+  remove: (imageId: string, token?: string) =>
+    apiRequest(`/images/${encodeURIComponent(imageId)}`, { method: 'DELETE' }, token),
+};
+
 // Auth APIs
 export const authApi = {
   signup: (userData: { email: string; password: string; name: string; role: string }) => 

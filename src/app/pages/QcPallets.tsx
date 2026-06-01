@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { qcPalletApi } from '../lib/api';
+import { qcPalletApi, qcPalletFileApi } from '../lib/api';
 import { extractPdfText } from '../lib/pdfText';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -35,6 +35,7 @@ export default function QcPallets() {
   const [parsing, setParsing] = useState(false);
   const [parsed, setParsed] = useState<any>(null);   // parsed slip + editable header
   const [chosenIds, setChosenIds] = useState<Record<string, boolean>>({});
+  const [slipFile, setSlipFile] = useState<File | null>(null); // original PDF, saved to each created pallet
 
   const loadData = async () => {
     try {
@@ -100,6 +101,7 @@ export default function QcPallets() {
     if (!file) return;
     setParsing(true);
     setParsed(null);
+    setSlipFile(file);
     try {
       const text = await extractPdfText(file);
       const res = await qcPalletApi.parseSlip(text, accessToken || undefined);
@@ -147,8 +149,27 @@ export default function QcPallets() {
       const made = res?.created?.length ?? 0;
       const skipped = res?.skipped?.length ?? 0;
       toast.success(`Created ${made} pallet(s)${skipped ? `, skipped ${skipped} existing` : ''}`);
+
+      // Attach the original imported slip PDF to each newly created pallet so the
+      // inspector can reference the exact NetSuite document it came from.
+      const createdPallets: any[] = Array.isArray(res?.created) ? res.created : [];
+      if (slipFile && createdPallets.length) {
+        let saved = 0;
+        for (const p of createdPallets) {
+          if (!p?.row_id) continue;
+          try {
+            await qcPalletFileApi.upload(p.row_id, slipFile, 'slip_pdf', accessToken || undefined);
+            saved++;
+          } catch (err) {
+            console.error('Failed to attach slip PDF to pallet', p.row_id, err);
+          }
+        }
+        if (saved) toast.success(`Saved slip PDF to ${saved} pallet(s)`);
+      }
+
       setSlipOpen(false);
       setParsed(null);
+      setSlipFile(null);
       loadData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to create pallets');
@@ -188,7 +209,7 @@ export default function QcPallets() {
           </div>
           <div className="flex gap-2">
             {/* Upload Slip */}
-            <Dialog open={slipOpen} onOpenChange={(o) => { setSlipOpen(o); if (!o) setParsed(null); }}>
+            <Dialog open={slipOpen} onOpenChange={(o) => { setSlipOpen(o); if (!o) { setParsed(null); setSlipFile(null); } }}>
               <DialogTrigger asChild>
                 <Button variant="outline">
                   <Upload className="w-4 h-4 mr-2" />
