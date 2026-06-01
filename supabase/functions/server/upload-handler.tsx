@@ -7,6 +7,11 @@ const supabase = createClient(
 
 const BUCKET_NAME = 'make-64775d98-incident-images';
 const SIGNED_URL_TTL_SECONDS = 31536000; // 1 year
+// Images plus PDFs (QC pallets store the imported NetSuite slip PDF).
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic',
+  'application/pdf',
+];
 
 // ---------------------------------------------------------------------------
 // Bucket init
@@ -27,7 +32,7 @@ export async function initializeIncidentImagesBucket() {
       const { data, error } = await supabase.storage.createBucket(BUCKET_NAME, {
         public: false,
         fileSizeLimit: 10485760, // 10MB
-        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic']
+        allowedMimeTypes: ALLOWED_MIME_TYPES,
       });
       if (error) {
         console.error('Error creating bucket:', error);
@@ -36,6 +41,13 @@ export async function initializeIncidentImagesBucket() {
       }
     } else {
       console.log(`Bucket ${BUCKET_NAME} already exists`);
+      // Ensure the existing bucket allows the full mime list (e.g. PDFs added later).
+      const { error: updErr } = await supabase.storage.updateBucket(BUCKET_NAME, {
+        public: false,
+        fileSizeLimit: 10485760,
+        allowedMimeTypes: ALLOWED_MIME_TYPES,
+      });
+      if (updErr) console.error('Error updating bucket mime types:', updErr);
     }
   } catch (error) {
     console.error('Error initializing bucket:', error);

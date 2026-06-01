@@ -1492,6 +1492,16 @@ apiRoutes.put("/qc-pallets/:id", async (c) => {
 apiRoutes.delete("/qc-pallets/:id", requireAdmin, async (c) => {
   try {
     const id = c.req.param('id');
+    // Clean up associated images (slip_pdf, build_slip_photo, qc_photo) first so
+    // we don't orphan storage objects / images rows when the pallet is removed.
+    try {
+      const { files } = await listImagesForRecord('qc_pallets', id);
+      for (const f of files || []) {
+        if (f?.id) await deleteImageById(f.id);
+      }
+    } catch (imgErr) {
+      console.warn('qc pallet image cleanup warning (continuing):', imgErr);
+    }
     const { error } = await supabase.from('qc_pallets').delete().eq('row_id', id);
     if (error) {
       console.error('Error deleting qc pallet:', error);
