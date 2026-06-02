@@ -464,24 +464,6 @@ export default function QcPalletDetail() {
               />
             </div>
 
-            {/* General QC photos (pallet-level evidence / defects) */}
-            <div className="border-t pt-4">
-              <Label className="mb-1 flex items-center gap-2">
-                <Camera className="w-4 h-4" /> QC photos (sampled guns / defects)
-              </Label>
-              <p className="text-xs text-gray-500 mb-2">
-                Optional photos of the sampled guns or any defects found during inspection.
-              </p>
-              <ImageUpload
-                parentTable="qc_pallets"
-                parentRowId={id!}
-                fieldName="qc_photo"
-                baseUrl={baseUrl}
-                publicAnonKey={publicAnonKey}
-                autoLoad
-                maxImages={20}
-              />
-            </div>
           </CardContent>
         </Card>
 
@@ -634,6 +616,32 @@ export default function QcPalletDetail() {
             </CardContent>
           </Card>
         ))}
+
+        {/* QC photos (sampled guns / defects) — placed after the inspection
+            checks since photos are taken while/after inspecting the guns. */}
+        {requiresQc && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Camera className="w-5 h-5" /> QC photos (sampled guns / defects)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-gray-500 mb-2">
+                Optional photos of the sampled guns or any defects found during inspection.
+              </p>
+              <ImageUpload
+                parentTable="qc_pallets"
+                parentRowId={id!}
+                fieldName="qc_photo"
+                baseUrl={baseUrl}
+                publicAnonKey={publicAnonKey}
+                autoLoad
+                maxImages={20}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Sign-off */}
         <Card>
