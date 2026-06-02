@@ -195,12 +195,18 @@ export default function IncidentsNew() {
       const fieldVisitId = searchParams.get('fieldVisitId');
       const customerId   = searchParams.get('customerId');
       const districtId   = searchParams.get('districtId');
-      if (fieldVisitId || customerId || districtId) {
+      const qcPalletId   = searchParams.get('qcPalletId');
+      const qcBuildNo    = searchParams.get('qcBuildNo');
+      const soNumber     = searchParams.get('soNumber');
+      if (fieldVisitId || customerId || districtId || qcPalletId || soNumber) {
         setEditingIncident(null);
         setPrefillIncident({
           field_visit_id: fieldVisitId || '',
           customer: customerId || '',
           customer_district: districtId || '',
+          qc_pallet_id: qcPalletId || '',
+          qc_build_no: qcBuildNo || '',
+          so_number: soNumber || '',
         });
       } else {
         setEditingIncident(null);

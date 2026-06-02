@@ -773,6 +773,20 @@ export default function IncidentDetail() {
                   <span className="text-gray-400">N/A</span>
                 )}
               </Field>
+              <Field label="QC Pallet / Build Slip">
+                {incident.qc_pallet_id ? (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/qc/${incident.qc_pallet_id}`)}
+                    className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {incident.qc_build_no || incident.qc_pallet_id}
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <span className="text-gray-400">N/A</span>
+                )}
+              </Field>
               <Field label="Report Version" value={incident.report_version} />
             </CardContent>
           </Card>

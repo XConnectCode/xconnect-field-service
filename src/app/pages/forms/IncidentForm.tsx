@@ -191,7 +191,14 @@ interface Props {
   // Initial values for a NEW incident (e.g. "Log Incident" from a Field Visit).
   // Unlike `incident`, this does NOT switch the form into edit mode — the record
   // is still inserted, just with these fields pre-selected.
-  prefill?: { field_visit_id?: string; customer?: string; customer_district?: string } | null;
+  prefill?: {
+    field_visit_id?: string;
+    customer?: string;
+    customer_district?: string;
+    qc_pallet_id?: string;
+    qc_build_no?: string;
+    so_number?: string;
+  } | null;
   currentUser?: any;
 }
 
@@ -213,6 +220,7 @@ export default function IncidentForm({
   const [listItems, setListItems] = useState<any[]>([]);
   const [epCompanies, setEpCompanies] = useState<string[]>([]);
   const [fieldVisits, setFieldVisits] = useState<any[]>([]);
+  const [qcPallets, setQcPallets] = useState<any[]>([]);
   const [components, setComponents] = useState<any[]>([]);
 
   // Form state
@@ -379,8 +387,23 @@ export default function IncidentForm({
       .then(({ data }) => setFieldVisits(data || []));
   }, [custId]);
 
+  // Load recent QC pallets (build slips) so an incident can be linked to the
+  // build it came from. qc_pallets.customer is stored as the customer NAME
+  // (not the customers.row_id used by incidents), so we don't filter by
+  // customer here — we show the most recent builds globally and let the user
+  // pick the right build_no.
+  useEffect(() => {
+    if (!open) return;
+    supabase
+      .from('qc_pallets')
+      .select('row_id, build_no, customer, sales_order, status, created_at')
+      .order('created_at', { ascending: false })
+      .limit(100)
+      .then(({ data }) => setQcPallets(data || []));
+  }, [open]);
+
   // Pre-fill when editing, or seed a new incident from `prefill` (Log Incident
-  // from a Field Visit). `prefill` only applies when not editing.
+  // from a Field Visit or a QC build slip). `prefill` only applies when not editing.
   useEffect(() => {
     if (incident) {
       setCustId(incident.customer || '');
@@ -463,6 +486,12 @@ export default function IncidentForm({
       stage_number: fd.get('stage_number') || null,
       so_number: fd.get('so_number') || null,
       field_visit_id: fd.get('field_visit_id') || null,
+      qc_pallet_id: fd.get('qc_pallet_id') || null,
+      // Denormalize the human-facing build slip number from the selected pallet
+      // so lists/detail views can show it without a join.
+      qc_build_no:
+        qcPallets.find((p: any) => p.row_id === fd.get('qc_pallet_id'))?.build_no ||
+        (fd.get('qc_pallet_id') ? (incident?.qc_build_no || prefill?.qc_build_no || null) : null),
       failed_component: fd.get('failed_component') || null,
       failure_type: fd.get('failure_type') || null,
       vendor: fd.get('vendor') || null,
@@ -795,7 +824,11 @@ export default function IncidentForm({
             </F>
 
             <F label="SO #">
-              <Input name="so_number" defaultValue={incident?.so_number || ''} />
+              <Input
+                key={`so-${incident?.row_id || prefill?.so_number || 'new'}`}
+                name="so_number"
+                defaultValue={incident?.so_number || prefill?.so_number || ''}
+              />
             </F>
 
             <F label="Field Visit">
@@ -821,6 +854,36 @@ export default function IncidentForm({
                   <option key={v.row_id} value={v.field_visit_id}>
                     {v.field_visit_id} — {v.pad_name || 'No pad'} (
                     {v.arrival_date?.slice(0, 10) || 'No date'})
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            {/* Link to the QC pallet / build slip the failed gun came from.
+                Stores the pallet row_id; build_no is denormalized on save. */}
+            <F label="QC Pallet / Build Slip">
+              <Sel
+                key={`qcp-${incident?.row_id || prefill?.qc_pallet_id || 'new'}-${qcPallets.length}`}
+                name="qc_pallet_id"
+                defaultValue={incident?.qc_pallet_id || prefill?.qc_pallet_id || ''}
+              >
+                <option value="">— None / Not linked —</option>
+                {/* Fallback: if the linked build isn't in the recent-100 list,
+                    still show it so the link isn't dropped on save. */}
+                {(() => {
+                  const linkedId = incident?.qc_pallet_id || prefill?.qc_pallet_id;
+                  const linkedNo = incident?.qc_build_no || prefill?.qc_build_no;
+                  return linkedId &&
+                    !qcPallets.some((p: any) => p.row_id === linkedId) ? (
+                      <option value={linkedId}>
+                        {linkedNo || linkedId} (linked build)
+                      </option>
+                    ) : null;
+                })()}
+                {qcPallets.map((p: any) => (
+                  <option key={p.row_id} value={p.row_id}>
+                    {p.build_no || '(no build #)'} — {p.customer || 'No customer'}
+                    {p.sales_order ? ` · SO ${p.sales_order}` : ''}
                   </option>
                 ))}
               </Sel>

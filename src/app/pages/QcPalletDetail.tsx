@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { qcPalletApi, qcPalletFileApi } from '../lib/api';
+import { qcPalletApi, qcPalletFileApi, incidentApi } from '../lib/api';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import ImageUpload from '../components/ImageUpload';
 import { Button } from '../components/ui/button';
@@ -11,7 +11,7 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Progress } from '../components/ui/progress';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, Save, Trash2, CheckCircle2, AlertTriangle, ShieldCheck, FileText, Camera } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, CheckCircle2, AlertTriangle, ShieldCheck, FileText, Camera, FilePlus, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
@@ -55,6 +55,8 @@ export default function QcPalletDetail() {
   const [slipPdfs, setSlipPdfs] = useState<any[]>([]);
   const [hasVerifyPhoto, setHasVerifyPhoto] = useState(false);
   const [uploadingSlip, setUploadingSlip] = useState(false);
+  // Incidents already linked to this build slip (qc_pallet_id === this pallet).
+  const [relatedIncidents, setRelatedIncidents] = useState<any[]>([]);
 
   const isAdmin = user?.role === 'admin';
   const isUnloaded = pallet?.load_type === 'unloaded';
@@ -319,6 +321,31 @@ export default function QcPalletDetail() {
     }
   };
 
+  // Load incidents linked to this build slip (for the Related Incidents card).
+  useEffect(() => {
+    if (!id) return;
+    incidentApi
+      .getAll(accessToken || undefined)
+      .then((rows: any[]) =>
+        setRelatedIncidents(
+          (rows || []).filter((r) => r.qc_pallet_id === id),
+        ),
+      )
+      .catch(() => setRelatedIncidents([]));
+  }, [id, accessToken]);
+
+  // "Log Incident from this Build" — open a NEW incident pre-linked to this
+  // pallet, carrying the build #, customer name, and sales order so the form
+  // is auto-filled. The incident form reads these via its `prefill` prop.
+  const handleLogIncident = () => {
+    if (!pallet) return;
+    const params = new URLSearchParams({ new: '1' });
+    if (id) params.set('qcPalletId', id);
+    if (pallet.build_no) params.set('qcBuildNo', pallet.build_no);
+    if (pallet.sales_order) params.set('soNumber', pallet.sales_order);
+    navigate(`/incidents?${params.toString()}`);
+  };
+
   // ── progress / readiness ──────────────────────────────────────────────────────
   const passedCount = useMemo(() => guns.filter((g) => g.result === 'pass').length, [guns]);
   const failedCount = useMemo(() => guns.filter((g) => g.result === 'fail').length, [guns]);
@@ -365,6 +392,14 @@ export default function QcPalletDetail() {
             <Badge variant={pallet.status === 'passed' ? 'default' : pallet.status === 'failed' ? 'destructive' : 'outline'} className="capitalize">
               {pallet.status}
             </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-amber-700 border-amber-200 hover:bg-amber-50"
+              onClick={handleLogIncident}
+            >
+              <FilePlus className="w-4 h-4 mr-1" /> Log Incident
+            </Button>
             <Button variant="outline" size="sm" onClick={savePalletMeta} disabled={saving}>
               <Save className="w-4 h-4 mr-1" /> Save
             </Button>
@@ -375,6 +410,41 @@ export default function QcPalletDetail() {
             )}
           </div>
         </div>
+
+        {/* Related Incidents — quality issues logged against this build slip. */}
+        {relatedIncidents.length > 0 && (
+          <Card className="border-amber-200">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+                Related Incidents
+                <Badge variant="outline" className="ml-1">{relatedIncidents.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {relatedIncidents.map((inc) => (
+                <button
+                  key={inc.row_id}
+                  type="button"
+                  onClick={() => navigate(`/incidents/${inc.row_id}`)}
+                  className="w-full flex items-center justify-between gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-left hover:bg-amber-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                      Incident #{inc.event_id || '—'}
+                      {inc.failed_component ? ` · ${inc.failed_component}` : ''}
+                    </div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {inc.incident_status || 'Open'}
+                      {inc.date_incident ? ` · ${String(inc.date_incident).slice(0, 10)}` : ''}
+                    </div>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-gray-400 shrink-0" />
+                </button>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Pallet info + NetSuite PDF */}
         <Card>
