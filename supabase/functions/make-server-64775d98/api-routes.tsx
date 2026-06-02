@@ -1230,6 +1230,7 @@ apiRoutes.post("/driver-loads/:id/items", async (c) => {
         qty_expected: it.qty_expected ?? 0,
         qty_loaded: it.qty_loaded ?? 0,
         destination: it.destination ?? null,
+        load_type: it.load_type ?? null,
         checked: it.checked ?? false,
         note: it.note ?? null,
         source_pallet_row_id: it.source_pallet_row_id ?? null,
@@ -1329,9 +1330,16 @@ function parseSlipText(text: string) {
   const is_gun = !!gunHeader || hasBarrel;
   const item_category = is_gun ? 'guns' : 'hardware';
 
+  // Loaded vs. Unloaded. The signal lives in the item/description text, not in a
+  // fixed header: a loaded build slip says "3 Shot XConnect Loaded Gun", while an
+  // unloaded slip says "RL2.75 Unloaded 3 Shot (3 Band Barrel) ASM" (no "Gun"
+  // word, so the gun-header regex misses it). Scan the whole slip and check
+  // "unloaded" FIRST so the substring inside "unloaded" never reads as "loaded".
   let load_type: string | null = null;
-  if (gunHeader) {
-    load_type = /unloaded/i.test(gunHeader) ? 'unloaded' : (/loaded/i.test(gunHeader) ? 'loaded' : null);
+  if (is_gun) {
+    if (/unloaded/i.test(clean)) load_type = 'unloaded';
+    else if (/\bloaded\b/i.test(clean)) load_type = 'loaded';
+    else if (gunHeader) load_type = /unloaded/i.test(gunHeader) ? 'unloaded' : (/loaded/i.test(gunHeader) ? 'loaded' : null);
   }
 
   // Barrel ASM quantity. On a BUILD slip this is the true per-pallet gun count
@@ -1356,11 +1364,37 @@ function parseSlipText(text: string) {
     }
   }
 
+  // Origin = the XC base the pallet was BUILT/staged at, NOT where it ships to.
+  // The build slip carries "Build Location: XConnect Williston Shop"; the
+  // additional-reference code (ND_WIL_/ND_MID_) is a secondary hint. Normalize
+  // to a known XC base name.
+  const build_location = get(/Build Location\s*\n\s*([^\n]+)/i);
+  let origin_district: string | null = null;
+  if (build_location && /Willist/i.test(build_location)) origin_district = 'Williston';
+  else if (build_location && /Midland/i.test(build_location)) origin_district = 'Midland';
+  if (!origin_district && additional_reference && /WIL/i.test(additional_reference)) origin_district = 'Williston';
+  else if (!origin_district && additional_reference && /MID/i.test(additional_reference)) origin_district = 'Midland';
+
+  // Destination = the CUSTOMER's site/facility, read from the packing slip
+  // Ship-To block (we are XC, so the XC base is the origin, never the
+  // destination). The first line under "Ship-To Address" is the consignee name;
+  // we keep the consignee + as much of the address as we can capture on one
+  // line. Build slips have no Ship-To, so destination stays null there and is
+  // filled when the packing slip is imported.
+  let ship_to: string | null = null;
   let destination: string | null = null;
-  if (additional_reference && /WIL/i.test(additional_reference)) destination = 'Williston';
-  else if (additional_reference && /MID/i.test(additional_reference)) destination = 'Midland';
-  if (!destination && /Williston/i.test(clean)) destination = 'Williston';
-  if (!destination && /Midland/i.test(clean)) destination = 'Midland';
+  if (doc_type === 'packing_slip') {
+    const shipBlock = clean.match(/Ship-?To Address\s*\n([\s\S]*?)(?:\n\s*ATF\b|\n\s*Date\b|\n\s*Customer\b)/i);
+    if (shipBlock) {
+      const lines = shipBlock[1].split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length) {
+        ship_to = lines.join(', ');
+        destination = ship_to;
+      }
+    }
+    // Fallback: if no Ship-To block, use the customer name as the destination.
+    if (!destination && customer) destination = customer;
+  }
 
   // Packing slip number. NetSuite embeds it in the title line, e.g.
   // "Packing Slip - Sales Order #SO4698-PS-8455" -> PS-8455. Also handle a
@@ -1376,7 +1410,7 @@ function parseSlipText(text: string) {
 
   return {
     doc_type, sales_order, packing_slip_no, fulfillment_ids, customer, operator,
-    destination, date, gun_qty, order_qty, load_type,
+    destination, ship_to, origin_district, date, gun_qty, order_qty, load_type,
     is_gun, item_category, requires_qc: is_gun, max_guns_per_pallet: MAX_GUNS_PER_PALLET,
   };
 }

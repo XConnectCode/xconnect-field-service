@@ -34,6 +34,9 @@ type Item = {
   qty_expected: number | string;
   qty_loaded: number | string;
   destination: string;
+  // 'loaded' | 'unloaded' — whether the guns on this pallet ship loaded with
+  // charges/det cord or as unloaded assemblies. Auto-detected from the slip.
+  load_type?: string | null;
   checked: boolean;
   note: string;
   source_pallet_row_id?: string | null;
@@ -41,7 +44,7 @@ type Item = {
 
 const emptyItem = (): Item => ({
   pallet_build_no: '', description: '', qty_expected: '', qty_loaded: '',
-  destination: '', checked: false, note: '', source_pallet_row_id: null,
+  destination: '', load_type: null, checked: false, note: '', source_pallet_row_id: null,
 });
 
 export default function DriverLoadDetail() {
@@ -82,6 +85,7 @@ export default function DriverLoadDetail() {
               qty_expected: it.qty_expected ?? '',
               qty_loaded: it.qty_loaded ?? '',
               destination: it.destination ?? '',
+              load_type: it.load_type ?? null,
               checked: !!it.checked,
               note: it.note ?? '',
               source_pallet_row_id: it.source_pallet_row_id ?? null,
@@ -171,12 +175,15 @@ export default function DriverLoadDetail() {
   const addPalletItem = (palletRowId: string) => {
     const p = passedPallets.find((x) => x.row_id === palletRowId);
     if (!p) return;
-    // Auto-fill customer + customer district + destination from the pallet paperwork.
+    // Auto-fill customer from the pallet paperwork. NOTE: we do NOT copy the
+    // pallet destination onto the load here — destination is the customer's
+    // site/facility and is tracked per cargo row; the load's origin_district
+    // (the XC base it ships FROM) is chosen separately in Delivery Info.
     setLoad((prev: any) => ({
       ...prev,
       customer: prev.customer || p.customer || null,
-      destination: prev.destination || p.destination || null,
     }));
+    const lt = detectLoadType(p.load_type, p.requires_qc === false ? '' : `guns ${p.load_type || ''}`);
     setItems((prev) => [
       ...prev,
       {
@@ -187,13 +194,28 @@ export default function DriverLoadDetail() {
         // guns_total/sample_size is only the inspected count.
         qty_expected: p.guns_in_pallet ?? p.guns_total ?? '',
         qty_loaded: '',
+        // Destination = customer site/facility (Ship-To). Filled from the
+        // pallet's parsed destination; refined when a packing slip is imported.
         destination: p.destination ?? '',
+        load_type: p.requires_qc === false ? null : lt,
         checked: false,
         note: '',
         source_pallet_row_id: p.row_id,
       },
     ]);
     toast.success(`Added pallet ${p.build_no || ''}`);
+  };
+
+  // Loaded vs. Unloaded for a cargo row. Prefer the explicit load_type from the
+  // pallet record; otherwise sniff the description text ("unloaded" wins over
+  // the "loaded" substring it contains).
+  const detectLoadType = (explicit?: string | null, text?: string | null): string | null => {
+    const e = String(explicit || '').toLowerCase();
+    if (e === 'loaded' || e === 'unloaded') return e;
+    const t = String(text || '').toLowerCase();
+    if (/unloaded/.test(t)) return 'unloaded';
+    if (/\bloaded\b/.test(t)) return 'loaded';
+    return null;
   };
 
   // ── field helpers ───────────────────────────────────────────────────────────
@@ -352,6 +374,25 @@ export default function DriverLoadDetail() {
       ]);
       // Auto-fill the packing slip number for the matching SO group.
       if (slipNo) setSlipNoFor(so, slipNo);
+      // The packing slip is the authoritative source for the customer
+      // destination (Ship-To). Fill it into every cargo row on this SO that
+      // does not already have a destination, so the cargo table shows where
+      // the load actually ships TO (not the XC base it ships from).
+      const dest = String(parsed?.destination || '').trim();
+      if (dest) {
+        const soPalletIds = new Set(
+          Object.entries(palletMeta)
+            .filter(([, m]) => String(m?.sales_order || '').trim() === so)
+            .map(([pid]) => pid)
+        );
+        setItems((prev) =>
+          prev.map((it) =>
+            it.source_pallet_row_id && soPalletIds.has(it.source_pallet_row_id) && !String(it.destination || '').trim()
+              ? { ...it, destination: dest }
+              : it
+          )
+        );
+      }
       toast.success(
         `Packing slip attached to ${so}` + (slipNo ? ` (#${slipNo})` : ' (no slip # found — enter manually)')
       );
@@ -710,9 +751,10 @@ export default function DriverLoadDetail() {
                   <TableRow>
                     <TableHead>Build #</TableHead>
                     <TableHead>Description</TableHead>
+                    <TableHead className="w-28" title="Whether the guns ship loaded with charges/det cord or as unloaded assemblies (auto-detected from the slip)">Type</TableHead>
                     <TableHead className="w-24" title="Total guns on this pallet (full pallet count, not the inspected sample)">Expected qty</TableHead>
                     <TableHead className="w-24" title="Quantity actually loaded onto the truck">Loaded qty</TableHead>
-                    <TableHead>Destination</TableHead>
+                    <TableHead title="Customer site / facility this ships TO (not the XC base it ships from)">Destination</TableHead>
                     <TableHead className="w-16" title="Confirm this item is physically loaded">Loaded?</TableHead>
                     <TableHead className="w-10"></TableHead>
                   </TableRow>
@@ -722,6 +764,14 @@ export default function DriverLoadDetail() {
                     <TableRow key={idx}>
                       <TableCell><Input value={it.pallet_build_no} onChange={(e) => updateItem(idx, 'pallet_build_no', e.target.value)} /></TableCell>
                       <TableCell><Input value={it.description} onChange={(e) => updateItem(idx, 'description', e.target.value)} /></TableCell>
+                      <TableCell>
+                        {(() => {
+                          const lt = detectLoadType(it.load_type, it.description);
+                          if (lt === 'unloaded') return <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-400">Unloaded</Badge>;
+                          if (lt === 'loaded') return <Badge variant="outline" className="border-blue-400 text-blue-700 dark:text-blue-400">Loaded</Badge>;
+                          return <span className="text-xs text-gray-400">—</span>;
+                        })()}
+                      </TableCell>
                       <TableCell><Input type="number" value={it.qty_expected} onChange={(e) => updateItem(idx, 'qty_expected', e.target.value)} /></TableCell>
                       <TableCell><Input type="number" value={it.qty_loaded} onChange={(e) => updateItem(idx, 'qty_loaded', e.target.value)} /></TableCell>
                       <TableCell><Input value={it.destination} onChange={(e) => updateItem(idx, 'destination', e.target.value)} /></TableCell>
@@ -861,7 +911,30 @@ export default function DriverLoadDetail() {
                         disabled={g.so === '(no SO)'}
                       />
                     </div>
-                    {g.so !== '(no SO)' && photoUploader(field, 'Packing Slip photo', true)}
+                    {/* Packing Slip PDF — surfaced as a clear, openable link so the
+                        imported PDF is always visible here (not hidden behind a
+                        photo tile). Lists every PDF/photo stored for this SO. */}
+                    {(() => {
+                      const slipFiles = images.filter((im) => im.fieldName === field);
+                      const pdfs = slipFiles.filter((im) => !im.mimeType || im.mimeType === 'application/pdf' || /pdf/i.test(im.mimeType || ''));
+                      if (pdfs.length === 0) return null;
+                      return (
+                        <div className="mb-2 flex flex-wrap items-center gap-3 text-sm">
+                          {pdfs.map((f) => (
+                            <a
+                              key={f.id}
+                              href={(f as any).signedUrl || f.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                            >
+                              <FileText className="w-4 h-4" /> Packing slip PDF{slipNo ? ` (#${slipNo})` : ''}
+                            </a>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                    {g.so !== '(no SO)' && photoUploader(field, 'Packing Slip PDF / photo', true)}
                   </div>
                 );
               })}
