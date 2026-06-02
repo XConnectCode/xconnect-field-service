@@ -166,17 +166,35 @@ function opts(listItems: any[], col: string): string[] {
 function Sel({
   name,
   defaultValue,
+  value,
+  onChange,
+  disabled,
+  required,
   children,
 }: {
   name: string;
   defaultValue?: string;
+  value?: string;
+  onChange?: (v: string) => void;
+  disabled?: boolean;
+  required?: boolean;
   children: React.ReactNode;
 }) {
+  // Controlled when `value`/`onChange` are supplied; otherwise uncontrolled
+  // (FormData). `required` adds a subtle amber ring as a visual cue.
+  const controlled = value !== undefined;
   return (
     <select
       name={name}
-      defaultValue={defaultValue || ''}
-      className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
+      {...(controlled
+        ? { value, onChange: (e) => onChange?.(e.target.value) }
+        : { defaultValue: defaultValue || '' })}
+      disabled={disabled}
+      className={`w-full border rounded-md p-2 text-sm disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-gray-800 ${
+        required
+          ? 'border-amber-400 ring-1 ring-amber-200'
+          : 'border-gray-300 dark:border-gray-600'
+      }`}
     >
       {children}
     </select>
@@ -228,6 +246,20 @@ export default function IncidentForm({
   const [distId, setDistId] = useState('');
   const [saving, setSaving] = useState(false);
   const [nextEventId, setNextEventId] = useState<string>('');
+  // Controlled so we can drive conditional requirements:
+  //  - Vendor is only relevant when Vendor Caused === "Yes"
+  //  - Failed Component is required for certain failure types (see below)
+  const [vendorCaused, setVendorCaused] = useState('');
+  const [failureType, setFailureType] = useState(''); // stores the lists row_id
+
+  // Failure types (by label) that REQUIRE a Failed Component to be selected.
+  const FAILURE_TYPES_REQUIRING_COMPONENT = [
+    'Low Order',
+    'Stem Life Expectancy Not Reached',
+    'Manufacturing',
+    'Vendor Defect',
+    'Design',
+  ];
 
   // AI assistant side-panel state. The panel reads/writes the six free-text
   // fields below directly through refs so we don't have to convert the rest
@@ -408,12 +440,18 @@ export default function IncidentForm({
     if (incident) {
       setCustId(incident.customer || '');
       setDistId(incident.customer_district || '');
+      setVendorCaused(incident.vendor_caused || '');
+      setFailureType(incident.failure_type || '');
     } else if (prefill) {
       setCustId(prefill.customer || '');
       setDistId(prefill.customer_district || '');
+      setVendorCaused('');
+      setFailureType('');
     } else {
       setCustId('');
       setDistId('');
+      setVendorCaused('');
+      setFailureType('');
     }
   }, [incident, prefill, open]);
 
@@ -450,6 +488,31 @@ export default function IncidentForm({
       toast.error(
         `Cannot save with status "${targetStatus}" — missing required fields: ${missing.join(', ')}.`,
         { duration: 6000 },
+      );
+      return;
+    }
+
+    // ── Conditional field rules ──────────────────────────────────────────────
+    const vendorCausedVal = String(fd.get('vendor_caused') || '');
+    const vendorVal = String(fd.get('vendor') || '');
+    // 1) Vendor must be selected when the incident was vendor-caused.
+    if (vendorCausedVal === 'Yes' && !vendorVal) {
+      toast.error('Vendor is required when Vendor Caused is "Yes".');
+      return;
+    }
+
+    // 2) Failed Component is required for certain failure types. The select
+    //    stores the lists row_id, so resolve it to its label first.
+    const failureTypeId = String(fd.get('failure_type') || '');
+    const failureTypeLabel =
+      listItems.find((l: any) => l.row_id === failureTypeId)?.failure_type || '';
+    const componentVal = String(fd.get('failed_component') || '');
+    if (
+      FAILURE_TYPES_REQUIRING_COMPONENT.includes(failureTypeLabel) &&
+      !componentVal
+    ) {
+      toast.error(
+        `Failed Component is required when Failure Type is "${failureTypeLabel}".`,
       );
       return;
     }
@@ -556,6 +619,14 @@ export default function IncidentForm({
         .map((l: any) => [l.failure_type, l] as const)
     ).values(),
   ];
+
+  // Conditional-requirement derivations (drive UI cues + disabled state).
+  const selectedFailureTypeLabel =
+    listItems.find((l: any) => l.row_id === failureType)?.failure_type || '';
+  const componentRequired = FAILURE_TYPES_REQUIRING_COMPONENT.includes(
+    selectedFailureTypeLabel,
+  );
+  const vendorActive = vendorCaused === 'Yes';
 
   const edgeBaseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -945,14 +1016,17 @@ export default function IncidentForm({
               </Sel>
             </F>
 
-            <F label="Failed Component">
+            <F label="Failed Component" required={componentRequired}>
               {/* Authoritative source: the `components` table (verified in DB).
                   All 371 incidents resolve cleanly through components — no
-                  need to surface `lists` rows here. */}
+                  need to surface `lists` rows here.
+                  Required when Failure Type is one of the manufacturing/design
+                  defect types (see FAILURE_TYPES_REQUIRING_COMPONENT). */}
               <Sel
                 key={`fc-${incident?.row_id}-${components.length}`}
                 name="failed_component"
                 defaultValue={incident?.failed_component || ''}
+                required={componentRequired}
               >
                 <option value="">— Select —</option>
                 {components.map((c: any) => (
@@ -974,9 +1048,9 @@ export default function IncidentForm({
 
             <F label="Failure Type">
               <Sel
-                key={`ft-${incident?.row_id}-${listItems.length}`}
                 name="failure_type"
-                defaultValue={incident?.failure_type || ''}
+                value={failureType}
+                onChange={setFailureType}
               >
                 <option value="">— Select —</option>
                 {uniqueFailureTypes.map((l: any) => (
@@ -987,30 +1061,36 @@ export default function IncidentForm({
               </Sel>
             </F>
 
-            <F label="Vendor">
-              <Sel
-                key={`vnd-${incident?.row_id}-${vendors.length}`}
-                name="vendor"
-                defaultValue={incident?.vendor || ''}
-              >
-                <option value="">— Select —</option>
-                {vendors.map((v: any) => (
-                  <option key={v.row_id} value={v.row_id}>
-                    {v.vendor}
-                  </option>
-                ))}
-              </Sel>
-            </F>
-
+            {/* Vendor Caused drives whether Vendor is required/selectable. */}
             <F label="Vendor Caused">
               <Sel
                 name="vendor_caused"
-                defaultValue={incident?.vendor_caused || ''}
+                value={vendorCaused}
+                onChange={setVendorCaused}
               >
                 <option value="">— Select —</option>
                 {opts(listItems, 'vendor_caused').map((o) => (
                   <option key={o} value={o}>
                     {o}
+                  </option>
+                ))}
+              </Sel>
+            </F>
+
+            <F label="Vendor" required={vendorActive}>
+              <Sel
+                key={`vnd-${incident?.row_id}-${vendors.length}-${vendorActive}`}
+                name="vendor"
+                defaultValue={vendorActive ? (incident?.vendor || '') : ''}
+                disabled={!vendorActive}
+                required={vendorActive}
+              >
+                <option value="">
+                  {vendorActive ? '— Select —' : '— Only when Vendor Caused = Yes —'}
+                </option>
+                {vendors.map((v: any) => (
+                  <option key={v.row_id} value={v.row_id}>
+                    {v.vendor}
                   </option>
                 ))}
               </Sel>
