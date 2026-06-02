@@ -105,8 +105,20 @@ export default function QcPalletDetail() {
         }),
       }));
       setGuns(gunList);
-      setGunCountInput(String(data.sample_size ?? data.guns_total ?? gunList.length ?? ''));
-      setLotInput(data.guns_in_pallet != null ? String(data.guns_in_pallet) : '');
+      const lot = data.guns_in_pallet != null ? Number(data.guns_in_pallet) : NaN;
+      setLotInput(Number.isFinite(lot) && lot > 0 ? String(lot) : '');
+      // Decide what to seed the sample field with:
+      //   • If guns are already initialised, use the real saved sample size.
+      //   • If NOT initialised yet but we know the lot, pre-fill the AQL suggestion
+      //     so the setup card shows a sensible count (not 0) on first open.
+      if (gunList.length > 0) {
+        setGunCountInput(String(data.sample_size ?? gunList.length));
+      } else if (Number.isFinite(lot) && lot > 0) {
+        const saved = Number(data.sample_size);
+        setGunCountInput(String(saved > 0 ? saved : aqlSampleSize(lot)));
+      } else {
+        setGunCountInput('');
+      }
     } catch (error: any) {
       console.error('Error loading QC pallet:', error);
       toast.error('Failed to load pallet');
@@ -124,7 +136,8 @@ export default function QcPalletDetail() {
       const files: any[] = Array.isArray(res?.files) ? res.files : [];
       // Build slip PDF for this pallet. Accept legacy 'slip_pdf' rows too so
       // previously-imported pallets still show their document.
-      setSlipPdfs(files.filter((f) => f.field_name === 'build_slip_pdf' || f.field_name === 'slip_pdf'));
+      setSlipPdfs(files.filter((f) =>
+        f.field_name === 'build_slip_pdf' || f.field_name === 'slip_pdf' || f.field_name === 'packing_slip_pdf'));
       setHasVerifyPhoto(files.some((f) => f.field_name === 'build_slip_photo'));
     } catch (error) {
       console.error('Error loading pallet files:', error);
@@ -403,25 +416,39 @@ export default function QcPalletDetail() {
               </p>
               {slipPdfs.length > 0 ? (
                 <div className="space-y-1">
-                  {slipPdfs.map((f) => (
-                    <div key={f.id} className="flex items-center gap-3 text-sm">
-                      <a
-                        href={f.signedUrl || f.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline inline-flex items-center gap-1"
-                      >
-                        <FileText className="w-4 h-4" /> View slip PDF
-                      </a>
-                      <button
-                        type="button"
-                        className="text-red-500 hover:underline text-xs"
-                        onClick={() => handleSlipPdfDelete(f.id)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
+                  {slipPdfs.map((f) => {
+                    // Distinguish what each PDF actually is. Build slips are the
+                    // per-pallet document; a packing slip (order-level) should not
+                    // normally live here — if one does, label it clearly.
+                    const isPacking = f.fieldName === 'packing_slip_pdf' || f.field_name === 'packing_slip_pdf';
+                    const docLabel = isPacking ? 'Packing slip' : 'Build slip';
+                    const when = (f.createdAt || f.created_at)
+                      ? new Date(f.createdAt || f.created_at).toLocaleDateString()
+                      : null;
+                    return (
+                      <div key={f.id} className="flex items-center gap-3 text-sm">
+                        <a
+                          href={f.signedUrl || f.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                        >
+                          <FileText className="w-4 h-4" /> View {docLabel} PDF
+                        </a>
+                        {isPacking && (
+                          <Badge variant="outline" className="text-[10px]">order-level</Badge>
+                        )}
+                        {when && <span className="text-xs text-gray-400">added {when}</span>}
+                        <button
+                          type="button"
+                          className="text-red-500 hover:underline text-xs"
+                          onClick={() => handleSlipPdfDelete(f.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-xs text-gray-400">No build slip PDF attached yet.</p>

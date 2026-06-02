@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Upload, X, ImageIcon, Loader2 } from 'lucide-react';
+import { Upload, X, ImageIcon, Loader2, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../lib/auth-context';
 
@@ -59,6 +59,24 @@ interface ImageUploadProps {
 
   /** Hide the uploader UI (display-only mode) */
   readOnly?: boolean;
+}
+
+// Friendly labels for known field_name tags so tiles show readable text
+// (e.g. "Build slip PDF") instead of raw keys ("build_slip_pdf").
+const FIELD_LABELS: Record<string, string> = {
+  build_slip_pdf: 'Build slip PDF',
+  slip_pdf: 'Build slip PDF',
+  packing_slip_pdf: 'Packing slip PDF',
+  build_slip_photo: 'Build slip photo',
+  qc_photo: 'QC photo',
+  hazmat: 'Hazmat photo',
+};
+function prettyFieldName(fieldName?: string | null): string | null {
+  if (!fieldName) return null;
+  if (FIELD_LABELS[fieldName]) return FIELD_LABELS[fieldName];
+  // Fall back to title-casing the raw key: "some_field" -> "Some field".
+  const s = fieldName.replace(/_/g, ' ').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : null;
 }
 
 export default function ImageUpload({
@@ -293,34 +311,53 @@ export default function ImageUpload({
 
       {images.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {images.map((rec, index) => (
-            <div key={rec.id ?? index} className="relative group">
-              <a href={rec.url} target="_blank" rel="noopener noreferrer">
-                <img
-                  src={rec.url}
-                  alt={rec.caption ?? rec.fieldName ?? `Image ${index + 1}`}
-                  className="w-full h-32 object-cover rounded-lg border border-gray-200"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-              </a>
-              {rec.fieldName && (
-                <div className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
-                  {rec.fieldName}
-                </div>
-              )}
-              {!readOnly && (
-                <button
-                  type="button"
-                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={() => handleRemoveImage(rec)}
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          ))}
+          {images.map((rec, index) => {
+            // A record is a PDF/document (not a photo) when its mime type isn't an
+            // image. Render those as a document tile instead of a broken <img>.
+            const isImage = !rec.mimeType || rec.mimeType.startsWith('image/');
+            const label = prettyFieldName(rec.fieldName);
+            return (
+              <div key={rec.id ?? index} className="relative group">
+                {isImage ? (
+                  <a href={rec.url} target="_blank" rel="noopener noreferrer">
+                    <img
+                      src={rec.url}
+                      alt={rec.caption ?? label ?? `Image ${index + 1}`}
+                      className="w-full h-32 object-cover rounded-lg border border-gray-200"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  </a>
+                ) : (
+                  <a
+                    href={rec.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-col items-center justify-center w-full h-32 rounded-lg border border-gray-200 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-center px-2"
+                  >
+                    <FileText className="w-8 h-8 text-blue-600 mb-1" />
+                    <span className="text-xs font-medium text-gray-700 dark:text-gray-200 leading-tight">
+                      {label ?? 'View PDF'}
+                    </span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">PDF · tap to open</span>
+                  </a>
+                )}
+                {isImage && label && (
+                  <div className="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
+                    {label}
+                  </div>
+                )}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => handleRemoveImage(rec)}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
