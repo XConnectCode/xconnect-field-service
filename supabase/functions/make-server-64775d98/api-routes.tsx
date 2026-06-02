@@ -1322,12 +1322,20 @@ function parseSlipText(text: string) {
     : /Packing Slip/i.test(clean) ? 'packing_slip' : 'unknown';
 
   // Gun vs. non-gun (hardware / spare parts) detection. A pallet is QC'd only
-  // when it contains perforating guns. We treat a slip as "guns" when it has a
-  // gun header line (e.g. "3 Shot XConnect Loaded Gun") or a "Banded Barrel"
-  // ASM line; otherwise it is hardware/spare parts and skips QC.
+  // when it contains perforating guns. Gun signals:
+  //   - a loaded-gun header line, e.g. "3 Shot XConnect Loaded Gun"
+  //   - a "Banded Barrel" / "Band Barrel" ASM line (loaded guns)
+  //   - an UNLOADED gun assembly line, e.g. "RL2.75 Unloaded 3 Shot (3 Band
+  //     Barrel) ASM" — this has no "Gun" word and isn't a "Banded Barrel", so it
+  //     was previously misread as hardware and skipped QC. Match an
+  //     "... <N> Shot ... ASM" gun-assembly line, or any explicit "Unloaded ...
+  //     Shot" / "Loaded ... Shot" gun line.
+  // Otherwise it is hardware / spare parts and skips QC.
   const gunHeader = get(/(\d+\s*Shot[^\n]*Gun[^\n]*)/i);
-  const hasBarrel = /Banded Barrel/i.test(clean);
-  const is_gun = !!gunHeader || hasBarrel;
+  const hasBarrel = /Band(?:ed)? Barrel/i.test(clean);
+  const hasGunAsmLine = /(?:un)?loaded[^\n]*\d+\s*Shot[^\n]*ASM/i.test(clean)
+    || /\d+\s*Shot[^\n]*\(\s*\d+\s*Band[^\n]*ASM/i.test(clean);
+  const is_gun = !!gunHeader || hasBarrel || hasGunAsmLine;
   const item_category = is_gun ? 'guns' : 'hardware';
 
   // Loaded vs. Unloaded. The signal lives in the item/description text, not in a
