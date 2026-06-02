@@ -188,6 +188,10 @@ interface Props {
   onClose: () => void;
   onSaved: () => void;
   incident?: any;
+  // Initial values for a NEW incident (e.g. "Log Incident" from a Field Visit).
+  // Unlike `incident`, this does NOT switch the form into edit mode — the record
+  // is still inserted, just with these fields pre-selected.
+  prefill?: { field_visit_id?: string; customer?: string; customer_district?: string } | null;
   currentUser?: any;
 }
 
@@ -196,6 +200,7 @@ export default function IncidentForm({
   onClose,
   onSaved,
   incident,
+  prefill,
   currentUser,
 }: Props) {
   const editing = !!incident;
@@ -374,16 +379,20 @@ export default function IncidentForm({
       .then(({ data }) => setFieldVisits(data || []));
   }, [custId]);
 
-  // Pre-fill when editing
+  // Pre-fill when editing, or seed a new incident from `prefill` (Log Incident
+  // from a Field Visit). `prefill` only applies when not editing.
   useEffect(() => {
     if (incident) {
       setCustId(incident.customer || '');
       setDistId(incident.customer_district || '');
+    } else if (prefill) {
+      setCustId(prefill.customer || '');
+      setDistId(prefill.customer_district || '');
     } else {
       setCustId('');
       setDistId('');
     }
-  }, [incident, open]);
+  }, [incident, prefill, open]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -791,19 +800,23 @@ export default function IncidentForm({
 
             <F label="Field Visit">
               <Sel
-                key={`fv-${incident?.row_id}-${fieldVisits.length}`}
+                key={`fv-${incident?.row_id || prefill?.field_visit_id || 'new'}-${fieldVisits.length}`}
                 name="field_visit_id"
-                defaultValue={incident?.field_visit_id || ''}
+                defaultValue={incident?.field_visit_id || prefill?.field_visit_id || ''}
               >
                 <option value="">— None / Not linked —</option>
-                {/* Fallback: if editing an incident whose saved visit isn't in the latest-50 list,
-                    still show it so the link isn't silently dropped on save. */}
-                {incident?.field_visit_id &&
-                  !fieldVisits.some((v: any) => v.field_visit_id === incident.field_visit_id) && (
-                    <option value={incident.field_visit_id}>
-                      {incident.field_visit_id} (previously linked)
-                    </option>
-                  )}
+                {/* Fallback: if editing an incident (or pre-linking from a Field Visit)
+                    whose visit isn't in the latest-50 list, still show it so the
+                    link isn't silently dropped on save. */}
+                {(() => {
+                  const linkedId = incident?.field_visit_id || prefill?.field_visit_id;
+                  return linkedId &&
+                    !fieldVisits.some((v: any) => v.field_visit_id === linkedId) ? (
+                      <option value={linkedId}>
+                        {linkedId} (linked visit)
+                      </option>
+                    ) : null;
+                })()}
                 {fieldVisits.map((v: any) => (
                   <option key={v.row_id} value={v.field_visit_id}>
                     {v.field_visit_id} — {v.pad_name || 'No pad'} (

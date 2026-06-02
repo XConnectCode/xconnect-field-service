@@ -162,6 +162,10 @@ export default function IncidentsNew() {
   const [formOpen,        setFormOpen]        = useState(false);
   const [viewOpen,        setViewOpen]        = useState(false);
   const [editingIncident, setEditingIncident] = useState<any>(null);
+  // Seed for a NEW incident (e.g. "Log Incident" from a Field Visit). Kept
+  // separate from editingIncident so the form does NOT flip into edit mode
+  // (editing = !!incident) and attempt an update with no row_id.
+  const [prefillIncident, setPrefillIncident] = useState<any>(null);
   const [viewingIncident, setViewingIncident] = useState<any>(null);
   const [generatingPDF,   setGeneratingPDF]   = useState<string | null>(null);
   const [pdfPreviewUrl,   setPdfPreviewUrl]   = useState('');
@@ -182,10 +186,26 @@ export default function IncidentsNew() {
   const reportMonth        = searchParams.get('month');
   const fromReport = !!(reportCustomerName || reportDistrictName || reportTimeFilter || reportXcCaused || reportSeverity || reportMonth);
 
-  // ── Open the add dialog when ?new=1 is present (deep-link from SQM dashboard) ─
+  // ── Open the add dialog when ?new=1 is present (deep-link from SQM dashboard
+  //    and from "Log Incident" on a Field Visit). When a fieldVisitId is
+  //    supplied, seed the new incident so the form pre-links the field visit
+  //    (and carries customer/district context). ───────────────────────────────
   useEffect(() => {
     if (searchParams.get('new') === '1') {
-      setEditingIncident(null);
+      const fieldVisitId = searchParams.get('fieldVisitId');
+      const customerId   = searchParams.get('customerId');
+      const districtId   = searchParams.get('districtId');
+      if (fieldVisitId || customerId || districtId) {
+        setEditingIncident(null);
+        setPrefillIncident({
+          field_visit_id: fieldVisitId || '',
+          customer: customerId || '',
+          customer_district: districtId || '',
+        });
+      } else {
+        setEditingIncident(null);
+        setPrefillIncident(null);
+      }
       setFormOpen(true);
     }
   }, [searchParams]);
@@ -404,7 +424,7 @@ export default function IncidentsNew() {
 
   const openEdit  = (inc: any) => { setEditingIncident(inc); setFormOpen(true); };
   const openView  = (inc: any) => { setViewingIncident(inc); setViewOpen(true); };
-  const closeForm = () => { setFormOpen(false); setEditingIncident(null); };
+  const closeForm = () => { setFormOpen(false); setEditingIncident(null); setPrefillIncident(null); };
 
   // ── PDF helpers ───────────────────────────────────────────────────────────
   // PDFs are generated client-side and uploaded to Supabase Storage so every
@@ -782,6 +802,7 @@ export default function IncidentsNew() {
           onClose={closeForm}
           onSaved={loadData}
           incident={editingIncident}
+          prefill={prefillIncident}
           currentUser={user}
         />
 

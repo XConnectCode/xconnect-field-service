@@ -18,6 +18,8 @@ import {
   Save,
   X,
   Loader2,
+  CheckCircle2,
+  FilePlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -34,6 +36,9 @@ const VISIT_PURPOSE_OPTS = [
 ];
 
 const FIELD_OR_FACILITY_OPTS = ['Field', 'Facility'];
+
+const COMPLETE_STATUS = 'Complete';
+const isComplete = (v: any) => (v.visit_status || '').toLowerCase() === 'complete';
 
 // Panel types whose serials populate the equipment selects (FieldVisitForm parity).
 const DIGITAL_SHOOTING_PANEL = 'Digital Shooting Panel';
@@ -75,6 +80,7 @@ export default function FieldVisitDetail() {
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [form, setForm] = useState<any>({});
 
   // Reference data (same sources as FieldVisitForm) for FK / enum selects.
@@ -187,8 +193,39 @@ export default function FieldVisitDetail() {
     setForm((prev: any) => ({ ...prev, [name]: value }));
   }
 
+  // Validate edit-mode inputs before saving. Returns an error string or null.
+  function validateVisit(f: any): string | null {
+    // Duration can't be negative.
+    if (f.visit_duration !== '' && f.visit_duration != null) {
+      const dur = Number(f.visit_duration);
+      if (Number.isNaN(dur)) return 'Visit duration must be a number.';
+      if (dur < 0) return 'Visit duration cannot be less than zero.';
+    }
+    // Departure can't be in the future.
+    if (f.departure_date) {
+      const dep = new Date(f.departure_date);
+      if (!Number.isNaN(dep.getTime()) && dep.getTime() > Date.now()) {
+        return 'Departure date cannot be in the future.';
+      }
+    }
+    // Departure shouldn't precede arrival, when both are set.
+    if (f.arrival_date && f.departure_date) {
+      const arr = new Date(f.arrival_date);
+      const dep = new Date(f.departure_date);
+      if (!Number.isNaN(arr.getTime()) && !Number.isNaN(dep.getTime()) && dep < arr) {
+        return 'Departure date cannot be before the arrival date.';
+      }
+    }
+    return null;
+  }
+
   async function handleSave() {
     if (!id || !accessToken) return;
+    const validationError = validateVisit(form);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -222,6 +259,73 @@ export default function FieldVisitDetail() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // ── Mark Visit Complete ──────────────────────────────────────────────────────
+  // Primary action: flag the visit as done. Stamps status + who/when. Sending
+  // only the completion fields (others undefined) leaves the rest untouched.
+  async function handleMarkComplete() {
+    if (!id || !accessToken || !visit) return;
+    const who = user?.name || user?.email || null;
+    setCompleting(true);
+    try {
+      await fieldVisitApi.update(
+        id,
+        {
+          visit_status: COMPLETE_STATUS,
+          completed_at: new Date().toISOString(),
+          completed_by: who,
+          updated_by: who,
+          date_updated: new Date().toLocaleDateString(),
+        },
+        accessToken,
+      );
+      toast.success('Field visit marked complete');
+      await loadVisit();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to mark visit complete');
+    } finally {
+      setCompleting(false);
+    }
+  }
+
+  // Reopen a completed visit (clears the completion stamps).
+  async function handleReopen() {
+    if (!id || !accessToken || !visit) return;
+    const who = user?.name || user?.email || null;
+    setCompleting(true);
+    try {
+      await fieldVisitApi.update(
+        id,
+        {
+          visit_status: null,
+          completed_at: null,
+          completed_by: null,
+          updated_by: who,
+          date_updated: new Date().toLocaleDateString(),
+        },
+        accessToken,
+      );
+      toast.success('Field visit reopened');
+      await loadVisit();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to reopen visit');
+    } finally {
+      setCompleting(false);
+    }
+  }
+
+  // ── Log an Incident from this visit ──────────────────────────────────────────
+  // Opens the new-incident flow pre-linked to this field visit (and carries the
+  // customer/district names through for the header context).
+  function handleLogIncident() {
+    if (!visit) return;
+    const params = new URLSearchParams({ new: '1' });
+    if (visit.field_visit_id) params.set('fieldVisitId', visit.field_visit_id);
+    if (visit.customer) params.set('customerId', visit.customer);
+    if (visit.customer_district) params.set('districtId', visit.customer_district);
+    if (visit.customerName) params.set('customerName', visit.customerName);
+    navigate(`/incidents?${params.toString()}`);
   }
 
   // ── loading / not-found states ──────────────────────────────────────────────
@@ -288,15 +392,63 @@ export default function FieldVisitDetail() {
             </div>
 
             {/* Right: badge + actions */}
-            <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
               {visit.visit_purpose && (
                 <Badge variant="secondary">{visit.visit_purpose}</Badge>
               )}
+              {isComplete(visit) && (
+                <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Complete
+                </Badge>
+              )}
               {!editing ? (
-                <Button size="sm" onClick={enterEdit}>
-                  <Pencil className="w-3.5 h-3.5 mr-1.5" />
-                  Edit
-                </Button>
+                <>
+                  {/* Primary action: log an incident pre-linked to this visit. */}
+                  <Button
+                    variant="outline"
+                    onClick={handleLogIncident}
+                    className="gap-1.5"
+                  >
+                    <FilePlus className="w-4 h-4" />
+                    Log Incident
+                  </Button>
+
+                  {/* Primary action: mark complete / reopen. */}
+                  {isComplete(visit) ? (
+                    <Button
+                      variant="outline"
+                      onClick={handleReopen}
+                      disabled={completing}
+                      className="gap-1.5 text-amber-700 border-amber-200 hover:bg-amber-50"
+                    >
+                      {completing ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <X className="w-4 h-4" />
+                      )}
+                      Reopen Visit
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleMarkComplete}
+                      disabled={completing}
+                      className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      {completing ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4" />
+                      )}
+                      Mark Complete
+                    </Button>
+                  )}
+
+                  <Button size="sm" variant="ghost" onClick={enterEdit}>
+                    <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                    Edit
+                  </Button>
+                </>
               ) : (
                 <>
                   <Button
@@ -651,6 +803,25 @@ export default function FieldVisitDetail() {
                   value={visit.districtName}
                   editing={false}
                 />
+                <Field
+                  label="Status"
+                  value={isComplete(visit) ? 'Complete' : 'Open'}
+                  editing={false}
+                />
+                {isComplete(visit) && (
+                  <>
+                    <Field
+                      label="Completed By"
+                      value={visit.completed_by}
+                      editing={false}
+                    />
+                    <Field
+                      label="Completed At"
+                      value={visit.completed_at ? fmtDate(visit.completed_at) : '—'}
+                      editing={false}
+                    />
+                  </>
+                )}
               </CardContent>
             </Card>
 

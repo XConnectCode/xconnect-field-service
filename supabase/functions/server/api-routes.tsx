@@ -335,7 +335,7 @@ apiRoutes.delete("/districts/:id", requireAdmin, async (c) => {
 
 // ============ FIELD VISITS ============
 
-apiRoutes.get("/fieldvisits", async (c) => {
+const listFieldVisits = async (c: any) => {
   try {
     const { data, error } = await supabase
       .from('fieldvisits')
@@ -382,9 +382,11 @@ apiRoutes.get("/fieldvisits", async (c) => {
     console.error('Error in field visits endpoint:', error);
     return c.json({ error: String(error) }, 500);
   }
-});
+};
+apiRoutes.get("/fieldvisits", listFieldVisits);
+apiRoutes.get("/field-visits", listFieldVisits);
 
-apiRoutes.post("/fieldvisits", async (c) => {
+const createFieldVisit = async (c: any) => {
   try {
     const body = await c.req.json();
     
@@ -422,9 +424,14 @@ apiRoutes.post("/fieldvisits", async (c) => {
     console.error('Error in create field visit endpoint:', error);
     return c.json({ error: String(error) }, 500);
   }
-});
+};
+apiRoutes.post("/fieldvisits", createFieldVisit);
+apiRoutes.post("/field-visits", createFieldVisit);
 
-apiRoutes.put("/fieldvisits/:id", async (c) => {
+// Shared handler for updating a field visit. Registered under both
+// '/fieldvisits/:id' and the hyphenated '/field-visits/:id' (the client calls
+// the hyphenated path — the no-hyphen-only route previously 404'd edits).
+const updateFieldVisit = async (c: any) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
@@ -448,7 +455,13 @@ apiRoutes.put("/fieldvisits/:id", async (c) => {
         communication_panel: body.communication_panel,
         digital_shooting_panel: body.digital_shooting_panel,
         surface_tester: body.surface_tester,
-        xc_rep: body.xc_rep
+        xc_rep: body.xc_rep,
+        // Completion workflow + audit stamps.
+        visit_status: body.visit_status,
+        completed_at: body.completed_at,
+        completed_by: body.completed_by,
+        updated_by: body.updated_by,
+        date_updated: body.date_updated
       })
       .eq('row_id', id)
       .select()
@@ -464,7 +477,9 @@ apiRoutes.put("/fieldvisits/:id", async (c) => {
     console.error('Error in update field visit endpoint:', error);
     return c.json({ error: String(error) }, 500);
   }
-});
+};
+apiRoutes.put("/fieldvisits/:id", updateFieldVisit);
+apiRoutes.put("/field-visits/:id", updateFieldVisit);
 
 apiRoutes.delete("/fieldvisits/:id", requireAdmin, async (c) => {
   try {

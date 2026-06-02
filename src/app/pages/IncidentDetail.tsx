@@ -675,24 +675,24 @@ export default function IncidentDetail() {
                   <div key={version} className="flex items-center gap-1">
                     {has && (
                       <>
-                        <Button size="sm" variant="outline" className="gap-1.5"
+                        <Button variant="outline" className="gap-1.5"
                           onClick={() => previewReport(slot)}>
-                          <Eye className="w-3.5 h-3.5" /> {label}
+                          <Eye className="w-4 h-4" /> {label}
                         </Button>
-                        <Button size="sm" variant="outline" className="gap-1.5"
+                        <Button variant="outline" className="gap-1.5"
                           onClick={() => downloadReport(slot, `Incident_${incident.event_id}_${label}.pdf`)}>
-                          <Download className="w-3.5 h-3.5" />
+                          <Download className="w-4 h-4" />
                         </Button>
                       </>
                     )}
-                    <Button size="sm"
+                    <Button
                       variant={has ? 'outline' : 'default'}
                       className={!has ? 'bg-gray-900 text-white hover:bg-gray-800 gap-1.5' : 'gap-1.5'}
                       disabled={generatingPDF === genKey}
                       onClick={() => openPdfPicker(version)}>
                       {generatingPDF === genKey
-                        ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating…</>
-                        : <><FileText className="w-3.5 h-3.5" />{has ? `Regen ${label}` : `Generate ${label}`}</>}
+                        ? <><RefreshCw className="w-4 h-4 animate-spin" /> Generating…</>
+                        : <><FileText className="w-4 h-4" />{has ? `Regen ${label}` : `Generate ${label}`}</>}
                     </Button>
                   </div>
                 );
@@ -708,7 +708,7 @@ export default function IncidentDetail() {
                 {/* Primary: send the final PDF to the customer.
                     Gated on the incident being Closed (Final/Completed) so
                     only locked-down reports are emailed out. */}
-                <Button size="sm"
+                <Button
                   className="gap-1.5"
                   disabled={
                     normalizeStatus(incident.incident_status) !== CLOSED_STATUS ||
@@ -722,9 +722,9 @@ export default function IncidentDetail() {
                         : undefined
                   }
                   onClick={handleOpenSendDialog}>
-                  <Send className="w-3.5 h-3.5" /> Send to Customer
+                  <Send className="w-4 h-4" /> Send to Customer
                 </Button>
-                <Button size="sm" variant="outline"
+                <Button variant="outline"
                   disabled={!canMarkReportSent(user?.role as any)}
                   title={!canMarkReportSent(user?.role as any) ? 'Only admins can mark a report as sent' : undefined}
                   className={incident.report_sent
@@ -732,8 +732,8 @@ export default function IncidentDetail() {
                     : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50 gap-1.5'}
                   onClick={handleToggleReportSent}>
                   {incident.report_sent
-                    ? <><X className="w-3.5 h-3.5" /> Mark Unsent</>
-                    : <><CheckCircle2 className="w-3.5 h-3.5" /> Mark as Sent</>}
+                    ? <><X className="w-4 h-4" /> Mark Unsent</>
+                    : <><CheckCircle2 className="w-4 h-4" /> Mark as Sent</>}
                 </Button>
               </div>
             </div>
