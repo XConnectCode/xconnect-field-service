@@ -41,6 +41,7 @@ import {
   resolveFailureTypeLabel,
 } from '../lib/failedComponent';
 import { sendIncidentReportToCustomer } from '../lib/sendIncidentReport';
+import { fetchIncidentReportImages } from '../lib/incidentReportImageFetch';
 import { parseSlackUrl } from '../lib/slackUrl';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -512,11 +513,17 @@ export default function IncidentDetail() {
     try {
       // Re-generate the final PDF on the fly so the customer always gets the
       // current data, then deliver via the Netlify function. The image picker
-      // is not shown here — we use whatever images are attached and let the
-      // user regenerate from the Reports section first if they need to curate.
+      // is not shown here, so we auto-include every image attached to the
+      // incident — INCLUDING native / backfilled AppSheet images, which live in
+      // the `images` table rather than the (empty) legacy image1/image2 columns.
+      // Fetching them here means the customer-facing report captures native
+      // evidence instead of silently rendering no Visual Evidence section.
       const incData = { ...incident, report_version: 'Final' };
       const custMapForPDF: Record<string, any> = {};
       customers.forEach(c => { if (c.row_id) custMapForPDF[c.row_id] = { name: c.customer }; });
+
+      const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
+      const autoImages = await fetchIncidentReportImages(baseUrl, incident.row_id);
 
       const blob = await generateIncidentReportPDF({
         incident:    incData,
@@ -525,6 +532,9 @@ export default function IncidentDetail() {
         vendorMap,
         customerMap: custMapForPDF,
         districtMap,
+        // Pass the resolved list (even if empty) so the generator uses the
+        // images table rather than falling back to legacy image1/image2.
+        selectedImages: autoImages,
         returnBlob:  true,
       }) as Blob;
 
