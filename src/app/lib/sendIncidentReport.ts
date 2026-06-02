@@ -1,10 +1,16 @@
 /**
  * Client-side helper that posts a generated incident PDF to the
- * /api/send-incident-report Netlify function. Keeps the React layer
+ * send-incident-report Supabase edge route. Keeps the React layer
  * free of mailer/provider details.
+ *
+ * NOTE: this used to POST to the Netlify function at /api/send-incident-report,
+ * but the app runs on Codespaces/Vite + Supabase edge (no Netlify functions),
+ * so that path 404'd. The send now goes through the same edge base path every
+ * other API call uses, authenticated with the user's session token.
  */
 
 import { supabase } from './supabase';
+import { projectId, publicAnonKey } from '/utils/supabase/info';
 
 export interface SendIncidentReportPayload {
   incidentRowId: string;
@@ -26,7 +32,7 @@ export interface SendIncidentReportResult {
   auditError: string | null;
 }
 
-const ENDPOINT = '/api/send-incident-report';
+const ENDPOINT = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98/send-incident-report`;
 
 async function blobToBase64(blob: Blob): Promise<string> {
   const dataUrl: string = await new Promise((res, rej) => {
@@ -44,9 +50,18 @@ export async function sendIncidentReportToCustomer(
 ): Promise<SendIncidentReportResult> {
   const pdfBase64 = await blobToBase64(payload.pdfBlob);
 
+  // The edge route is behind requireUser, so forward the caller's session
+  // token (falling back to the anon key, which still satisfies the gateway).
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData?.session?.access_token || publicAnonKey;
+
   const resp = await fetch(ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+      apikey: publicAnonKey,
+    },
     body: JSON.stringify({
       incidentRowId: payload.incidentRowId,
       eventId: payload.eventId,

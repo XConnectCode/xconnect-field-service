@@ -2806,3 +2806,215 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
     return c.json({ error: String(error) }, 500);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Send incident report to customer.
+//
+// This used to live in a Netlify function (/api/send-incident-report), but the
+// app is deployed via Codespaces/Vite + Supabase edge, where Netlify functions
+// don't run (the old endpoint 404'd). The send now lives here on the edge so it
+// works in dev and prod through the same base path every other API call uses.
+//
+// Email delivery is provider-agnostic and defaults to 'log' (simulated) when no
+// provider is configured, so the generate → send → close workflow completes
+// end-to-end without a mail provider. Configure later via edge env:
+//   MAIL_PROVIDER = resend | sendgrid | log   (default: log)
+//   MAIL_FROM, MAIL_REPLY_TO
+//   RESEND_API_KEY  (when MAIL_PROVIDER=resend)
+//   SENDGRID_API_KEY (when MAIL_PROVIDER=sendgrid)
+//
+// Returns { ok, sentAt, provider, simulated, auditError } — the shape the
+// client (sendIncidentReport.ts) already expects.
+const RESEND_API   = 'https://api.resend.com/emails';
+const SENDGRID_API = 'https://api.sendgrid.com/v3/mail/send';
+
+function isLikelyEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
+function normalizeRecipients(input: unknown): string[] {
+  if (Array.isArray(input)) {
+    return input.map((s) => String(s).trim()).filter(isLikelyEmail);
+  }
+  return String(input ?? '')
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(isLikelyEmail);
+}
+
+function parseFromAddress(addr: string): { name?: string; email: string } {
+  const m = addr.match(/^\s*(.+?)\s*<([^>]+)>\s*$/);
+  if (m) return { name: m[1], email: m[2] };
+  return { email: addr };
+}
+
+function composeEmailBody(
+  { message, eventId, senderName }: { message?: string; eventId?: string; senderName?: string | null },
+): string {
+  const greeting = 'Hello,';
+  const intro = eventId
+    ? `Attached is the incident report for Event #${eventId}.`
+    : 'Attached is the incident report you requested.';
+  const note = message && message.trim() ? `\n\n${message.trim()}` : '';
+  const signoff = senderName
+    ? `\n\nRegards,\n${senderName}\nXConnect Field Service`
+    : '\n\nRegards,\nXConnect Field Service';
+  return `${greeting}\n\n${intro}${note}${signoff}\n`;
+}
+
+async function sendIncidentEmail(
+  { to, subject, body, pdfBase64, pdfFilename, senderName, senderEmail }:
+    { to: string[]; subject: string; body: string; pdfBase64?: string; pdfFilename?: string; senderName?: string | null; senderEmail?: string | null },
+): Promise<{ provider: string; simulated?: boolean; id?: string | null }> {
+  if (!to || !to.length) throw new Error('No recipient addresses provided');
+
+  const provider = (Deno.env.get('MAIL_PROVIDER') || 'log').toLowerCase();
+
+  // Per requirements, customer emails are sent AS the logged-in user (their
+  // own address), with replies routed back to them. SendGrid will only accept
+  // a From whose domain is authenticated in the account. When MAIL_FROM_DOMAIN
+  // is configured we require the sender's address to match it (otherwise the
+  // provider would reject the send); when it isn't set we trust the sender
+  // address as-is. MAIL_FROM remains the fallback when no sender is present.
+  const fromDomain = (Deno.env.get('MAIL_FROM_DOMAIN') || '').trim().toLowerCase();
+  const fallbackFrom = Deno.env.get('MAIL_FROM') || 'XConnect Field Service <no-reply@xconnect.local>';
+  const senderAddr = (senderEmail || '').trim();
+  let from = fallbackFrom;
+  let replyTo: string | undefined = Deno.env.get('MAIL_REPLY_TO') || undefined;
+  if (senderAddr && isLikelyEmail(senderAddr)) {
+    const senderDomain = senderAddr.split('@')[1]?.toLowerCase() || '';
+    if (fromDomain && senderDomain !== fromDomain) {
+      throw new Error(
+        `Sender ${senderAddr} is not on the authenticated mail domain (${fromDomain}). ` +
+        `Configure MAIL_FROM_DOMAIN or authenticate this domain in the mail provider.`,
+      );
+    }
+    from = senderName ? `${senderName} <${senderAddr}>` : senderAddr;
+    replyTo = senderAddr;
+  }
+
+  if (provider === 'log') {
+    console.log('[send-report] MAIL_PROVIDER=log — would have sent:', {
+      to, subject, from, pdfFilename,
+      pdfBytes: pdfBase64 ? Math.floor((pdfBase64.length * 3) / 4) : 0,
+    });
+    return { provider, simulated: true };
+  }
+
+  if (provider === 'resend') {
+    const key = Deno.env.get('RESEND_API_KEY');
+    if (!key) throw new Error('RESEND_API_KEY is not set');
+    const resp = await fetch(RESEND_API, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from, to, reply_to: replyTo, subject, text: body,
+        attachments: pdfBase64
+          ? [{ filename: pdfFilename || 'incident-report.pdf', content: pdfBase64 }]
+          : [],
+      }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`Resend send failed (${resp.status}): ${txt.slice(0, 500)}`);
+    }
+    const data = await resp.json().catch(() => ({}));
+    return { provider, id: data.id || null };
+  }
+
+  if (provider === 'sendgrid') {
+    const key = Deno.env.get('SENDGRID_API_KEY');
+    if (!key) throw new Error('SENDGRID_API_KEY is not set');
+    const resp = await fetch(SENDGRID_API, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        personalizations: [{ to: to.map((email) => ({ email })) }],
+        from: parseFromAddress(from),
+        reply_to: replyTo ? parseFromAddress(replyTo) : undefined,
+        subject,
+        content: [{ type: 'text/plain', value: body }],
+        attachments: pdfBase64
+          ? [{ content: pdfBase64, filename: pdfFilename || 'incident-report.pdf', type: 'application/pdf', disposition: 'attachment' }]
+          : undefined,
+      }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`SendGrid send failed (${resp.status}): ${txt.slice(0, 500)}`);
+    }
+    return { provider, id: resp.headers.get('x-message-id') || null };
+  }
+
+  throw new Error(`Unknown MAIL_PROVIDER: ${provider}`);
+}
+
+apiRoutes.post('/make-server-64775d98/send-incident-report', async (c) => {
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const {
+    incidentRowId, eventId, recipients, subject, message,
+    pdfBase64, pdfFilename, senderName, senderEmail,
+  } = body || {};
+
+  if (!incidentRowId) return c.json({ error: 'incidentRowId is required' }, 400);
+  if (!recipients)    return c.json({ error: 'recipients is required' }, 400);
+  if (!pdfBase64)     return c.json({ error: 'pdfBase64 is required' }, 400);
+
+  const recipientList = normalizeRecipients(recipients);
+  if (recipientList.length === 0) {
+    return c.json({ error: 'No valid recipient email addresses' }, 400);
+  }
+
+  const finalSubject = subject || `XConnect Incident Report${eventId ? ` #${eventId}` : ''}`;
+  const finalBody = composeEmailBody({ message, eventId, senderName });
+
+  let sendResult: { provider: string; simulated?: boolean; id?: string | null };
+  try {
+    sendResult = await sendIncidentEmail({
+      to: recipientList,
+      subject: finalSubject,
+      body: finalBody,
+      pdfBase64,
+      pdfFilename,
+      senderName,
+      senderEmail,
+    });
+  } catch (err: any) {
+    return c.json({ error: `Send failed: ${err?.message || err}` }, 502);
+  }
+
+  const sentAt = new Date().toISOString();
+
+  // Audit trail — best-effort. The email (or simulation) already happened, so
+  // we still return success even if the column write fails. The client also
+  // has a fallback update path when auditError is non-null.
+  let auditError: string | null = null;
+  try {
+    const { error } = await supabase
+      .from('incidents')
+      .update({
+        report_sent: sentAt,
+        report_sent_to: recipientList.join(', '),
+        report_sent_by: senderEmail || senderName || null,
+        report_sent_message: message || null,
+      })
+      .eq('row_id', incidentRowId);
+    if (error) auditError = `incidents update failed: ${error.message}`;
+  } catch (err: any) {
+    auditError = `audit error: ${err?.message || err}`;
+  }
+
+  return c.json({
+    ok: true,
+    sentAt,
+    provider: sendResult.provider,
+    simulated: !!sendResult.simulated,
+    auditError,
+  });
+});
