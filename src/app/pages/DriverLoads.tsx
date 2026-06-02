@@ -182,7 +182,8 @@ export default function DriverLoads() {
           p.requires_qc === false
             ? 'Hardware / spare parts'
             : `Perforating guns (${p.load_type || 'loaded'})`,
-        qty_expected: p.guns_total ?? 0,
+        // Full pallet count (lot), not the inspected AQL sample.
+        qty_expected: p.guns_in_pallet ?? p.guns_total ?? 0,
         qty_loaded: 0,
         destination: p.destination ?? '',
         checked: false,

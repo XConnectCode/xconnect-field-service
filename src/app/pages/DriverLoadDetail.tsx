@@ -181,8 +181,11 @@ export default function DriverLoadDetail() {
       ...prev,
       {
         pallet_build_no: p.build_no ?? '',
-        description: `Perforating guns (${p.load_type})`,
-        qty_expected: p.guns_total ?? '',
+        description: p.requires_qc === false ? 'Hardware / spare parts' : `Perforating guns (${p.load_type})`,
+        // Expected qty = guns physically ON the pallet (the full lot), NOT the
+        // AQL sample that was inspected. guns_in_pallet is the lot total;
+        // guns_total/sample_size is only the inspected count.
+        qty_expected: p.guns_in_pallet ?? p.guns_total ?? '',
         qty_loaded: '',
         destination: p.destination ?? '',
         checked: false,
@@ -707,7 +710,7 @@ export default function DriverLoadDetail() {
                   <TableRow>
                     <TableHead>Build #</TableHead>
                     <TableHead>Description</TableHead>
-                    <TableHead className="w-24" title="Quantity expected on this pallet (from QC)">Expected qty</TableHead>
+                    <TableHead className="w-24" title="Total guns on this pallet (full pallet count, not the inspected sample)">Expected qty</TableHead>
                     <TableHead className="w-24" title="Quantity actually loaded onto the truck">Loaded qty</TableHead>
                     <TableHead>Destination</TableHead>
                     <TableHead className="w-16" title="Confirm this item is physically loaded">Loaded?</TableHead>
