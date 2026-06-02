@@ -2827,6 +2827,87 @@ apiRoutes.get("/debug/row-counts", requireAdmin, async (c) => {
 // client (sendIncidentReport.ts) already expects.
 const RESEND_API   = 'https://api.resend.com/emails';
 const SENDGRID_API = 'https://api.sendgrid.com/v3/mail/send';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GMAIL_SEND_URL   = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+
+// Exchange a long-lived Gmail refresh token for a short-lived access token.
+async function getGmailAccessToken(): Promise<string> {
+  const clientId     = Deno.env.get('GMAIL_CLIENT_ID');
+  const clientSecret = Deno.env.get('GMAIL_CLIENT_SECRET');
+  const refreshToken = Deno.env.get('GMAIL_REFRESH_TOKEN');
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error('Gmail not configured: set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN');
+  }
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token',
+  });
+  const resp = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`Gmail token refresh failed (${resp.status}): ${txt.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  if (!data.access_token) throw new Error('Gmail token refresh returned no access_token');
+  return data.access_token as string;
+}
+
+// Base64url-encode a UTF-8 string (Gmail API requires base64url of the raw MIME).
+function base64UrlEncodeUtf8(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Build an RFC 2822 MIME message (plain-text body + optional base64 PDF) and
+// return it base64url-encoded for the Gmail send endpoint.
+function buildGmailRawMessage(
+  { from, to, replyTo, subject, body, pdfBase64, pdfFilename }:
+    { from: string; to: string[]; replyTo?: string; subject: string; body: string; pdfBase64?: string; pdfFilename?: string },
+): string {
+  const boundary = `xc_mime_${crypto.randomUUID().replace(/-/g, '')}`;
+  const headers: string[] = [
+    `From: ${from}`,
+    `To: ${to.join(', ')}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+  ];
+  if (replyTo) headers.push(`Reply-To: ${replyTo}`);
+
+  if (!pdfBase64) {
+    headers.push('Content-Type: text/plain; charset="UTF-8"');
+    return base64UrlEncodeUtf8(`${headers.join('\r\n')}\r\n\r\n${body}`);
+  }
+
+  headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+  // Gmail wants standard base64 (with line breaks) for attachment parts.
+  const wrapped = (pdfBase64.match(/.{1,76}/g) || [pdfBase64]).join('\r\n');
+  const parts = [
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    body,
+    '',
+    `--${boundary}`,
+    `Content-Type: application/pdf; name="${pdfFilename || 'incident-report.pdf'}"`,
+    'Content-Transfer-Encoding: base64',
+    `Content-Disposition: attachment; filename="${pdfFilename || 'incident-report.pdf'}"`,
+    '',
+    wrapped,
+    '',
+    `--${boundary}--`,
+    '',
+  ];
+  return base64UrlEncodeUtf8(`${headers.join('\r\n')}\r\n\r\n${parts.join('\r\n')}`);
+}
 
 function isLikelyEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
@@ -2870,27 +2951,37 @@ async function sendIncidentEmail(
 
   const provider = (Deno.env.get('MAIL_PROVIDER') || 'log').toLowerCase();
 
-  // Per requirements, customer emails are sent AS the logged-in user (their
-  // own address), with replies routed back to them. SendGrid will only accept
-  // a From whose domain is authenticated in the account. When MAIL_FROM_DOMAIN
-  // is configured we require the sender's address to match it (otherwise the
-  // provider would reject the send); when it isn't set we trust the sender
-  // address as-is. MAIL_FROM remains the fallback when no sender is present.
-  const fromDomain = (Deno.env.get('MAIL_FROM_DOMAIN') || '').trim().toLowerCase();
   const fallbackFrom = Deno.env.get('MAIL_FROM') || 'XConnect Field Service <no-reply@xconnect.local>';
   const senderAddr = (senderEmail || '').trim();
   let from = fallbackFrom;
   let replyTo: string | undefined = Deno.env.get('MAIL_REPLY_TO') || undefined;
-  if (senderAddr && isLikelyEmail(senderAddr)) {
-    const senderDomain = senderAddr.split('@')[1]?.toLowerCase() || '';
-    if (fromDomain && senderDomain !== fromDomain) {
-      throw new Error(
-        `Sender ${senderAddr} is not on the authenticated mail domain (${fromDomain}). ` +
-        `Configure MAIL_FROM_DOMAIN or authenticate this domain in the mail provider.`,
-      );
+
+  if (provider === 'gmail') {
+    // Single-mailbox model: the OAuth token belongs to ONE Gmail account, so
+    // the From MUST be that mailbox (MAIL_FROM, e.g. Robert@xcperf.com) — Gmail
+    // rejects a mismatched From. We still set Reply-To to the logged-in user so
+    // customer replies reach the person who sent it.
+    from = fallbackFrom;
+    if (senderAddr && isLikelyEmail(senderAddr)) {
+      replyTo = senderAddr;
     }
-    from = senderName ? `${senderName} <${senderAddr}>` : senderAddr;
-    replyTo = senderAddr;
+  } else {
+    // Resend / SendGrid: send AS the logged-in user (their own address), with
+    // replies routed back to them. When MAIL_FROM_DOMAIN is configured the
+    // sender's domain must match the authenticated mail domain, otherwise the
+    // provider would reject the send. MAIL_FROM is the no-sender fallback.
+    const fromDomain = (Deno.env.get('MAIL_FROM_DOMAIN') || '').trim().toLowerCase();
+    if (senderAddr && isLikelyEmail(senderAddr)) {
+      const senderDomain = senderAddr.split('@')[1]?.toLowerCase() || '';
+      if (fromDomain && senderDomain !== fromDomain) {
+        throw new Error(
+          `Sender ${senderAddr} is not on the authenticated mail domain (${fromDomain}). ` +
+          `Configure MAIL_FROM_DOMAIN or authenticate this domain in the mail provider.`,
+        );
+      }
+      from = senderName ? `${senderName} <${senderAddr}>` : senderAddr;
+      replyTo = senderAddr;
+    }
   }
 
   if (provider === 'log') {
@@ -2944,6 +3035,22 @@ async function sendIncidentEmail(
       throw new Error(`SendGrid send failed (${resp.status}): ${txt.slice(0, 500)}`);
     }
     return { provider, id: resp.headers.get('x-message-id') || null };
+  }
+
+  if (provider === 'gmail') {
+    const accessToken = await getGmailAccessToken();
+    const raw = buildGmailRawMessage({ from, to, replyTo, subject, body, pdfBase64, pdfFilename });
+    const resp = await fetch(GMAIL_SEND_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`Gmail send failed (${resp.status}): ${txt.slice(0, 500)}`);
+    }
+    const data = await resp.json().catch(() => ({}));
+    return { provider, id: data.id || null };
   }
 
   throw new Error(`Unknown MAIL_PROVIDER: ${provider}`);
