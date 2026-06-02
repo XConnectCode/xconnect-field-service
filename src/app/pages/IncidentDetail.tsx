@@ -39,6 +39,9 @@ import {
   ACTION_STATUS_LABELS,
   getReviewSteps,
   validateForStatus,
+  isReportGenerated,
+  isReviewed,
+  requiresCustomerReport,
 } from '../lib/incidentWorkflow';
 import ReviewProgress from '../components/ReviewProgress';
 import { useTheme } from '../lib/theme-context';
@@ -521,10 +524,31 @@ export default function IncidentDetail() {
     }
   };
 
+  // Whether the report can be sent to the customer. The workflow order is
+  // fields → review → generate → SEND → close: sending happens BEFORE close
+  // (closing an XC incident actually REQUIRES report_sent). So the send gate
+  // must NOT require Closed — it mirrors the checklist's `sent` step:
+  // required fields complete, director-reviewed, and report generated.
+  // Returns a blocking reason string, or '' when ready to send.
+  const sendBlockedReason = (inc: any): string => {
+    if (!inc) return 'Incident not loaded.';
+    if (!requiresCustomerReport(inc)) {
+      return 'This incident is not XC-caused, so no customer report is required.';
+    }
+    const missing = validateForStatus(inc, FINAL_REVIEW_STATUS);
+    if (missing.length > 0) {
+      return `Complete required fields first: ${missing.join(', ')}.`;
+    }
+    if (!isReviewed(inc)) return 'Director must review the incident first.';
+    if (!isReportGenerated(inc)) return 'Generate the report first.';
+    return '';
+  };
+
   const handleOpenSendDialog = () => {
     if (!incident) return;
-    if (normalizeStatus(incident.incident_status) !== CLOSED_STATUS) {
-      toast.error('Incident must be Closed (Final/Completed) before sending to the customer.');
+    const blocked = sendBlockedReason(incident);
+    if (blocked) {
+      toast.error(blocked);
       return;
     }
     // Pre-fill from last send if any, or the customer record's email if surfaced.
@@ -539,8 +563,9 @@ export default function IncidentDetail() {
       toast.error('Please provide at least one recipient email address.');
       return;
     }
-    if (normalizeStatus(incident.incident_status) !== CLOSED_STATUS) {
-      toast.error('Incident must be Closed (Final/Completed) before sending to the customer.');
+    const blocked = sendBlockedReason(incident);
+    if (blocked) {
+      toast.error(blocked);
       return;
     }
     setSendingReport(true);
@@ -806,18 +831,20 @@ export default function IncidentDetail() {
                     Sent {safeFmtDate(incident.report_sent, 'M/d/yyyy')}
                   </span>
                 )}
-                {/* Primary: send the final PDF to the customer.
-                    Gated on the incident being Closed (Final/Completed) so
-                    only locked-down reports are emailed out. */}
+                {/* Primary: send the final PDF to the customer. Per the
+                    workflow order (fields → review → generate → SEND → close),
+                    the report is sent BEFORE the incident is closed — closing
+                    an XC incident actually requires report_sent. So this is
+                    gated on the report being generated + reviewed, NOT Closed. */}
                 <Button
                   className="gap-1.5"
                   disabled={
-                    normalizeStatus(incident.incident_status) !== CLOSED_STATUS ||
+                    !!sendBlockedReason(incident) ||
                     !canMarkReportSent(user?.role as any)
                   }
                   title={
-                    normalizeStatus(incident.incident_status) !== CLOSED_STATUS
-                      ? 'Close the incident (Final/Completed) before sending to the customer'
+                    sendBlockedReason(incident)
+                      ? sendBlockedReason(incident)
                       : !canMarkReportSent(user?.role as any)
                         ? 'Only admins can send reports to customers'
                         : undefined
