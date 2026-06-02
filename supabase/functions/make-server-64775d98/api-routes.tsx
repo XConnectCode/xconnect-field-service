@@ -1386,22 +1386,33 @@ function parseSlipText(text: string) {
   // Destination = the CUSTOMER's site/facility, read from the packing slip
   // Ship-To block (we are XC, so the XC base is the origin, never the
   // destination). The first line under "Ship-To Address" is the consignee name;
-  // we keep the consignee + as much of the address as we can capture on one
-  // line. Build slips have no Ship-To, so destination stays null there and is
-  // filled when the packing slip is imported.
+  // we keep the consignee + as much of the address as we can capture.
+  //
+  // IMPORTANT: some slips print the "Ship-To Address" label with an EMPTY body
+  // (the address column is blank) followed immediately by the ATF block in the
+  // extracted text. We must NOT treat ATF lines / labels as an address. So we
+  // drop any captured line that is an ATF entry, a bare ATF permit number, or a
+  // stray field label. If nothing real remains, destination stays null and the
+  // user enters it manually — we never guess it from ATF or the customer name.
   let ship_to: string | null = null;
   let destination: string | null = null;
   if (doc_type === 'packing_slip') {
-    const shipBlock = clean.match(/Ship-?To Address\s*\n([\s\S]*?)(?:\n\s*ATF\b|\n\s*Date\b|\n\s*Customer\b)/i);
+    const shipBlock = clean.match(/Ship-?To Address\s*\n([\s\S]*?)(?:\n\s*ATF\b|\n\s*Date\b|\n\s*Customer\b|\n\s*Sales Order\b|\n\s*Operator\b)/i);
     if (shipBlock) {
-      const lines = shipBlock[1].split('\n').map((l) => l.trim()).filter(Boolean);
+      const isJunkLine = (l: string) =>
+        !l ||
+        /^ATF\b/i.test(l) ||                         // "ATF Number :", "ATF Expiration ..."
+        /^\d-[A-Z]{2}-\d/i.test(l) ||                 // bare ATF permit, e.g. 3-ND-105-33-7J-00162
+        /^(Date|Customer|Operator|Sales Order|Pad Name|Well Name|Additional Reference)\b/i.test(l);
+      const lines = shipBlock[1]
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !isJunkLine(l));
       if (lines.length) {
         ship_to = lines.join(', ');
         destination = ship_to;
       }
     }
-    // Fallback: if no Ship-To block, use the customer name as the destination.
-    if (!destination && customer) destination = customer;
   }
 
   // Packing slip number. NetSuite embeds it in the title line, e.g.
