@@ -397,6 +397,30 @@ export default function IncidentDetail() {
         const filtered = prev.filter(r => r.report_type !== inserted.report_type);
         return [inserted, ...filtered];
       });
+
+      // Stamp the incident's report_generated_at/by so the Review Progress
+      // "Generate report" step flags done (it reads incident.report_generated_at).
+      // Only the FINAL report is the customer-facing artifact the workflow gates
+      // on — a preliminary PDF shouldn't satisfy the generate step.
+      if (version === 'final') {
+        const generatedAt = new Date().toISOString();
+        const generatedBy = user?.email || user?.name || null;
+        const { error: stampErr } = await supabase
+          .from('incidents')
+          .update({ report_generated_at: generatedAt, report_generated_by: generatedBy, report_version: 'Final' })
+          .eq('row_id', incident.row_id);
+        if (stampErr) {
+          console.warn('Failed to stamp report_generated_at:', stampErr.message);
+        } else {
+          setIncident((prev: any) => ({
+            ...prev,
+            report_generated_at: generatedAt,
+            report_generated_by: generatedBy,
+            report_version: 'Final',
+          }));
+        }
+      }
+
       setPdfTick(t => t + 1);
       setPickerOpen(false);
       setPickerVersion(null);

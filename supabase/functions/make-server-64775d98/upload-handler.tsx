@@ -235,10 +235,80 @@ export async function listImagesForRecord(
       };
     });
 
+    // ── Native / backfilled AppSheet images (incidents only) ────────────────
+    // Older evidence photos live in `images_legacy` keyed by event_id (public
+    // Supabase Storage URLs), NOT in the `images` table. Merge them in here so
+    // EVERY surface that lists an incident's images (detail page, edit modal,
+    // dashboard) shows the same unified gallery. We tag them source='legacy'
+    // and give a `legacy:<row_id>` id so deleteImageById can route deletes
+    // back to images_legacy.
+    if (parentTable === 'incidents') {
+      const legacyFiles = await listLegacyIncidentImages(parentRowId);
+      // Avoid dupes if a legacy URL was already migrated into `images`.
+      const known = new Set(files.map(f => f.url).filter(Boolean));
+      for (const lf of legacyFiles) {
+        if (lf.url && known.has(lf.url)) continue;
+        files.push(lf);
+      }
+    }
+
     return { files, error: null };
   } catch (error) {
     console.error('listImagesForRecord exception:', error);
     return { files: [], error: String(error) };
+  }
+}
+
+/**
+ * Fetch native/backfilled evidence images for an incident from `images_legacy`.
+ * That table is keyed by event_id, so we first resolve the incident's event_id
+ * from its row_id. Returns ImageRecord-shaped objects with source='legacy' and
+ * a `legacy:<row_id>` id so the UI can render + delete them uniformly.
+ */
+async function listLegacyIncidentImages(incidentRowId: string): Promise<any[]> {
+  try {
+    const { data: inc, error: incErr } = await supabase
+      .from('incidents')
+      .select('event_id')
+      .eq('row_id', incidentRowId)
+      .maybeSingle();
+    if (incErr || !inc?.event_id) return [];
+
+    const { data: rows, error } = await supabase
+      .from('images_legacy')
+      .select('row_id,pictures,description,event_id')
+      .eq('event_id', String(inc.event_id))
+      .order('description', { ascending: true });
+    if (error || !rows) return [];
+
+    return rows
+      .filter(r => r?.pictures && String(r.pictures).trim() !== '')
+      .map(r => {
+        const url = String(r.pictures);
+        return {
+          id: `legacy:${r.row_id}`,
+          url,
+          storagePath: null,
+          fieldName: null,
+          caption: r.description ?? null,
+          source: 'legacy',
+          mimeType: 'image/jpeg',
+          fileSizeBytes: null,
+          createdAt: null,
+          // legacy snake_case keys (do not remove)
+          parent_table: 'incidents',
+          parent_row_id: incidentRowId,
+          field_name: null,
+          storage_path: null,
+          signedUrl: url,
+          mime_type: 'image/jpeg',
+          file_size_bytes: null,
+          created_at: null,
+        };
+      });
+  } catch (error) {
+    console.error('listLegacyIncidentImages exception:', error);
+    return [];
   }
 }
 
@@ -249,6 +319,21 @@ export async function deleteImageById(
   imageId: string
 ): Promise<{ success: boolean; error: string | null }> {
   try {
+    // Legacy AppSheet image — id shape is `legacy:<images_legacy.row_id>`.
+    // These have no storage object we own (public AppSheet URL), so we only
+    // delete the images_legacy row.
+    if (imageId.startsWith('legacy:')) {
+      const legacyRowId = imageId.slice('legacy:'.length);
+      const { error: legErr } = await supabase
+        .from('images_legacy')
+        .delete()
+        .eq('row_id', legacyRowId);
+      if (legErr) {
+        console.error('images_legacy delete error:', legErr);
+        return { success: false, error: legErr.message };
+      }
+      return { success: true, error: null };
+    }
     const { data: row, error: selErr } = await supabase
       .from('images')
       .select('storage_path')
