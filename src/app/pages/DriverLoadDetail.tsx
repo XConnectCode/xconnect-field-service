@@ -17,7 +17,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, Plus, Save, Trash2, Truck, AlertTriangle, CheckCircle2, FileText, Camera } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Trash2, Truck, AlertTriangle, CheckCircle2, FileText, Camera, Hash } from 'lucide-react';
 import { toast } from 'sonner';
 
 const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
@@ -585,21 +585,43 @@ export default function DriverLoadDetail() {
         <Card>
           <CardHeader><CardTitle className="text-lg">1. Delivery Info</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label>Load #</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={load.load_number || ''}
-                  onChange={(e) => setField('load_number', e.target.value)}
-                  placeholder="auto: WILL-20260601-01"
-                />
-                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={handleGenerateLoadNumber}>
-                  Generate
-                </Button>
+            {/* Load # — hero card: show the auto-generated number prominently with
+                one action; manual edit tucked into a collapsed override. */}
+            <div className="md:col-span-2">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-900 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-400 flex items-center gap-1">
+                  <Hash className="w-4 h-4" /> Load number
+                </p>
+                <div className="mt-2 flex items-center justify-between flex-wrap gap-3">
+                  <span className="text-2xl font-extrabold leading-none font-mono">
+                    {load.load_number || <span className="text-gray-400 text-lg font-sans font-normal">Select an origin base to auto-generate</span>}
+                  </span>
+                  {load.origin_district && load.load_number !== genLoadNumber() && (
+                    <Button type="button" size="sm" onClick={handleGenerateLoadNumber}>
+                      <CheckCircle2 className="w-4 h-4 mr-1" /> Use {genLoadNumber()}
+                    </Button>
+                  )}
+                </div>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-sm font-medium text-blue-600 dark:text-blue-400">
+                    Edit manually
+                  </summary>
+                  <div className="mt-2 flex gap-2 max-w-md">
+                    <Input
+                      value={load.load_number || ''}
+                      onChange={(e) => setField('load_number', e.target.value)}
+                      placeholder="auto: WILL-20260601-01"
+                      className="font-mono"
+                    />
+                    <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={handleGenerateLoadNumber}>
+                      Regenerate
+                    </Button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Format: BASE-YYYYMMDD-NN (origin base + delivery date + daily sequence).
+                  </p>
+                </details>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
-                Auto-fills from origin base + date once a base is selected. Format: BASE-YYYYMMDD-NN.
-              </p>
             </div>
             <div>
               <Label>Delivery Date</Label>
@@ -947,31 +969,68 @@ export default function DriverLoadDetail() {
           </CardContent>
         </Card>
 
-        {/* Readiness / departure */}
+        {/* Readiness / departure — hero card mirroring the QC sign-off look:
+            prominent status + count, one large primary action, blockers below. */}
         <Card>
           <CardContent className="py-5">
-            {canDepart ? (
-              <div className="flex items-center gap-2 text-green-700 dark:text-green-400 mb-4">
-                <CheckCircle2 className="w-5 h-5" />
-                <span className="font-medium">All checks complete — ready to depart.</span>
-              </div>
-            ) : (
-              <div className="mb-4">
-                <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 mb-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  <span className="font-medium">Not ready to depart — {blockers.length} item(s) outstanding:</span>
+            {(() => {
+              // Total readiness checks = baseline gates that are always required.
+              const TOTAL_CHECKS = 6; // correlation, items secure, driver/inspector/manager sigs, photos
+              const outstanding = blockers.length;
+              const passed = Math.max(0, TOTAL_CHECKS - Math.min(outstanding, TOTAL_CHECKS));
+              const departed = load.status === 'departed';
+              return (
+                <div
+                  className={`rounded-lg border p-4 mb-4 ${
+                    canDepart
+                      ? 'border-green-300 bg-green-50 dark:bg-green-900/20 dark:border-green-900'
+                      : 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-900'
+                  }`}
+                >
+                  <p
+                    className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-1 ${
+                      canDepart ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'
+                    }`}
+                  >
+                    {canDepart ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                    Departure readiness
+                  </p>
+                  <div className="mt-2 flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-extrabold leading-none">
+                        {canDepart ? 'Ready' : outstanding}
+                      </span>
+                      <span className="text-sm text-gray-600 dark:text-gray-300">
+                        {canDepart
+                          ? 'to depart — all checks complete'
+                          : `item${outstanding === 1 ? '' : 's'} outstanding (${passed}/${TOTAL_CHECKS} cleared)`}
+                      </span>
+                    </div>
+                    <Button
+                      size="lg"
+                      className="h-12 px-6 text-base"
+                      onClick={() => markStatus('departed')}
+                      disabled={!canDepart || saving}
+                    >
+                      <Truck className="w-5 h-5 mr-2" /> Mark Ready to Depart
+                    </Button>
+                  </div>
+                  {!canDepart && (
+                    <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 space-y-1 mt-3">
+                      {blockers.map((b, i) => <li key={i}>{b}</li>)}
+                    </ul>
+                  )}
+                  {departed && (
+                    <p className="text-sm text-green-700 dark:text-green-400 mt-3 flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4" /> Departed{load.departed_by ? ` by ${load.departed_by}` : ''}.
+                    </p>
+                  )}
                 </div>
-                <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 space-y-1">
-                  {blockers.map((b, i) => <li key={i}>{b}</li>)}
-                </ul>
-              </div>
-            )}
+              );
+            })()}
             <div className="flex flex-wrap gap-3">
               <Button variant="outline" onClick={() => handleSave()} disabled={saving}>
                 <Save className="w-4 h-4 mr-1" /> Save progress
-              </Button>
-              <Button onClick={() => markStatus('departed')} disabled={!canDepart || saving}>
-                <Truck className="w-4 h-4 mr-1" /> Mark Ready to Depart
               </Button>
               {load.status === 'departed' && (
                 <Button variant="outline" onClick={() => markStatus('delivered')} disabled={saving}>
