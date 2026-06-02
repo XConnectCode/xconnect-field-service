@@ -484,61 +484,119 @@ export default function QcPalletDetail() {
         <Card>
           <CardHeader><CardTitle className="text-lg">Sampling &amp; Guns</CardTitle></CardHeader>
           <CardContent>
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="w-40">
-                <Label>Total guns in pallet</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={MAX_GUNS_PER_PALLET}
-                  placeholder="e.g. 100"
-                  value={lotInput}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    if (raw === '') { setLotInput(''); return; }
-                    const n = Math.floor(Number(raw));
-                    if (!Number.isFinite(n)) { setLotInput(raw); return; }
-                    setLotInput(String(Math.min(Math.max(n, 0), MAX_GUNS_PER_PALLET)));
-                  }}
-                />
+            {guns.length === 0 ? (
+              // ── Set-up: ask ONE question, auto-suggest the AQL sample, one big action ──
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-base">How many guns are on this pallet?</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={MAX_GUNS_PER_PALLET}
+                    placeholder="Enter or scan total guns"
+                    className="mt-1 text-lg h-12 max-w-xs"
+                    value={lotInput}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') { setLotInput(''); setGunCountInput(''); return; }
+                      const n = Math.floor(Number(raw));
+                      if (!Number.isFinite(n)) { setLotInput(raw); return; }
+                      const lot = Math.min(Math.max(n, 0), MAX_GUNS_PER_PALLET);
+                      setLotInput(String(lot));
+                      // Auto-fill the sample from AQL the instant a total is entered.
+                      setGunCountInput(lot > 0 ? String(aqlSampleSize(lot)) : '');
+                    }}
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Max {MAX_GUNS_PER_PALLET} guns per pallet. The build slip confirms the exact per-pallet count.
+                  </p>
+                </div>
+
+                {suggestedSample != null && (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-900 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-400 flex items-center gap-1">
+                      <CheckCircle2 className="w-4 h-4" /> Auto AQL suggestion
+                    </p>
+                    <div className="mt-2 flex items-center justify-between flex-wrap gap-3">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-extrabold leading-none">{gunCountInput || suggestedSample}</span>
+                        <span className="text-sm text-gray-500">
+                          gun{(Number(gunCountInput || suggestedSample)) === 1 ? '' : 's'} to inspect of{' '}
+                          <span className="font-medium text-gray-700 dark:text-gray-300">{lotInput}</span>
+                        </span>
+                      </div>
+                      <Button size="lg" className="h-12 px-6 text-base" onClick={handleInitGuns} disabled={saving}>
+                        Begin QC →
+                      </Button>
+                    </div>
+                    {Number(gunCountInput) < suggestedSample && gunCountInput !== '' && (
+                      <p className="text-xs text-amber-700 dark:text-amber-500 mt-2 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Below the AQL-suggested sample of {suggestedSample}.
+                      </p>
+                    )}
+                    {/* Override tucked away for the rare case. */}
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-sm font-medium text-blue-600 dark:text-blue-400">
+                        Inspect a different number
+                      </summary>
+                      <div className="mt-2 flex items-end gap-3">
+                        <div className="w-40">
+                          <Label>Custom sample</Label>
+                          <Input type="number" min={1} max={lotInput || undefined} value={gunCountInput}
+                            onChange={(e) => setGunCountInput(e.target.value)} />
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                {isUnloaded && (
+                  <p className="text-xs text-gray-500">
+                    Unloaded pallet — shaped charges and det cord default to N/A.
+                  </p>
+                )}
               </div>
-              <div className="w-40">
-                <Label>Sample to inspect</Label>
-                <Input type="number" min={1} value={gunCountInput} onChange={(e) => setGunCountInput(e.target.value)} />
+            ) : (
+              // ── Already initialised: show what's being inspected + re-sample option ──
+              <div className="space-y-2">
+                {pallet?.guns_in_pallet != null && (
+                  <p className="text-sm text-gray-700">
+                    Inspecting <span className="font-medium">{guns.length}</span> of{' '}
+                    <span className="font-medium">{pallet.guns_in_pallet}</span> guns (AQL Level II sample).
+                  </p>
+                )}
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="w-40">
+                    <Label>Total guns in pallet</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={MAX_GUNS_PER_PALLET}
+                      value={lotInput}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === '') { setLotInput(''); return; }
+                        const n = Math.floor(Number(raw));
+                        if (!Number.isFinite(n)) { setLotInput(raw); return; }
+                        setLotInput(String(Math.min(Math.max(n, 0), MAX_GUNS_PER_PALLET)));
+                      }}
+                    />
+                  </div>
+                  <div className="w-40">
+                    <Label>Sample to inspect</Label>
+                    <Input type="number" min={1} value={gunCountInput} onChange={(e) => setGunCountInput(e.target.value)} />
+                  </div>
+                  {suggestedSample != null && String(suggestedSample) !== gunCountInput && (
+                    <Button type="button" variant="ghost" className="text-blue-600"
+                      onClick={() => setGunCountInput(String(suggestedSample))}>
+                      Use AQL suggestion ({suggestedSample})
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={handleInitGuns} disabled={saving || pallet.status === 'passed'}>
+                    Reset & re-sample
+                  </Button>
+                </div>
               </div>
-              {suggestedSample != null && String(suggestedSample) !== gunCountInput && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="text-blue-600"
-                  onClick={() => setGunCountInput(String(suggestedSample))}
-                >
-                  Use AQL suggestion ({suggestedSample})
-                </Button>
-              )}
-              <Button variant="outline" onClick={handleInitGuns} disabled={saving}>
-                {guns.length > 0 ? 'Reset & re-init guns' : 'Initialise guns'}
-              </Button>
-            </div>
-            <p className="text-xs text-gray-400 mt-1">
-              Max {MAX_GUNS_PER_PALLET} guns per pallet. The build slip confirms the exact per-pallet count.
-            </p>
-            {suggestedSample != null && (
-              <p className="text-xs text-gray-500 mt-2">
-                AQL Level II suggests inspecting <span className="font-medium">{suggestedSample}</span>
-                {' '}of {lotInput} guns.
-              </p>
-            )}
-            {pallet?.guns_in_pallet != null && guns.length > 0 && (
-              <p className="text-sm text-gray-700 mt-1">
-                Inspecting <span className="font-medium">{guns.length}</span> of{' '}
-                <span className="font-medium">{pallet.guns_in_pallet}</span> guns (AQL Level II sample).
-              </p>
-            )}
-            {isUnloaded && (
-              <p className="text-xs text-gray-500 mt-2">
-                Unloaded pallet — shaped charges and det cord default to N/A.
-              </p>
             )}
           </CardContent>
         </Card>
