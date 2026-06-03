@@ -863,7 +863,7 @@ export default function Dashboard() {
             <span style={{ fontSize: 16 }}>🔎</span>
             <span style={{ fontSize: 15, fontWeight: 700, color: isDark ? "#fca5a5" : "#991b1b" }}>Needs My Review</span>
             <span style={{ fontSize: 12, fontWeight: 600, padding: "2px 10px", borderRadius: 20, background: "#dc2626", color: "#fff" }}>{reviewQueue.length}</span>
-            <span style={{ fontSize: 12, color: isDark ? "#f87171" : "#b91c1c", marginLeft: 4 }}>XC-caused or Critical incidents awaiting your sign-off · oldest first</span>
+            <span style={{ fontSize: 12, color: isDark ? "#f87171" : "#b91c1c", marginLeft: 4 }}>Open incidents awaiting your sign-off · oldest first</span>
           </div>
           <div>
             {reviewQueue.map((inc, idx) => {
