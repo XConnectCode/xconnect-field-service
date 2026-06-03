@@ -3223,9 +3223,13 @@ apiRoutes.post('/send-incident-report', async (c) => {
 // Categories NOT listed here (failure_type, failed_component, action_status…)
 // are either stored by row-id reference or have no scanned consumer, so we only
 // touch the `lists` row for them.
+// NOTE: 'incident_status' is intentionally NOT listed here. It is a code-driven
+// workflow (New → Investigating → Root Cause Needed → Final Review → Closed)
+// defined in incidentWorkflow.ts with role gating + field validation, not a
+// user-editable list. It is therefore not exposed via Manage Lists.
 const LIST_CATEGORIES = [
   'xc_products', 'event_category', 'firing_system', 'incident_severity',
-  'incident_status', 'xc_caused', 'vendor_caused', 'report_version',
+  'xc_caused', 'vendor_caused', 'report_version',
   'field_facility', 'failure_type', 'visit_purpose', 'failed_component',
   'action_status',
 ];
@@ -3235,7 +3239,6 @@ const CATEGORY_CONSUMERS: Record<string, { table: string; column: string }> = {
   event_category:   { table: 'incidents',   column: 'event_category' },
   firing_system:    { table: 'incidents',   column: 'firing_system' },
   incident_severity:{ table: 'incidents',   column: 'incident_severity' },
-  incident_status:  { table: 'incidents',   column: 'incident_status' },
   xc_caused:        { table: 'incidents',   column: 'xc_caused' },
   vendor_caused:    { table: 'incidents',   column: 'vendor_caused' },
   report_version:   { table: 'incidents',   column: 'report_version' },

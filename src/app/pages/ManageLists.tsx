@@ -34,7 +34,9 @@ const CATEGORIES: { key: string; label: string; help?: string }[] = [
   { key: 'event_category',    label: 'Event Category',   help: 'Incident → Event Category' },
   { key: 'firing_system',     label: 'Firing System',    help: 'Incident → Firing System' },
   { key: 'incident_severity', label: 'Incident Severity' },
-  { key: 'incident_status',   label: 'Incident Status' },
+  // 'incident_status' intentionally omitted: it is a code-driven workflow
+  // (New → Investigating → Root Cause Needed → Final Review → Closed) defined in
+  // incidentWorkflow.ts with role gating + validation, NOT a free-form list.
   { key: 'xc_caused',         label: 'XC Caused' },
   { key: 'vendor_caused',     label: 'Vendor Caused' },
   { key: 'report_version',    label: 'Report Version' },
