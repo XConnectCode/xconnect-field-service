@@ -118,19 +118,13 @@ export function isReviewed(incident: Record<string, any>): boolean {
 }
 
 /**
- * Every open (non-Closed) incident "needs my review" — regardless of
- * xc_caused or severity. For incidents that require a customer report
- * (XC-caused or Inconclusive), it stays on the board until the report has been
- * SENT — even after director review — so nothing slips through unsent. All
- * other incidents drop off the board once director-reviewed.
+ * Every incident that is not Closed "needs my review" — regardless of
+ * xc_caused, severity, review state, or report state. Incidents stay on the
+ * board until their status is Closed.
  */
 export function needsReview(incident: Record<string, any>): boolean {
   if (!incident) return false;
-  if (normalizeStatus(incident.incident_status) === CLOSED_STATUS) return false;
-  // Report-required incidents linger until the report is sent.
-  if (requiresCustomerReport(incident)) return !isReportSent(incident);
-  // Otherwise the legacy rule: drops off once director-reviewed.
-  return !isReviewed(incident);
+  return normalizeStatus(incident.incident_status) !== CLOSED_STATUS;
 }
 
 // Vendor (the reference link) is only required if vendor_caused is set to "Yes".

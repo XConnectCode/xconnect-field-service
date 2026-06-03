@@ -15,7 +15,6 @@ import {
   FINAL_REVIEW_STATUS,
   ACTION_STATUS_COMPLETE,
   needsReview,
-  isReviewed,
   getReviewSteps,
 } from "../lib/incidentWorkflow";
 import { useNavigate } from "react-router";
