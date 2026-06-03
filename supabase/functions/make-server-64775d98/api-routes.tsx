@@ -3397,3 +3397,105 @@ apiRoutes.delete('/lists', requireAdmin, async (c) => {
     return c.json({ error: String(error) }, 500);
   }
 });
+
+// ===========================================================================
+// USER MANAGEMENT (admin-only)
+// Backed by the Supabase Auth Admin API via the service-role client. Roles are
+// authoritative on app_metadata.role and mirrored to user_metadata.role for
+// legacy reads (matches userRole() resolution + the /signup endpoint).
+// ===========================================================================
+
+// Normalize any requested role to a known value (least privilege default).
+function normalizeUserRole(r: unknown): 'admin' | 'sqm' | 'ops' {
+  const v = String(r || '').toLowerCase();
+  return v === 'admin' ? 'admin' : v === 'ops' ? 'ops' : 'sqm';
+}
+
+// Resolve a Supabase auth user's effective role (app_metadata wins, then
+// user_metadata), normalized. Mirrors userRole() but keeps 'ops' distinct.
+function resolveRole(u: any): 'admin' | 'sqm' | 'ops' {
+  const appMeta = (u?.app_metadata ?? {}) as Record<string, unknown>;
+  const userMeta = (u?.user_metadata ?? {}) as Record<string, unknown>;
+  return normalizeUserRole(appMeta.role ?? userMeta.role);
+}
+
+// GET /users — list all auth users with their role. Admin-only.
+apiRoutes.get('/users', requireAdmin, async (c) => {
+  try {
+    const out: any[] = [];
+    let page = 1;
+    const perPage = 1000;
+    for (let i = 0; i < 50; i++) {
+      const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+      if (error) return c.json({ error: error.message }, 500);
+      const users = data?.users ?? [];
+      for (const u of users) {
+        out.push({
+          id: u.id,
+          email: u.email,
+          name: (u.user_metadata as any)?.name || '',
+          role: resolveRole(u),
+          provider: (u.app_metadata as any)?.provider || 'email',
+          created_at: u.created_at,
+          last_sign_in_at: (u as any).last_sign_in_at || null,
+        });
+      }
+      if (users.length < perPage) break;
+      page += 1;
+    }
+    out.sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')));
+    return c.json(out);
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// PUT /users/role — change a user's role: { userId, role }. Admin-only.
+// Guard: an admin cannot demote their OWN account (prevents lockout).
+apiRoutes.put('/users/role', requireAdmin, async (c) => {
+  try {
+    const caller = c.get('user') as any;
+    const body = await c.req.json();
+    const userId = String(body.userId || '').trim();
+    const role = normalizeUserRole(body.role);
+    if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+    if (userId === caller?.id && role !== 'admin') {
+      return c.json({ error: 'You cannot remove admin access from your own account.' }, 400);
+    }
+
+    // Fetch existing metadata so we merge (preserve name etc.) rather than wipe.
+    const { data: existing, error: getErr } = await supabase.auth.admin.getUserById(userId);
+    if (getErr || !existing?.user) return c.json({ error: getErr?.message || 'User not found' }, 404);
+    const prevUserMeta = (existing.user.user_metadata ?? {}) as Record<string, unknown>;
+    const prevAppMeta = (existing.user.app_metadata ?? {}) as Record<string, unknown>;
+
+    const { data, error } = await supabase.auth.admin.updateUserById(userId, {
+      app_metadata: { ...prevAppMeta, role },
+      user_metadata: { ...prevUserMeta, role },
+    });
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ ok: true, id: data.user?.id, role });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// DELETE /users — remove a user: { userId }. Admin-only.
+// Guard: an admin cannot delete their OWN account.
+apiRoutes.delete('/users', requireAdmin, async (c) => {
+  try {
+    const caller = c.get('user') as any;
+    const body = await c.req.json();
+    const userId = String(body.userId || '').trim();
+    if (!userId) return c.json({ error: 'userId is required' }, 400);
+    if (userId === caller?.id) {
+      return c.json({ error: 'You cannot delete your own account.' }, 400);
+    }
+    const { error } = await supabase.auth.admin.deleteUser(userId);
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});

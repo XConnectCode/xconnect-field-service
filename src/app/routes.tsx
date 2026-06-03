@@ -29,6 +29,7 @@ import DriverLoadDetail from './pages/DriverLoadDetail';
 import QcPallets from './pages/QcPallets';
 import QcPalletDetail from './pages/QcPalletDetail';
 import ManageLists from './pages/ManageLists';
+import Users from './pages/Users';
 
 type Role = 'admin' | 'sqm' | 'ops';
 
@@ -80,6 +81,7 @@ export const router = createBrowserRouter([
       { path: "technical-bulletin/:id", element: <AdminOnly><TechnicalBulletin /></AdminOnly> },
       { path: "technical-bulletin-setup", element: <AdminOnly><TechnicalBulletinSetup /></AdminOnly> },
       { path: "manage-lists", element: <AdminOnly><ManageLists /></AdminOnly> },
+      { path: "users", element: <AdminOnly><Users /></AdminOnly> },
       { path: "diagnostics", element: <AdminOnly><DiagnosticsPage /></AdminOnly> },
       { path: "debug", element: <AdminOnly><Debug /></AdminOnly> },
       { path: "driver",     element: <RequireRole roles={['admin','ops']}><DriverLoads /></RequireRole> },

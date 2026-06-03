@@ -61,6 +61,7 @@ const NAV_GROUPS = [
   {
     label: 'Settings',
     items: [
+      { path: '/users',        label: 'Users',        icon: Users,      roles: ['admin'] as Role[] },
       { path: '/manage-lists', label: 'Manage Lists', icon: ListChecks, roles: ['admin'] as Role[] },
     ],
   },
