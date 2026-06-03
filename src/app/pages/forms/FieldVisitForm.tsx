@@ -74,6 +74,11 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   const [locating,      setLocating]      = useState(false);
   const [latLngValue,   setLatLngValue]   = useState('');
   const [xcRep,         setXcRep]         = useState('');
+  // Multi-select of panel serials seen on this visit. Replaces the 3 legacy
+  // single dropdowns (digital_shooting_panel / communication_panel /
+  // surface_tester). Marking a panel here stamps it verified='Y' + last-seen
+  // on save (handled server-side).
+  const [panelsSeen,    setPanelsSeen]    = useState<string[]>([]);
 
   // Fetch next available Visit ID — fetch ALL field_visit_ids and find the true
   // numeric max. We can't .order() because Postgres sorts field_visit_id as
@@ -125,6 +130,32 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     else setCustId('');
   }, [visit, open]);
 
+  // Seed the Panels Seen multi-select. Prefer the new panels_seen array; for
+  // legacy visits saved before this field existed, fall back to the 3 old
+  // single dropdown columns so nothing is lost on edit.
+  useEffect(() => {
+    if (!open) { setPanelsSeen([]); return; }
+    if (visit) {
+      const arr: string[] = Array.isArray(visit.panels_seen) ? visit.panels_seen.filter(Boolean) : [];
+      if (arr.length > 0) {
+        setPanelsSeen(Array.from(new Set(arr.map((s: any) => String(s)))));
+      } else {
+        const legacy = [visit.digital_shooting_panel, visit.communication_panel, visit.surface_tester]
+          .map((s: any) => (s == null ? '' : String(s).trim()))
+          .filter((s: string) => s !== '');
+        setPanelsSeen(Array.from(new Set(legacy)));
+      }
+    } else {
+      setPanelsSeen([]);
+    }
+  }, [visit, open]);
+
+  const togglePanelSeen = (serial: string) => {
+    setPanelsSeen(prev =>
+      prev.includes(serial) ? prev.filter(s => s !== serial) : [...prev, serial]
+    );
+  };
+
   // XC Rep: on edit keep the stored rep; on create auto-pull the logged-in
   // user. The field is a constrained dropdown of SQM reps, so only pre-select
   // the user's name when it actually matches a valid option; otherwise leave it
@@ -144,6 +175,15 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     const arrival   = fd.get('arrival_date') as string;
     const departure = fd.get('departure_date') as string;
 
+    // Derive the 3 legacy single-value columns from the multi-select so older
+    // reads still work: pick the first selected panel of each legacy type.
+    const seenList = Array.from(new Set(panelsSeen.map(s => String(s).trim()).filter(Boolean)));
+    const typeOf = (serial: string) => {
+      const p = allPanels.find(pp => getSerial(pp) === serial);
+      return p?.panel_type || '';
+    };
+    const firstOfType = (type: string) => seenList.find(s => typeOf(s) === type) || null;
+
     const payload: Record<string, any> = {
       field_visit_id:        fd.get('field_visit_id')        || '',
       arrival_date:          arrival                         || null,
@@ -158,9 +198,11 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
       pad_name:              fd.get('pad_name')              || null,
       lat_long:              fd.get('lat_long')              || null,
       visit_duration:        fd.get('visit_duration')        || null,
-      communication_panel:   fd.get('communication_panel')   || null,
-      digital_shooting_panel:fd.get('digital_shooting_panel')|| null,
-      surface_tester:        fd.get('surface_tester')        || null,
+      panels_seen:           seenList,
+      // Legacy single-value mirrors (derived from panels_seen for back-compat).
+      communication_panel:   firstOfType('Communication Panel'),
+      digital_shooting_panel:firstOfType('Digital Shooting Panel'),
+      surface_tester:        firstOfType('Surface Tester'),
       visit_summary:         fd.get('visit_summary')         || null,
     };
 
@@ -187,6 +229,21 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
 
   // Panel options grouped by type
   const panelsByType = (type: string) => allPanels.filter(p => p.panel_type === type);
+
+  // Build ordered type groups for the Panels Seen multi-select. Common legacy
+  // types lead; any remaining types follow alphabetically. Empty types skipped.
+  const TYPE_ORDER = ['Digital Shooting Panel', 'Surface Tester', 'P2500', 'P2000', 'P1000'];
+  const allTypes = Array.from(new Set(allPanels.map(p => p.panel_type).filter(Boolean)));
+  const orderedTypes = [
+    ...TYPE_ORDER.filter(t => allTypes.includes(t)),
+    ...allTypes.filter(t => !TYPE_ORDER.includes(t)).sort(),
+  ];
+  const panelTypeGroups = orderedTypes
+    .map(type => ({ type, panels: panelsByType(type) }))
+    .filter(g => g.panels.length > 0);
+  // Selected serials that aren't in the current panel list (e.g. legacy data).
+  const knownSerials = new Set(allPanels.map(p => getSerial(p)));
+  const orphanSeen = panelsSeen.filter(s => !knownSerials.has(s));
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
@@ -344,38 +401,66 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
             </div>
           </F>
 
-          {/* ── Panels ── */}
-          <Section title="XFire Equipment" />
+          {/* ── Panels Seen ── */}
+          <Section title="Panels Seen" />
 
-          <F label="Digital Shooting Panel">
-            <select name="digital_shooting_panel" defaultValue={visit?.digital_shooting_panel || ''}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-              <option value="">— None —</option>
-              {panelsByType('Digital Shooting Panel').map(p => (
-                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
+          <div className="col-span-2">
+            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">
+              Flag every panel you saw on this visit
+              <span className="ml-2 font-normal text-gray-400">
+                ({panelsSeen.length} selected · marks each Verified = Y)
+              </span>
+            </Label>
+            <div className="space-y-3 border border-gray-200 dark:border-gray-700 rounded-md p-3 max-h-72 overflow-y-auto">
+              {panelTypeGroups.length === 0 && (
+                <p className="text-sm text-gray-400">No panels available.</p>
+              )}
+              {panelTypeGroups.map(({ type, panels }) => (
+                <div key={type}>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">{type}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {panels.map(p => {
+                      const serial = getSerial(p);
+                      const on = panelsSeen.includes(serial);
+                      return (
+                        <button
+                          type="button"
+                          key={serial}
+                          onClick={() => togglePanelSeen(serial)}
+                          className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                            on
+                              ? 'bg-blue-600 border-blue-600 text-white'
+                              : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-blue-400'
+                          }`}
+                        >
+                          {on ? '✓ ' : ''}{serial}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
-            </select>
-          </F>
-
-          <F label="Communication Panel">
-            <select name="communication_panel" defaultValue={visit?.communication_panel || ''}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-              <option value="">— None —</option>
-              {panelsByType('Communication Panel').map(p => (
-                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
-              ))}
-            </select>
-          </F>
-
-          <F label="Surface Tester">
-            <select name="surface_tester" defaultValue={visit?.surface_tester || ''}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-              <option value="">— None —</option>
-              {panelsByType('Surface Tester').map(p => (
-                <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
-              ))}
-            </select>
-          </F>
+            </div>
+            {/* Serials selected here but no longer in the panel list (e.g. legacy
+                values) are preserved so editing never silently drops them. */}
+            {orphanSeen.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Other (not in current list)</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {orphanSeen.map(serial => (
+                    <button
+                      type="button"
+                      key={serial}
+                      onClick={() => togglePanelSeen(serial)}
+                      className="px-2.5 py-1 rounded-full text-xs border bg-blue-600 border-blue-600 text-white"
+                    >
+                      ✓ {serial}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* ── Summary ── */}
           <Section title="Summary" />

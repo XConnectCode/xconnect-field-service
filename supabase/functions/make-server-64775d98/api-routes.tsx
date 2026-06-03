@@ -386,6 +386,38 @@ const listFieldVisits = async (c: any) => {
 apiRoutes.get("/fieldvisits", listFieldVisits);
 apiRoutes.get("/field-visits", listFieldVisits);
 
+// Shared helper: when a field visit records which panels were seen, stamp each
+// of those panels as verified='Y' plus a last-seen audit trail (date / by /
+// visit). Best-effort: a stamping failure is logged but never blocks the visit
+// save. Serials are matched against panels.serial_number.
+const stampPanelsSeen = async (
+  serials: any,
+  opts: { seenDate?: string | null; seenBy?: string | null; visitId?: string | null }
+) => {
+  try {
+    const list = Array.isArray(serials)
+      ? serials.map((s: any) => (s == null ? '' : String(s).trim())).filter((s: string) => s !== '')
+      : [];
+    if (list.length === 0) return;
+    const uniq = Array.from(new Set(list));
+    const stampDate = opts.seenDate || new Date().toISOString();
+    const { error } = await supabase
+      .from('panels')
+      .update({
+        verified: 'Y',
+        last_seen_date: stampDate,
+        last_seen_by: opts.seenBy ?? null,
+        last_seen_visit_id: opts.visitId ?? null
+      })
+      .in('serial_number', uniq);
+    if (error) {
+      console.error('Error stamping panels seen:', error);
+    }
+  } catch (err) {
+    console.error('Exception stamping panels seen:', err);
+  }
+};
+
 const createFieldVisit = async (c: any) => {
   try {
     const body = await c.req.json();
@@ -409,6 +441,7 @@ const createFieldVisit = async (c: any) => {
         communication_panel: body.communication_panel,
         digital_shooting_panel: body.digital_shooting_panel,
         surface_tester: body.surface_tester,
+        panels_seen: body.panels_seen,
         xc_rep: body.xc_rep
       })
       .select()
@@ -418,6 +451,13 @@ const createFieldVisit = async (c: any) => {
       console.error('Error creating field visit:', error);
       return c.json({ error: error.message }, 500);
     }
+
+    // Mark every panel listed on this visit as seen (verified + last-seen stamp).
+    await stampPanelsSeen(body.panels_seen, {
+      seenDate: body.arrival_date,
+      seenBy: body.xc_rep,
+      visitId: body.field_visit_id
+    });
 
     return c.json(data);
   } catch (error) {
@@ -455,6 +495,7 @@ const updateFieldVisit = async (c: any) => {
         communication_panel: body.communication_panel,
         digital_shooting_panel: body.digital_shooting_panel,
         surface_tester: body.surface_tester,
+        panels_seen: body.panels_seen,
         xc_rep: body.xc_rep,
         // Completion workflow + audit stamps.
         visit_status: body.visit_status,
@@ -471,6 +512,13 @@ const updateFieldVisit = async (c: any) => {
       console.error('Error updating field visit:', error);
       return c.json({ error: error.message }, 500);
     }
+
+    // Mark every panel listed on this visit as seen (verified + last-seen stamp).
+    await stampPanelsSeen(body.panels_seen, {
+      seenDate: body.arrival_date,
+      seenBy: body.xc_rep,
+      visitId: body.field_visit_id
+    });
 
     return c.json(data);
   } catch (error) {
@@ -1103,6 +1151,39 @@ apiRoutes.put("/panels/:id", async (c) => {
     return c.json(data);
   } catch (error) {
     console.error('Error in update panel endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Dedicated per-panel "Mark Seen" action. Sets verified='Y' and stamps the
+// last-seen audit trail without requiring a full field visit. Matched by row_id.
+// Body: { seen_by?, seen_date?, visit_id? }
+apiRoutes.post("/panels/:id/mark-seen", async (c) => {
+  try {
+    const id = c.req.param('id');
+    let body: any = {};
+    try { body = await c.req.json(); } catch (_) { body = {}; }
+
+    const { data, error } = await supabase
+      .from('panels')
+      .update({
+        verified: 'Y',
+        last_seen_date: body.seen_date || new Date().toISOString(),
+        last_seen_by: body.seen_by ?? null,
+        last_seen_visit_id: body.visit_id ?? null
+      })
+      .eq('row_id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error marking panel seen:', error);
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json(data);
+  } catch (error) {
+    console.error('Error in mark panel seen endpoint:', error);
     return c.json({ error: String(error) }, 500);
   }
 });

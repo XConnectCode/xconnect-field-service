@@ -56,6 +56,47 @@ function fmt(n: number | null | undefined): string | number {
   return n.toLocaleString();
 }
 
+// ── Panels Needing Attention rules ─────────────────────────────────────────
+// Statuses that require full customer-assignment info (mirrors PanelForm).
+const ATTENTION_ASSIGN_STATUSES = ['Leased', 'Loaned', 'Sold'];
+// Required assignment fields when assigned. 'so#' has a # so it's bracket-keyed.
+const ATTENTION_REQUIRED_FIELDS: { key: string; label: string }[] = [
+  { key: 'unit_number',       label: 'Unit #' },
+  { key: 'so#',              label: 'SO #' },
+  { key: 'customer',          label: 'Customer' },
+  { key: 'customer_district', label: 'District' },
+  { key: 'operating_company', label: 'Operating Co.' },
+  { key: 'is_spare',          label: 'Spare' },
+  { key: 'activity',          label: 'Activity' },
+];
+const STALE_SEEN_DAYS = 90;
+
+// Returns the list of reasons a panel needs attention (empty = healthy).
+function panelAttentionReasons(p: any): string[] {
+  const reasons: string[] = [];
+  const isBlank = (v: any) => v === null || v === undefined || String(v).trim() === '';
+
+  if (ATTENTION_ASSIGN_STATUSES.includes(p.panel_status)) {
+    const missing = ATTENTION_REQUIRED_FIELDS.filter(f => isBlank(p[f.key])).map(f => f.label);
+    if (missing.length > 0) reasons.push(`Missing: ${missing.join(', ')}`);
+  }
+
+  if (String(p.verified || '').trim().toUpperCase() !== 'Y') {
+    reasons.push('Unverified');
+  }
+
+  if (isBlank(p.last_seen_date)) {
+    reasons.push('Never seen');
+  } else {
+    const seen = new Date(p.last_seen_date).getTime();
+    if (!isNaN(seen)) {
+      const days = Math.floor((Date.now() - seen) / 86_400_000);
+      if (days > STALE_SEEN_DAYS) reasons.push(`Not seen ${days}d`);
+    }
+  }
+  return reasons;
+}
+
 function getDateRange(filter: string): { start: string | null; end: string | null } {
   if (filter === "all_time") return { start: null, end: null };
   const now = new Date();
@@ -548,6 +589,8 @@ export default function Dashboard() {
   const [totalStages,    setTotalStages]    = useState(0);
   const [panelTotal,     setPanelTotal]     = useState(0);
   const [panelStatuses,  setPanelStatuses]  = useState<{ status: string; count: number; total: number }[]>([]);
+  // Panels failing assignment requirements / unverified / not seen recently.
+  const [attentionPanels, setAttentionPanels] = useState<any[]>([]);
 
   // Incidents review
   const [incidents,      setIncidents]      = useState<any[]>([]);
@@ -714,6 +757,16 @@ export default function Dashboard() {
           return a.localeCompare(b);
         });
         setPanelStatuses(sorted.map(([status, count]) => ({ status, count, total: pt })));
+
+        // Panels Needing Attention: pull full rows (select * because so# breaks
+        // PostgREST's select parser) and flag any failing the assignment /
+        // verified / last-seen rules. Sorted worst-first by reason count.
+        const allPanelRows = await fetchAllPages(supabase.from("panels").select("*"));
+        const flagged = (allPanelRows || [])
+          .map((p: any) => ({ panel: p, reasons: panelAttentionReasons(p) }))
+          .filter((x: any) => x.reasons.length > 0)
+          .sort((a: any, b: any) => b.reasons.length - a.reasons.length);
+        setAttentionPanels(flagged);
 
         // Incidents for review table — all matching filter, ordered by date desc
         // Note: select("*") is required because column names stage# and so#
@@ -910,6 +963,42 @@ export default function Dashboard() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* ── Panels Needing Attention (director/admin only) ── */}
+      {role === "admin" && !loading && attentionPanels.length > 0 && (
+        <div style={{ marginBottom: 28, background: isDark ? "#1e293b" : "#fff", borderRadius: 12, border: `1px solid ${isDark ? "#78350f" : "#fed7aa"}`, overflow: "hidden", boxShadow: isDark ? "0 1px 3px rgba(0,0,0,0.4)" : "0 1px 3px rgba(0,0,0,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 20px", background: isDark ? "#451a03" : "#fff7ed", borderBottom: `1px solid ${isDark ? "#78350f" : "#fed7aa"}` }}>
+            <span style={{ fontSize: 16 }}>📡</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: isDark ? "#fdba74" : "#9a3412" }}>Panels Needing Attention</span>
+            <span style={{ fontSize: 12, fontWeight: 600, padding: "2px 10px", borderRadius: 20, background: "#ea580c", color: "#fff" }}>{attentionPanels.length}</span>
+            <span style={{ fontSize: 12, color: isDark ? "#fb923c" : "#c2410c", marginLeft: 4 }}>Missing required info · unverified · or not seen in {STALE_SEEN_DAYS}+ days</span>
+          </div>
+          <div>
+            {attentionPanels.slice(0, 12).map(({ panel: p, reasons }: any, idx: number) => (
+              <div key={p.row_id || p.serial_number} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 20px", borderBottom: idx < Math.min(attentionPanels.length, 12) - 1 ? `1px solid ${isDark ? "#334155" : "#f1f5f9"}` : "none" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#0ea5e9", minWidth: 90, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.serial_number}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: isDark ? "#94a3b8" : "#64748b", marginBottom: 4 }}>
+                    {p.panel_type || "—"}{p.panel_status && <> · {p.panel_status}</>}
+                    {p.last_seen_date && <> · last seen {new Date(p.last_seen_date).toLocaleDateString()}</>}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {reasons.map((r: string, ri: number) => (
+                      <span key={ri} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: isDark ? "#7c2d12" : "#ffedd5", color: isDark ? "#fdba74" : "#9a3412" }}>{r}</span>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={() => navigate(`/panels/${p.row_id}`)} style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${isDark ? "#475569" : "#e2e8f0"}`, background: isDark ? "#334155" : "#fff", cursor: "pointer", fontSize: 11, color: isDark ? "#cbd5e1" : "#475569", fontWeight: 600, whiteSpace: "nowrap" }}>Open →</button>
+              </div>
+            ))}
+          </div>
+          {attentionPanels.length > 12 && (
+            <div style={{ padding: "10px 20px", fontSize: 12, color: isDark ? "#94a3b8" : "#64748b", borderTop: `1px solid ${isDark ? "#334155" : "#f1f5f9"}`, background: isDark ? "#0f172a" : "#fafafa" }}>
+              Showing 12 of {attentionPanels.length} · <button onClick={() => navigate('/panels')} style={{ background: "none", border: "none", color: "#0ea5e9", cursor: "pointer", fontWeight: 600, fontSize: 12, padding: 0 }}>View all panels →</button>
+            </div>
+          )}
         </div>
       )}
 

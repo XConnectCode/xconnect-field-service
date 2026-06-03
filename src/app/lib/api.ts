@@ -111,6 +111,9 @@ export const panelApi = {
     apiRequest('/panels', { method: 'POST', body: JSON.stringify(panel) }, token),
   update: (id: string, updates: any, token?: string) => 
     apiRequest(`/panels/${id}`, { method: 'PUT', body: JSON.stringify(updates) }, token),
+  // Mark a single panel as seen: sets verified='Y' + last-seen audit stamp.
+  markSeen: (id: string, body: { seen_by?: string | null; seen_date?: string | null; visit_id?: string | null }, token?: string) =>
+    apiRequest(`/panels/${id}/mark-seen`, { method: 'POST', body: JSON.stringify(body || {}) }, token),
 };
 
 // Sales APIs

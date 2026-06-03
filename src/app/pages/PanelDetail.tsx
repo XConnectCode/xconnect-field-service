@@ -9,7 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
-import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck } from 'lucide-react';
+import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
@@ -135,6 +135,7 @@ export default function PanelDetail() {
   const [returning, setReturning] = useState(false);
   const [returnDateInput, setReturnDateInput] = useState('');
   const [returnNotesInput, setReturnNotesInput] = useState('');
+  const [seenSaving, setSeenSaving] = useState(false);
 
   // Reference data (same sources as PanelForm) for FK selects.
   const [customers,   setCustomers]   = useState<any[]>([]);
@@ -403,6 +404,25 @@ export default function PanelDetail() {
     }
   };
 
+  // Mark this panel as seen right now: sets verified='Y' and stamps the
+  // last-seen audit trail (date = now, by = current user). Uses the dedicated
+  // mark-seen route so it never touches other panel columns.
+  const handleMarkSeen = async () => {
+    if (!id || !accessToken || !panel) return;
+    setSeenSaving(true);
+    try {
+      const who = user?.name || user?.email || null;
+      await panelApi.markSeen(id, { seen_by: who, seen_date: new Date().toISOString(), visit_id: null }, accessToken);
+      toast.success('Panel marked seen — Verified set to Y');
+      await loadPanel();
+      await loadHistory();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to mark panel seen');
+    } finally {
+      setSeenSaving(false);
+    }
+  };
+
   // ── Loading / not-found states ─────────────────────────────────────────────
   if (loading) {
     return (
@@ -456,10 +476,26 @@ export default function PanelDetail() {
               </Badge>
 
               {!editing ? (
-                <Button size="sm" onClick={handleEdit}>
-                  <Pencil className="w-4 h-4 mr-1" />
-                  Edit
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleMarkSeen}
+                    disabled={seenSaving}
+                    title="Set Verified = Y and stamp last-seen now"
+                  >
+                    {seenSaving ? (
+                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                    ) : (
+                      <Eye className="w-4 h-4 mr-1" />
+                    )}
+                    Mark Seen
+                  </Button>
+                  <Button size="sm" onClick={handleEdit}>
+                    <Pencil className="w-4 h-4 mr-1" />
+                    Edit
+                  </Button>
+                </>
               ) : (
                 <>
                   <Button
@@ -742,6 +778,16 @@ export default function PanelDetail() {
                       placeholder="Select"
                     />
                   </Field>
+
+                  <Field
+                    label="Last Seen"
+                    value={panel.last_seen_date ? new Date(panel.last_seen_date).toLocaleDateString() : ''}
+                  />
+
+                  <Field
+                    label="Last Seen By"
+                    value={panel.last_seen_by}
+                  />
 
                   <Field
                     label="Activity"
