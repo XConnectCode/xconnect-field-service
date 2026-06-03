@@ -19,7 +19,7 @@ import {
   LayoutDashboard, Users, ClipboardList, AlertTriangle,
   Cpu, TrendingUp, FileBarChart,
   Sun, Moon, LogOut, Map, FileText, BarChart3,
-  Truck, ClipboardCheck,
+  Truck, ClipboardCheck, ListChecks,
 } from 'lucide-react';
 
 type Role = 'admin' | 'sqm' | 'ops';
@@ -56,6 +56,12 @@ const NAV_GROUPS = [
     items: [
       { path: '/driver', label: 'Driver Loads', icon: Truck,           roles: ['admin', 'ops'] as Role[] },
       { path: '/qc',     label: 'QC',           icon: ClipboardCheck,  roles: ['admin', 'ops'] as Role[] },
+    ],
+  },
+  {
+    label: 'Settings',
+    items: [
+      { path: '/manage-lists', label: 'Manage Lists', icon: ListChecks, roles: ['admin'] as Role[] },
     ],
   },
 ];

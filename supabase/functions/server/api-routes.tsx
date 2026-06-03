@@ -3206,3 +3206,182 @@ apiRoutes.post('/send-incident-report', async (c) => {
     auditError,
   });
 });
+// ============ LISTS (dropdown options manager) ============
+//
+// The `lists` table is a multi-column lookup: each enum category lives in its
+// own text column (e.g. xc_products = Product Line). Each distinct non-empty
+// value sits in its own row, with the other category columns left null. The
+// app builds every incident/visit dropdown from the distinct values in these
+// columns. These routes let an admin add / rename / delete options.
+//
+// RLS on `lists` only allows SELECT for authenticated users, so all writes go
+// through this service-role edge router (admin-gated via requireAdmin).
+//
+// CATEGORY_CONSUMERS maps a list column -> the table+column where the chosen
+// value is stored as PLAIN TEXT on real records. Used to (a) count usage before
+// delete and (b) cascade a rename so historical records stay consistent.
+// Categories NOT listed here (failure_type, failed_component, action_status…)
+// are either stored by row-id reference or have no scanned consumer, so we only
+// touch the `lists` row for them.
+const LIST_CATEGORIES = [
+  'xc_products', 'event_category', 'firing_system', 'incident_severity',
+  'incident_status', 'xc_caused', 'vendor_caused', 'report_version',
+  'field_facility', 'failure_type', 'visit_purpose', 'failed_component',
+  'action_status',
+];
+
+const CATEGORY_CONSUMERS: Record<string, { table: string; column: string }> = {
+  xc_products:      { table: 'incidents',   column: 'product_line' },
+  event_category:   { table: 'incidents',   column: 'event_category' },
+  firing_system:    { table: 'incidents',   column: 'firing_system' },
+  incident_severity:{ table: 'incidents',   column: 'incident_severity' },
+  incident_status:  { table: 'incidents',   column: 'incident_status' },
+  xc_caused:        { table: 'incidents',   column: 'xc_caused' },
+  vendor_caused:    { table: 'incidents',   column: 'vendor_caused' },
+  report_version:   { table: 'incidents',   column: 'report_version' },
+  field_facility:   { table: 'fieldvisits', column: 'field_or_facility' },
+  visit_purpose:    { table: 'fieldvisits', column: 'visit_purpose' },
+  // failure_type / failed_component are stored by row-id reference (not text)
+  // and action_status has no scanned consumer here, so they are intentionally
+  // omitted — rename/delete only affect the `lists` row for those.
+};
+
+function isValidCategory(cat: string): boolean {
+  return LIST_CATEGORIES.includes(cat);
+}
+
+// Count how many real records currently use a given text value for a category.
+// Returns 0 when the category has no scanned consumer.
+async function countUsage(category: string, value: string): Promise<number> {
+  const consumer = CATEGORY_CONSUMERS[category];
+  if (!consumer) return 0;
+  const { count, error } = await supabase
+    .from(consumer.table)
+    .select('*', { count: 'exact', head: true })
+    .eq(consumer.column, value);
+  if (error) {
+    console.error(`countUsage(${category}) error:`, error.message);
+    throw new Error(error.message);
+  }
+  return count || 0;
+}
+
+// GET all list rows (admin) — full table so the manager can group by category.
+apiRoutes.get('/lists', requireAdmin, async (c) => {
+  try {
+    const { data, error } = await supabase.from('lists').select('*');
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json(data || []);
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// POST add a new option: { category, value }
+apiRoutes.post('/lists', requireAdmin, async (c) => {
+  try {
+    const body = await c.req.json();
+    const category = String(body.category || '').trim();
+    const value = String(body.value || '').trim();
+    if (!isValidCategory(category)) return c.json({ error: `Unknown category "${category}"` }, 400);
+    if (!value) return c.json({ error: 'Value is required' }, 400);
+
+    // Reject duplicates (case-insensitive) within the same category.
+    const { data: existing, error: exErr } = await supabase
+      .from('lists').select(`row_id, ${category}`).not(category, 'is', null);
+    if (exErr) return c.json({ error: exErr.message }, 500);
+    const dup = (existing || []).some(
+      (r: any) => String(r[category] || '').trim().toLowerCase() === value.toLowerCase()
+    );
+    if (dup) return c.json({ error: `"${value}" already exists in this list` }, 409);
+
+    const rowId = 'pl_' + crypto.randomUUID().replace(/-/g, '');
+    const { data, error } = await supabase
+      .from('lists').insert({ row_id: rowId, [category]: value }).select().single();
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json(data);
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// PUT rename an option: { category, oldValue, newValue }
+// Renames the lists row AND cascades to existing records so reports stay
+// consistent. Returns how many records were updated.
+apiRoutes.put('/lists/rename', requireAdmin, async (c) => {
+  try {
+    const body = await c.req.json();
+    const category = String(body.category || '').trim();
+    const oldValue = String(body.oldValue ?? '').trim();
+    const newValue = String(body.newValue ?? '').trim();
+    if (!isValidCategory(category)) return c.json({ error: `Unknown category "${category}"` }, 400);
+    if (!oldValue || !newValue) return c.json({ error: 'Both old and new values are required' }, 400);
+    if (oldValue === newValue) return c.json({ ok: true, updatedRecords: 0, note: 'No change' });
+
+    // Reject collision with another existing option (case-insensitive).
+    const { data: existing } = await supabase
+      .from('lists').select(`row_id, ${category}`).not(category, 'is', null);
+    const collision = (existing || []).some(
+      (r: any) => String(r[category] || '').trim().toLowerCase() === newValue.toLowerCase()
+        && String(r[category] || '').trim() !== oldValue
+    );
+    if (collision) return c.json({ error: `"${newValue}" already exists in this list` }, 409);
+
+    // 1) update the lists row(s) holding the old value
+    const { error: listErr } = await supabase
+      .from('lists').update({ [category]: newValue }).eq(category, oldValue);
+    if (listErr) return c.json({ error: listErr.message }, 500);
+
+    // 2) cascade to consuming records (auto-update existing data)
+    let updatedRecords = 0;
+    const consumer = CATEGORY_CONSUMERS[category];
+    if (consumer) {
+      const { data: upd, error: cErr } = await supabase
+        .from(consumer.table).update({ [consumer.column]: newValue })
+        .eq(consumer.column, oldValue).select('row_id');
+      if (cErr) return c.json({ error: `lists renamed but record cascade failed: ${cErr.message}` }, 500);
+      updatedRecords = (upd || []).length;
+    }
+    return c.json({ ok: true, updatedRecords });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// GET usage count for a value (used by the UI before delete): ?category=&value=
+apiRoutes.get('/lists/usage', requireAdmin, async (c) => {
+  try {
+    const category = String(c.req.query('category') || '').trim();
+    const value = String(c.req.query('value') || '').trim();
+    if (!isValidCategory(category)) return c.json({ error: `Unknown category "${category}"` }, 400);
+    const used = await countUsage(category, value);
+    return c.json({ category, value, usage: used, scanned: !!CATEGORY_CONSUMERS[category] });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// DELETE an option: { category, value }. Blocks if still in use by records.
+apiRoutes.delete('/lists', requireAdmin, async (c) => {
+  try {
+    const body = await c.req.json();
+    const category = String(body.category || '').trim();
+    const value = String(body.value ?? '').trim();
+    if (!isValidCategory(category)) return c.json({ error: `Unknown category "${category}"` }, 400);
+    if (!value) return c.json({ error: 'Value is required' }, 400);
+
+    const used = await countUsage(category, value);
+    if (used > 0) {
+      return c.json({
+        error: `Cannot delete "${value}" — it is still used by ${used} record${used === 1 ? '' : 's'}. Rename or reassign those records first.`,
+        usage: used,
+      }, 409);
+    }
+
+    const { error } = await supabase.from('lists').delete().eq(category, value);
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
