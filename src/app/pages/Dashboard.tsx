@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth-context";
 import { useTheme } from "../lib/theme-context";
@@ -16,6 +16,7 @@ import {
   ACTION_STATUS_COMPLETE,
   needsReview,
   getReviewSteps,
+  REQUIRED_FOR_FINAL_REVIEW,
 } from "../lib/incidentWorkflow";
 import { useNavigate } from "react-router";
 import {
@@ -152,7 +153,7 @@ const XC_COLORS: Record<string, { bg: string; color: string }> = {
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = WORKFLOW_STATUS_COLORS;
 
 // ── Inline pill button for quick editing ─────────────────────────────────────
-function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident, role, isDark = false }: {
+function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident, role, isDark = false, table = "incidents" }: {
   value: string; options: string[];
   colorMap: Record<string, { bg: string; color: string }>;
   field: string; rowId: string;
@@ -160,6 +161,7 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident
   incident?: Record<string, any>;
   role?: 'admin' | 'sqm';
   isDark?: boolean;
+  table?: string;
 }) {
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
@@ -198,7 +200,7 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident
     if (field === "incident_status" && normalizeStatus(opt) === CLOSED_STATUS) {
       updates.action_status = ACTION_STATUS_COMPLETE;
     }
-    const { error } = await supabase.from("incidents").update(updates).eq("row_id", rowId);
+    const { error } = await supabase.from(table).update(updates).eq("row_id", rowId);
     if (!error) {
       onUpdated(rowId, field, opt);
       if (updates.action_status) onUpdated(rowId, "action_status", ACTION_STATUS_COMPLETE);
@@ -251,14 +253,109 @@ function QuickEdit({ value, options, colorMap, field, rowId, onUpdated, incident
   );
 }
 
+// ── Inline lookup pill (saves a stored value, displays a label) ──────────────
+// Like QuickEdit, but maps a stored value (which may be a row_id) to a display
+// label. Used for Event Category (stores text), Failure Type and Failed
+// Component (store row_ids). Includes a type-to-filter box for long lists.
+function QuickSelect({ value, options, field, rowId, onUpdated, isDark = false, placeholder = "— Select —", table = "incidents" }: {
+  value: string | null;
+  options: { value: string; label: string }[];
+  field: string; rowId: string;
+  onUpdated: (rowId: string, field: string, value: string) => void;
+  isDark?: boolean;
+  placeholder?: string;
+  table?: string;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+  const curLabel = options.find(o => o.value === value)?.label ?? null;
+  const pillBg = isDark ? "#334155" : "#f1f5f9";
+  const pillColor = curLabel ? (isDark ? "#e2e8f0" : "#334155") : (isDark ? "#94a3b8" : "#94a3b8");
+
+  const filtered = filter.trim()
+    ? options.filter(o => o.label.toLowerCase().includes(filter.trim().toLowerCase()))
+    : options;
+
+  const handleSelect = async (optValue: string) => {
+    if (optValue === value) { setOpen(false); return; }
+    setSaving(true);
+    setOpen(false);
+    setFilter("");
+    const { error } = await supabase.from(table).update({ [field]: optValue }).eq("row_id", rowId);
+    if (!error) {
+      onUpdated(rowId, field, optValue);
+    } else {
+      toast.error(error.message || "Failed to update");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <button
+        onClick={() => { setOpen(o => !o); setFilter(""); }}
+        disabled={saving}
+        style={{
+          padding: "3px 10px", borderRadius: 20, border: "none", cursor: saving ? "wait" : "pointer",
+          fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis",
+          background: pillBg, color: pillColor,
+          opacity: saving ? 0.6 : 1, transition: "opacity 0.15s",
+        }}
+      >
+        {saving ? "…" : (curLabel || placeholder)}
+        <span style={{ marginLeft: 4, opacity: 0.6 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 9999,
+          background: isDark ? "#1e293b" : "#fff", border: `1px solid ${isDark ? "#334155" : "#e2e8f0"}`, borderRadius: 8,
+          boxShadow: isDark ? "0 4px 16px rgba(0,0,0,0.5)" : "0 4px 16px rgba(0,0,0,0.12)", minWidth: 220, maxHeight: 300, overflow: "hidden", display: "flex", flexDirection: "column",
+        }}>
+          {options.length > 6 && (
+            <input
+              autoFocus
+              value={filter}
+              placeholder="Filter…"
+              onChange={e => setFilter(e.target.value)}
+              style={{
+                margin: 8, padding: "6px 8px", fontSize: 12, borderRadius: 6,
+                border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`, outline: "none",
+                background: isDark ? "#0f172a" : "#fff", color: isDark ? "#f1f5f9" : "#0f172a",
+              }}
+            />
+          )}
+          <div style={{ overflowY: "auto" }}>
+            {filtered.length === 0 && (
+              <div style={{ padding: "10px 12px", fontSize: 12, color: isDark ? "#94a3b8" : "#64748b" }}>No matches</div>
+            )}
+            {filtered.map(opt => (
+              <button key={opt.value} onClick={() => handleSelect(opt.value)} style={{
+                display: "block", width: "100%", textAlign: "left",
+                padding: "8px 12px", border: "none", cursor: "pointer",
+                fontSize: 12, fontWeight: opt.value === value ? 700 : 400,
+                background: opt.value === value ? (isDark ? "#334155" : "#f8fafc") : (isDark ? "#1e293b" : "#fff"),
+                color: isDark ? "#f1f5f9" : "#0f172a",
+                borderLeft: opt.value === value ? "3px solid #3b82f6" : "3px solid transparent",
+              }}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Inline free-text editor (saves on blur) ──────────────────────────────────
 // Used for gated text fields (root cause, product line) so the reviewer can
 // fix them without leaving the modal. Lookups (failed component, failure type)
 // stay in the full editor and are surfaced via the checklist instead.
-function InlineText({ value, field, rowId, onUpdated, isDark, placeholder, multiline }: {
+function InlineText({ value, field, rowId, onUpdated, isDark, placeholder, multiline, table = "incidents" }: {
   value: string; field: string; rowId: string;
   onUpdated: (rowId: string, field: string, value: string) => void;
-  isDark: boolean; placeholder?: string; multiline?: boolean;
+  isDark: boolean; placeholder?: string; multiline?: boolean; table?: string;
 }) {
   const [val, setVal] = useState(value ?? "");
   const [saving, setSaving] = useState(false);
@@ -268,7 +365,7 @@ function InlineText({ value, field, rowId, onUpdated, isDark, placeholder, multi
     const next = val.trim();
     if (next === (value ?? "").trim()) return;
     setSaving(true);
-    const { error } = await supabase.from("incidents").update({ [field]: next }).eq("row_id", rowId);
+    const { error } = await supabase.from(table).update({ [field]: next }).eq("row_id", rowId);
     setSaving(false);
     if (error) { toast.error(error.message || "Failed to save"); setVal(value ?? ""); return; }
     onUpdated(rowId, field, next);
@@ -294,11 +391,14 @@ function InlineText({ value, field, rowId, onUpdated, isDark, placeholder, multi
 // Incident Detail page so both render the identical ordered checklist).
 
 // ── Full incident popup modal ─────────────────────────────────────────────────
-function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, onUpdated, onMarkReviewed, role, isDark = false }: {
+function IncidentModal({ incident, listMap, componentsMap, vendorMap, eventCategoryOpts, failureTypeOpts, failedComponentOpts, onClose, onUpdated, onMarkReviewed, role, isDark = false }: {
   incident: any;
   listMap: Record<string, any>;
   componentsMap: Record<string, { failed_component: string }>;
   vendorMap: Record<string, string>;
+  eventCategoryOpts: string[];
+  failureTypeOpts: { row_id: string; label: string }[];
+  failedComponentOpts: { row_id: string; label: string }[];
   onClose: () => void;
   onUpdated: (rowId: string, field: string, value: string) => void;
   onMarkReviewed: (inc: any) => Promise<void> | void;
@@ -323,6 +423,40 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
   const { user } = useAuth();
 
   const goToFullEditor = () => navigate(`/incidents/${r.row_id}`);
+
+  // Scroll container for the modal body so we can jump to a field's editor.
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  // Map a "Missing: <label>" entry from the checklist to the data-field key on
+  // its editor in the modal. Labels come from REQUIRED_FOR_FINAL_REVIEW; the
+  // extra "Vendor" label (added when vendor_caused=Yes) maps to the vendor
+  // reference which only lives in the full editor.
+  const labelToFieldKey = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const f of REQUIRED_FOR_FINAL_REVIEW) m[f.label] = f.key;
+    return m;
+  }, []);
+
+  // Clickable-missing-field handler: scroll the field's editor into view and
+  // focus its first input/button. For fields that aren't editable in the modal
+  // (e.g. Vendor), fall back to opening the full editor.
+  const handleFocusField = (label: string) => {
+    const key = labelToFieldKey[label];
+    if (!key) { goToFullEditor(); return; }
+    const el = bodyRef.current?.querySelector<HTMLElement>(`[data-field="${key}"]`)
+      // vendor_caused lives in the header quick-edit row (outside bodyRef).
+      ?? document.querySelector<HTMLElement>(`[data-field="${key}"]`);
+    if (!el) { goToFullEditor(); return; }
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Brief highlight so the user sees where they landed.
+    const prevOutline = el.style.outline;
+    el.style.outline = "2px solid #3b82f6";
+    el.style.outlineOffset = "3px";
+    el.style.borderRadius = "8px";
+    setTimeout(() => { el.style.outline = prevOutline; el.style.outlineOffset = ""; }, 1600);
+    const focusable = el.querySelector<HTMLElement>("input, textarea, button");
+    focusable?.focus();
+  };
 
   const handleReview = async () => {
     setBusy(true);
@@ -392,7 +526,7 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
 
         {/* Quick-edit row */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "12px 20px", background: isDark ? "#0f172a" : "#f8fafc", borderBottom: `1px solid ${isDark ? "#334155" : "#e2e8f0"}` }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }} data-field="xc_caused">
             <span style={modal.qLabel}>XC Caused</span>
             <QuickEdit value={r.xc_caused || "—"} options={XC_CAUSED_OPTS} colorMap={XC_COLORS} field="xc_caused" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} />
           </div>
@@ -404,16 +538,16 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
             <span style={modal.qLabel}>Status</span>
             <QuickEdit value={normalizeStatus(r.incident_status) || "—"} options={STATUS_OPTS} colorMap={STATUS_COLORS} field="incident_status" rowId={r.row_id} onUpdated={onUpdated} incident={r} role={role} isDark={isDark} />
           </div>
-          {r.vendor_caused !== null && r.vendor_caused !== undefined && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={modal.qLabel}>Vendor Caused</span>
-              <QuickEdit value={r.vendor_caused || "—"} options={VENDOR_CAUSED_OPTS} colorMap={{ Yes: { bg: "#dc2626", color: "#fff" }, No: { bg: isDark ? "#334155" : "#f1f5f9", color: isDark ? "#cbd5e1" : "#475569" }, "Pending Investigation": { bg: "#fef9c3", color: "#854d0e" } }} field="vendor_caused" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} />
-            </div>
-          )}
+          {/* Vendor Caused is a REQUIRED field — always render so it can be set
+              even when currently null. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }} data-field="vendor_caused">
+            <span style={modal.qLabel}>Vendor Caused</span>
+            <QuickEdit value={r.vendor_caused || "—"} options={VENDOR_CAUSED_OPTS} colorMap={{ Yes: { bg: "#dc2626", color: "#fff" }, No: { bg: isDark ? "#334155" : "#f1f5f9", color: isDark ? "#cbd5e1" : "#475569" }, "Pending Investigation": { bg: "#fef9c3", color: "#854d0e" } }} field="vendor_caused" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} />
+          </div>
         </div>
 
         {/* Scrollable content */}
-        <div style={modal.body}>
+        <div style={modal.body} ref={bodyRef}>
           {/* Ordered review checklist + last-task gating. Hidden once the
               incident is fully closed (all steps complete). */}
           {!reviewSteps.every(s => s.done) && (
@@ -425,6 +559,11 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
               onSendToCustomer={handleSend}
               onCloseIncident={handleCloseIncident}
               busy={busy}
+              onFocusField={role ? handleFocusField : undefined}
+              actionNotes={{
+                generate: "Marks the report as generated so the send step unlocks. Build the actual PDF on the full incident page.",
+                sent: "Opens the full incident page to email the report + attachment to the customer.",
+              }}
             />
           )}
 
@@ -443,11 +582,20 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
             {r.xc_rep        && <InfoItem label="XC Rep"          value={r.xc_rep} isDark={isDark} />}
             {r.customer_rep  && <InfoItem label="Customer Rep"    value={r.customer_rep} isDark={isDark} />}
             {r.ep_rep        && <InfoItem label="EP Rep"          value={r.ep_rep} isDark={isDark} />}
-            {r.event_category && <InfoItem label="Category"       value={r.event_category} isDark={isDark} />}
+            {/* Event Category is a REQUIRED lookup — quick-editable in place
+                (stores the text value directly). */}
+            <div data-field="event_category">
+              <div style={modal.gridLabel}>Category</div>
+              {role ? (
+                <QuickSelect value={r.event_category || null} options={eventCategoryOpts.map(v => ({ value: v, label: v }))} field="event_category" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} />
+              ) : (
+                <div style={{ fontSize: 13, color: isDark ? "#f1f5f9" : "#0f172a" }}>{r.event_category || "—"}</div>
+              )}
+            </div>
             {/* Product Line is a gated field — inline-editable so the reviewer
                 can fill/fix it without leaving the modal. */}
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Product Line</div>
+            <div data-field="product_line">
+              <div style={modal.gridLabel}>Product Line</div>
               {role ? (
                 <InlineText value={r.product_line || ""} field="product_line" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} placeholder="Enter product line…" />
               ) : (
@@ -459,8 +607,26 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
             {r.well_name     && <InfoItem label="Well Name"       value={r.well_name} isDark={isDark} />}
             {r['stage#']     && <InfoItem label="Stage #"         value={r['stage#']} isDark={isDark} />}
             {r['so#']        && <InfoItem label="SO #"            value={r['so#']} isDark={isDark} />}
-            {failedComp      && <InfoItem label="Failed Component" value={failedComp} isDark={isDark} />}
-            {failureType     && <InfoItem label="Failure Type"    value={failureType} isDark={isDark} />}
+            {/* Failed Component is a REQUIRED lookup — quick-editable in place
+                (stores components.row_id, displays the label). */}
+            <div data-field="failed_component">
+              <div style={modal.gridLabel}>Failed Component</div>
+              {role ? (
+                <QuickSelect value={r.failed_component || null} options={failedComponentOpts.map(o => ({ value: o.row_id, label: o.label }))} field="failed_component" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} />
+              ) : (
+                <div style={{ fontSize: 13, color: isDark ? "#f1f5f9" : "#0f172a" }}>{failedComp || "—"}</div>
+              )}
+            </div>
+            {/* Failure Type is a REQUIRED lookup — quick-editable in place
+                (stores lists.row_id, displays the label). */}
+            <div data-field="failure_type">
+              <div style={modal.gridLabel}>Failure Type</div>
+              {role ? (
+                <QuickSelect value={r.failure_type || null} options={failureTypeOpts.map(o => ({ value: o.row_id, label: o.label }))} field="failure_type" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} />
+              ) : (
+                <div style={{ fontSize: 13, color: isDark ? "#f1f5f9" : "#0f172a" }}>{failureType || "—"}</div>
+              )}
+            </div>
             {vendorName      && <InfoItem label="Vendor"          value={vendorName} isDark={isDark} />}
           </div>
 
@@ -478,7 +644,7 @@ function IncidentModal({ incident, listMap, componentsMap, vendorMap, onClose, o
 
           {/* Root Cause is a gated field — always shown and inline-editable so a
               missing conclusion can be filled in during review. */}
-          <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 14 }} data-field="root_cause">
             <div style={modal.blockLabel}>Root Cause / Conclusion</div>
             {role ? (
               <InlineText value={r.root_cause || ""} field="root_cause" rowId={r.row_id} onUpdated={onUpdated} isDark={isDark} placeholder="Enter the root cause / conclusion…" multiline />
@@ -531,11 +697,187 @@ function makeModal(isDark: boolean): Record<string, React.CSSProperties> {
   box: { background: isDark ? "#1e293b" : "#fff", borderRadius: 16, width: "100%", maxWidth: 740, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.45)", overflow: "hidden" },
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: `1px solid ${border}` },
   qLabel: { fontSize: 11, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8" },
+  gridLabel: { fontSize: 11, fontWeight: 600, color: isDark ? "#64748b" : "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 },
   body: { overflowY: "auto", padding: 20, flex: 1 },
   grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px", marginBottom: 20, padding: 14, background: innerBg, borderRadius: 8 },
   blockLabel: { fontSize: 12, fontWeight: 700, color: isDark ? "#cbd5e1" : "#334155", marginBottom: 4 },
   blockText: { fontSize: 13, color: isDark ? "#cbd5e1" : "#475569", background: innerBg, padding: "10px 12px", borderRadius: 6, whiteSpace: "pre-wrap", lineHeight: 1.6 },
   };
+}
+
+// ── Lightweight panel quick-edit modal ───────────────────────────────────────
+// Mirrors IncidentModal: lets an admin fix the fields that land a panel on the
+// "Panels Needing Attention" board (assignment info, verified flag, etc.)
+// without leaving the dashboard. Customer/District are cascading lookups, so
+// they're loaded inside the modal. Anything not surfaced here is reachable via
+// "Open full panel".
+const PANEL_STATUS_OPTS = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold'];
+const PANEL_STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+  "At Facility": { bg: "#dbeafe", color: "#1e40af" },
+  "Leased":      { bg: "#dcfce7", color: "#166534" },
+  "In Repair":   { bg: "#ffedd5", color: "#9a3412" },
+  "Loaned":      { bg: "#fef9c3", color: "#854d0e" },
+  "Sold":        { bg: "#f1f5f9", color: "#475569" },
+};
+const YN_COLORS: Record<string, { bg: string; color: string }> = {
+  Y:   { bg: "#dcfce7", color: "#166534" },
+  N:   { bg: "#fee2e2", color: "#991b1b" },
+  Yes: { bg: "#dcfce7", color: "#166534" },
+  No:  { bg: "#fee2e2", color: "#991b1b" },
+};
+
+function PanelModal({ panel, onClose, onUpdated, isDark = false }: {
+  panel: any;
+  onClose: () => void;
+  onUpdated: (rowId: string, field: string, value: string) => void;
+  isDark?: boolean;
+}) {
+  const p = panel;
+  const navigate = useNavigate();
+  const modal = makeModal(isDark);
+  const txtSubtle = isDark ? "#94a3b8" : "#64748b";
+
+  // Cascading customer → district lookups (mirrors PanelDetail).
+  const [customers, setCustomers] = useState<{ row_id: string; customer: string }[]>([]);
+  const [districts, setDistricts] = useState<{ row_id: string; customer_district: string }[]>([]);
+  const [epCompanies, setEpCompanies] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      supabase.from("customers").select("row_id,customer").order("customer"),
+      supabase.from("ep").select("operating_company").order("operating_company"),
+    ]).then(([c, e]) => {
+      if (cancelled) return;
+      setCustomers((c.data as any) || []);
+      setEpCompanies(((e.data as any) || []).map((r: any) => r.operating_company).filter(Boolean));
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Districts cascade off the panel's currently-stored customer.
+  useEffect(() => {
+    let cancelled = false;
+    const custId = p.customer;
+    if (!custId) { setDistricts([]); return; }
+    supabase.from("districts").select("row_id,customer_district").eq("customer", custId).order("customer_district")
+      .then(({ data }) => { if (!cancelled) setDistricts((data as any) || []); });
+    return () => { cancelled = true; };
+  }, [p.customer]);
+
+  const reasons = panelAttentionReasons(p);
+  const isAssigned = ATTENTION_ASSIGN_STATUSES.includes(p.panel_status);
+  const statusCfg = PANEL_STATUS_COLORS[p.panel_status] ?? { bg: isDark ? "#334155" : "#f1f5f9", color: isDark ? "#cbd5e1" : "#475569" };
+
+  // When the customer changes, the stored district may no longer belong to it —
+  // clear it so the user reselects from the cascaded list. Handled via onUpdated.
+  const handleCustomerChange = (rowId: string, field: string, value: string) => {
+    onUpdated(rowId, field, value);
+    if (p.customer_district) onUpdated(rowId, "customer_district", "");
+    // Best-effort clear of the now-orphaned district in the DB too.
+    supabase.from("panels").update({ customer_district: null }).eq("row_id", rowId).then(() => {});
+  };
+
+  const customerLabel = customers.find(c => c.row_id === p.customer)?.customer || null;
+
+  return (
+    <div style={modal.overlay} onClick={onClose}>
+      <div style={modal.box} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={modal.header}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 18, fontWeight: 700, color: "#0ea5e9" }}>{p.serial_number}</span>
+            {p.panel_type && <span style={{ fontSize: 13, color: txtSubtle }}>{p.panel_type}</span>}
+            <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 10px", borderRadius: 20, background: statusCfg.bg, color: statusCfg.color }}>{p.panel_status || "—"}</span>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: txtSubtle, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {/* Quick-edit row */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "12px 20px", background: isDark ? "#0f172a" : "#f8fafc", borderBottom: `1px solid ${isDark ? "#334155" : "#e2e8f0"}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }} data-field="panel_status">
+            <span style={modal.qLabel}>Status</span>
+            <QuickEdit value={p.panel_status || "—"} options={PANEL_STATUS_OPTS} colorMap={PANEL_STATUS_COLORS} field="panel_status" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} table="panels" />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }} data-field="verified">
+            <span style={modal.qLabel}>Verified</span>
+            <QuickEdit value={p.verified || "—"} options={['Y', 'N']} colorMap={YN_COLORS} field="verified" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} table="panels" />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }} data-field="is_spare">
+            <span style={modal.qLabel}>Spare</span>
+            <QuickEdit value={p.is_spare || "—"} options={['Yes', 'No']} colorMap={YN_COLORS} field="is_spare" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} table="panels" />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }} data-field="activity">
+            <span style={modal.qLabel}>Activity</span>
+            <QuickEdit value={p.activity || "—"} options={['Y', 'N']} colorMap={YN_COLORS} field="activity" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} table="panels" />
+          </div>
+        </div>
+
+        {/* Scrollable content */}
+        <div style={modal.body}>
+          {/* Live attention checklist — what still needs fixing. */}
+          {reasons.length > 0 ? (
+            <div style={{ margin: "0 0 16px", border: `1px solid ${isDark ? "#78350f" : "#fed7aa"}`, borderRadius: 10, background: isDark ? "#1c1207" : "#fff7ed", padding: "12px 14px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: isDark ? "#fdba74" : "#9a3412", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>Needs Attention</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {reasons.map((rsn, i) => (
+                  <span key={i} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20, background: isDark ? "#7c2d12" : "#ffedd5", color: isDark ? "#fdba74" : "#9a3412" }}>{rsn}</span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ margin: "0 0 16px", border: `1px solid ${isDark ? "#14532d" : "#bbf7d0"}`, borderRadius: 10, background: isDark ? "#052e16" : "#f0fdf4", padding: "12px 14px", fontSize: 13, fontWeight: 600, color: isDark ? "#86efac" : "#166534" }}>
+              ✓ All clear — this panel meets every requirement.
+            </div>
+          )}
+
+          {/* Open full panel for any field not editable here (firmware, history, etc.). */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+            <button onClick={() => navigate(`/panels/${p.row_id}`)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${isDark ? "#475569" : "#cbd5e1"}`, background: isDark ? "#334155" : "#fff", color: isDark ? "#e2e8f0" : "#334155", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+              ✎ Open full panel ↗
+            </button>
+          </div>
+
+          {/* Editable fields. Assignment fields (Customer/District/Operating Co./
+              Unit #/SO #) are only required when the panel is Leased/Loaned/Sold,
+              but we always show them so they can be filled proactively. */}
+          <div style={modal.grid}>
+            <div data-field="unit_number">
+              <div style={modal.gridLabel}>Unit #</div>
+              <InlineText value={p.unit_number || ""} field="unit_number" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} placeholder="Enter unit #…" table="panels" />
+            </div>
+            <div data-field="so#">
+              <div style={modal.gridLabel}>SO #</div>
+              <InlineText value={p["so#"] || ""} field="so#" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} placeholder="Enter SO #…" table="panels" />
+            </div>
+            <div data-field="customer">
+              <div style={modal.gridLabel}>Customer</div>
+              <QuickSelect value={p.customer || null} options={customers.map(c => ({ value: c.row_id, label: c.customer }))} field="customer" rowId={p.row_id} onUpdated={handleCustomerChange} isDark={isDark} table="panels" placeholder={customerLabel ? undefined : "— Select customer —"} />
+            </div>
+            <div data-field="customer_district">
+              <div style={modal.gridLabel}>District</div>
+              {p.customer ? (
+                <QuickSelect value={p.customer_district || null} options={districts.map(d => ({ value: d.row_id, label: d.customer_district }))} field="customer_district" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} table="panels" placeholder="— Select district —" />
+              ) : (
+                <div style={{ fontSize: 12, color: txtSubtle, fontStyle: "italic", paddingTop: 4 }}>Select a customer first</div>
+              )}
+            </div>
+            <div data-field="operating_company">
+              <div style={modal.gridLabel}>Operating Co.</div>
+              <QuickSelect value={p.operating_company || null} options={epCompanies.map(v => ({ value: v, label: v }))} field="operating_company" rowId={p.row_id} onUpdated={onUpdated} isDark={isDark} table="panels" placeholder="— Select operating co. —" />
+            </div>
+            {p.last_seen_date && <InfoItem label="Last Seen" value={new Date(p.last_seen_date).toLocaleDateString()} isDark={isDark} />}
+          </div>
+
+          {!isAssigned && (
+            <div style={{ fontSize: 11.5, color: txtSubtle, marginTop: -6 }}>
+              Customer assignment fields become required when the panel is Leased, Loaned, or Sold.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
@@ -601,9 +943,16 @@ export default function Dashboard() {
   const [listMap,        setListMap]        = useState<Record<string, any>>({});
   const [componentsMap,  setComponentsMap]  = useState<Record<string, { failed_component: string }>>({});
   const [vendorMap,      setVendorMap]      = useState<Record<string, string>>({});
+  // Quick-edit option arrays for the in-modal lookup pills (Phase 1).
+  // event_category stores the TEXT value; failure_type / failed_component store row_ids.
+  const [eventCategoryOpts,  setEventCategoryOpts]  = useState<string[]>([]);
+  const [failureTypeOpts,    setFailureTypeOpts]    = useState<{ row_id: string; label: string }[]>([]);
+  const [failedComponentOpts, setFailedComponentOpts] = useState<{ row_id: string; label: string }[]>([]);
 
   // Modal
   const [modalIncident,  setModalIncident]  = useState<any | null>(null);
+  // Panel quick-edit modal (opened from "Panels Needing Attention").
+  const [modalPanel,     setModalPanel]     = useState<any | null>(null);
 
   // ── Enrich incidents with resolved names ────────────────────────────────────
   const enriched = useMemo(() => incidents
@@ -623,6 +972,18 @@ export default function Dashboard() {
     setIncidents(prev => prev.map(i => i.row_id === rowId ? { ...i, [field]: value } : i));
     if (modalIncident?.row_id === rowId) setModalIncident((prev: any) => ({ ...prev, [field]: value }));
   }, [modalIncident]);
+
+  // ── Panel inline update handler (optimistic) ───────────────────────────────
+  // Updates the open panel modal and re-evaluates the attention reasons live so
+  // the "Needs Attention" list + checklist reflect each fix immediately.
+  const handlePanelUpdated = useCallback((rowId: string, field: string, value: string) => {
+    setAttentionPanels(prev => prev.map((x: any) => {
+      if (x.panel.row_id !== rowId) return x;
+      const nextPanel = { ...x.panel, [field]: value };
+      return { panel: nextPanel, reasons: panelAttentionReasons(nextPanel) };
+    }));
+    if (modalPanel?.row_id === rowId) setModalPanel((prev: any) => ({ ...prev, [field]: value }));
+  }, [modalPanel]);
 
   // ── Director review: one-click acknowledge ─────────────────────────────────
   // Stamps reviewed_by + reviewed_at so the incident leaves the review queue
@@ -681,7 +1042,7 @@ export default function Dashboard() {
       ] = await Promise.all([
         supabase.from("customers").select("row_id,customer"),
         supabase.from("districts").select("row_id,customer_district"),
-        supabase.from("lists").select("row_id,failed_component,failure_type"),
+        supabase.from("lists").select("row_id,failed_component,failure_type,event_category"),
         supabase.from("vendors").select("row_id,vendor"),
         supabase.from("components").select("row_id,failed_component"),
       ]);
@@ -702,6 +1063,29 @@ export default function Dashboard() {
       const vm: Record<string, string> = {};
       (vends || []).forEach((v: any) => { vm[v.row_id] = v.vendor; });
       setVendorMap(vm);
+
+      // Build quick-edit option arrays from the same reference tables.
+      // Event Category: distinct text values from lists.event_category.
+      setEventCategoryOpts(
+        Array.from(new Set((lists || []).map((l: any) => l.event_category).filter((v: any): v is string => !!v))).sort()
+      );
+      // Failure Type: {row_id,label} deduped by label (mirrors IncidentForm).
+      setFailureTypeOpts(
+        Array.from(
+          new Map(
+            (lists || [])
+              .filter((l: any) => l.failure_type)
+              .map((l: any) => [l.failure_type as string, { row_id: l.row_id as string, label: l.failure_type as string }] as const)
+          ).values()
+        ).sort((a, b) => a.label.localeCompare(b.label))
+      );
+      // Failed Component: {row_id,label} from components, sorted by label.
+      setFailedComponentOpts(
+        (comps || [])
+          .filter((c: any) => c.row_id && c.failed_component)
+          .map((c: any) => ({ row_id: c.row_id as string, label: c.failed_component as string }))
+          .sort((a, b) => a.label.localeCompare(b.label))
+      );
     }
     loadRefs();
   }, []);
@@ -990,7 +1374,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-                <button onClick={() => navigate(`/panels/${p.row_id}`)} style={{ padding: "4px 12px", borderRadius: 6, border: `1px solid ${isDark ? "#475569" : "#e2e8f0"}`, background: isDark ? "#334155" : "#fff", cursor: "pointer", fontSize: 11, color: isDark ? "#cbd5e1" : "#475569", fontWeight: 600, whiteSpace: "nowrap" }}>Open →</button>
+                <button onClick={() => setModalPanel(p)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", background: "#ea580c", cursor: "pointer", fontSize: 11, color: "#fff", fontWeight: 600, whiteSpace: "nowrap" }}>Quick fix →</button>
               </div>
             ))}
           </div>
@@ -1254,10 +1638,23 @@ export default function Dashboard() {
           listMap={listMap}
           componentsMap={componentsMap}
           vendorMap={vendorMap}
+          eventCategoryOpts={eventCategoryOpts}
+          failureTypeOpts={failureTypeOpts}
+          failedComponentOpts={failedComponentOpts}
           onClose={() => setModalIncident(null)}
           onUpdated={handleUpdated}
           onMarkReviewed={handleMarkReviewed}
           role={role}
+          isDark={isDark}
+        />
+      )}
+
+      {/* ── Panel Quick-Edit Modal ── */}
+      {modalPanel && (
+        <PanelModal
+          panel={attentionPanels.find((x: any) => x.panel.row_id === modalPanel.row_id)?.panel ?? modalPanel}
+          onClose={() => setModalPanel(null)}
+          onUpdated={handlePanelUpdated}
           isDark={isDark}
         />
       )}

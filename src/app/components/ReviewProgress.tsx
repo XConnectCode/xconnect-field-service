@@ -20,6 +20,18 @@ export interface ReviewProgressProps {
   onSendToCustomer: () => void;
   onCloseIncident: () => void;
   busy: boolean;
+  /**
+   * Optional: when provided, each "Missing" field label becomes a clickable
+   * chip that asks the host (the incident modal) to scroll to + focus that
+   * field's editor. The label string matches REQUIRED_FOR_FINAL_REVIEW labels.
+   */
+  onFocusField?: (label: string) => void;
+  /**
+   * Optional per-step helper notes keyed by step id (e.g. 'generate', 'sent').
+   * The Dashboard modal uses these to warn that a step opens the full incident
+   * page; the Incident Detail page (already on that page) omits them.
+   */
+  actionNotes?: Partial<Record<string, string>>;
 }
 
 export default function ReviewProgress({
@@ -30,6 +42,8 @@ export default function ReviewProgress({
   onSendToCustomer,
   onCloseIncident,
   busy,
+  onFocusField,
+  actionNotes,
 }: ReviewProgressProps) {
   const txtPrimary = isDark ? '#f1f5f9' : '#0f172a';
   const txtSubtle = isDark ? '#94a3b8' : '#64748b';
@@ -69,10 +83,41 @@ export default function ReviewProgress({
                     <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 20, background: '#3b82f6', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Next</span>
                   )}
                 </div>
-                {/* Missing-field detail for the fields step. */}
+                {/* Missing-field detail for the fields step. When onFocusField
+                    is provided, each missing field is a clickable chip that
+                    jumps to + focuses its editor in the modal. */}
                 {s.id === 'fields' && !s.done && s.missing.length > 0 && (
-                  <div style={{ fontSize: 11.5, color: isDark ? '#fca5a5' : '#b91c1c', marginTop: 3, lineHeight: 1.5 }}>
-                    Missing: {s.missing.join(', ')}
+                  onFocusField ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11.5, color: isDark ? '#fca5a5' : '#b91c1c', fontWeight: 600 }}>Missing:</span>
+                      {s.missing.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => onFocusField(m)}
+                          title={`Fill in ${m}`}
+                          style={{
+                            fontSize: 11, fontWeight: 600, padding: '2px 9px', borderRadius: 20, cursor: 'pointer',
+                            border: `1px solid ${isDark ? '#7f1d1d' : '#fecaca'}`,
+                            background: isDark ? '#450a0a' : '#fef2f2',
+                            color: isDark ? '#fca5a5' : '#b91c1c',
+                          }}
+                        >
+                          {m} →
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11.5, color: isDark ? '#fca5a5' : '#b91c1c', marginTop: 3, lineHeight: 1.5 }}>
+                      Missing: {s.missing.join(', ')}
+                    </div>
+                  )
+                )}
+                {/* Host-provided helper note for an actionable step (e.g. that
+                    Send to Customer opens the full incident page). */}
+                {!s.done && s.actionable && s.allowedForRole && actionNotes?.[s.id] && (
+                  <div style={{ fontSize: 11.5, color: txtSubtle, marginTop: 3, lineHeight: 1.5, fontStyle: 'italic' }}>
+                    {actionNotes[s.id]}
                   </div>
                 )}
                 {/* Why this step is blocked. */}
