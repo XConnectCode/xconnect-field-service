@@ -4,13 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
-import { ArrowLeft, CheckCircle2, Save, ExternalLink } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Save, ExternalLink, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../lib/auth-context';
+import { supabase } from '../lib/supabase';
 import {
   getSession, updateSession,
   type ChecklistSession, type ChecklistStepResult,
 } from '../lib/trainingChecklists';
+import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
 
 export default function TrainingChecklistSession() {
   const { id } = useParams();
@@ -21,6 +23,7 @@ export default function TrainingChecklistSession() {
   const [session, setSession] = useState<ChecklistSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   // editable fields
   const [steps, setSteps] = useState<ChecklistStepResult[]>([]);
@@ -51,6 +54,37 @@ export default function TrainingChecklistSession() {
 
   const toggleStep = (stepId: string) => {
     setSteps((prev) => prev.map((r) => (r.id === stepId ? { ...r, done: !r.done } : r)));
+  };
+
+  const handleGenerateReport = async () => {
+    if (!session) return;
+    setGenerating(true);
+    try {
+      // Persist the latest in-memory edits into a session snapshot so the PDF
+      // reflects what the SQM currently sees (without forcing a DB save).
+      const snapshot: ChecklistSession = {
+        ...session,
+        step_results: steps,
+        customer: customer.trim() || session.customer,
+        location: location.trim() || session.location,
+        notes: notes.trim() || null,
+        signoff_name: signoff.trim() || null,
+      };
+      // Pull the full linked field visit (if any) for the visit-details section.
+      let visit: Record<string, any> | null = null;
+      if (session.field_visit_id) {
+        const { data } = await supabase
+          .from('fieldvisits')
+          .select('*')
+          .eq('field_visit_id', session.field_visit_id)
+          .maybeSingle();
+        visit = data || null;
+      }
+      await generateTrainingVisitReportPDF({ visit, session: snapshot });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate report');
+    }
+    setGenerating(false);
   };
 
   const doneCount = steps.filter((s) => s.done).length;
@@ -116,9 +150,14 @@ export default function TrainingChecklistSession() {
                   )}
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{doneCount}/{total}</div>
-                <div className="text-xs text-gray-500 uppercase tracking-wide">steps complete</div>
+              <div className="flex items-start gap-4">
+                <div className="text-right">
+                  <div className="text-3xl font-bold text-gray-900 dark:text-gray-100">{doneCount}/{total}</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">steps complete</div>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleGenerateReport} disabled={generating}>
+                  <FileDown className="w-4 h-4 mr-2" />{generating ? 'Generating...' : 'Download Report'}
+                </Button>
               </div>
             </div>
             {session.field_visit_id && (

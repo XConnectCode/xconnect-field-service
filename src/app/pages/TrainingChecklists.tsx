@@ -12,8 +12,10 @@ import { toast } from 'sonner';
 import { useAuth } from '../lib/auth-context';
 import {
   listTemplates, listSessions, startSession, deleteSession, listTrainingVisits,
+  listCustomers, listDistrictsForCustomer, getVisitAutofill,
   isMissingTableError,
   type ChecklistTemplate, type ChecklistSession,
+  type CustomerOption, type DistrictOption,
 } from '../lib/trainingChecklists';
 
 export default function TrainingChecklists() {
@@ -32,35 +34,59 @@ export default function TrainingChecklists() {
   const [showStart, setShowStart] = useState(false);
   const [starting, setStarting] = useState(false);
   const [trainingVisits, setTrainingVisits] = useState<Array<{ field_visit_id: string; customer: string | null; arrival_date: string | null }>>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [districts, setDistricts] = useState<DistrictOption[]>([]);
   const [startForm, setStartForm] = useState({
-    templateId: '', customer: '', location: '', fieldVisitId: '',
+    templateId: '', customer: '', customerDistrict: '', location: '', fieldVisitId: '',
   });
 
   useEffect(() => { fetchAll(); }, []);
 
-  // Deep-link: /training-checklists?start=1&fieldVisitId=...&customer=...
+  // Deep-link: /training-checklists?start=1&fieldVisitId=...
+  // Customer/district/location are auto-filled by the visit effect below.
   useEffect(() => {
     if (searchParams.get('start') === '1') {
       setStartForm((s) => ({
         ...s,
         fieldVisitId: searchParams.get('fieldVisitId') || '',
-        customer: searchParams.get('customer') || s.customer,
       }));
       setShowStart(true);
     }
   }, [searchParams]);
 
+  // Cascade districts off the selected customer (mirrors FieldVisitForm).
+  useEffect(() => {
+    if (!startForm.customer) { setDistricts([]); return; }
+    listDistrictsForCustomer(startForm.customer).then(setDistricts);
+  }, [startForm.customer]);
+
+  // Auto-fill customer / district / location from the linked field visit.
+  useEffect(() => {
+    if (!startForm.fieldVisitId) return;
+    getVisitAutofill(startForm.fieldVisitId).then((v) => {
+      if (!v) return;
+      setStartForm((s) => ({
+        ...s,
+        customer: v.customer || s.customer,
+        customerDistrict: v.customer_district || s.customerDistrict,
+        location: v.location || s.location,
+      }));
+    });
+  }, [startForm.fieldVisitId]);
+
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [tpls, sess, visits] = await Promise.all([
+      const [tpls, sess, visits, custs] = await Promise.all([
         listTemplates(false),
         listSessions(),
         listTrainingVisits(),
+        listCustomers(),
       ]);
       setTemplates(tpls);
       setSessions(sess);
       setTrainingVisits(visits);
+      setCustomers(custs);
       setTableMissing(false);
     } catch (err: any) {
       if (isMissingTableError(err)) setTableMissing(true);
@@ -72,12 +98,14 @@ export default function TrainingChecklists() {
   const handleStart = async () => {
     const tpl = templates.find((t) => t.id === startForm.templateId);
     if (!tpl) { toast.error('Pick a checklist template'); return; }
+    if (!startForm.customer) { toast.error('Select a customer'); return; }
     setStarting(true);
     try {
       const session = await startSession({
         template: tpl,
         fieldVisitId: startForm.fieldVisitId || null,
-        customer: startForm.customer.trim() || null,
+        customer: startForm.customer || null,
+        customerDistrict: startForm.customerDistrict || null,
         location: startForm.location.trim() || null,
         trainerName: user?.name || null,
         trainerId: user?.id || null,
@@ -85,7 +113,7 @@ export default function TrainingChecklists() {
       });
       toast.success('Training session started');
       setShowStart(false);
-      setStartForm({ templateId: '', customer: '', location: '', fieldVisitId: '' });
+      setStartForm({ templateId: '', customer: '', customerDistrict: '', location: '', fieldVisitId: '' });
       navigate(`/training-checklists/session/${session.id}`);
     } catch (err: any) {
       toast.error(err?.message || 'Could not start session');
@@ -102,6 +130,14 @@ export default function TrainingChecklists() {
     } catch (err: any) {
       toast.error(err?.message || 'Delete failed');
     }
+  };
+
+  // Sessions store the customer as a customers.row_id (or a legacy free-text
+  // name). Resolve to a readable name using the already-loaded customers list;
+  // fall back to the raw value so nothing renders blank.
+  const customerLabel = (val: string | null) => {
+    if (!val) return null;
+    return customers.find((c) => c.row_id === val)?.customer || val;
   };
 
   const progress = (s: ChecklistSession) => {
@@ -219,7 +255,7 @@ export default function TrainingChecklists() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap mb-1">
                                 <h3 className="font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                  {s.customer || 'Unknown customer'}
+                                  {customerLabel(s.customer) || 'Unknown customer'}
                                 </h3>
                                 {s.status === 'completed' ? (
                                   <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 gap-1">
@@ -288,13 +324,34 @@ export default function TrainingChecklists() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer</label>
-                  <Input value={startForm.customer} onChange={(e) => setStartForm((s) => ({ ...s, customer: e.target.value }))} placeholder="Customer name" />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Customer <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={startForm.customer}
+                    onChange={(e) => setStartForm((s) => ({ ...s, customer: e.target.value, customerDistrict: '' }))}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+                  >
+                    <option value="">— Select customer —</option>
+                    {customers.map((c) => <option key={c.row_id} value={c.row_id}>{c.customer}</option>)}
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
-                  <Input value={startForm.location} onChange={(e) => setStartForm((s) => ({ ...s, location: e.target.value }))} placeholder="Site / location" />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer District</label>
+                  <select
+                    value={startForm.customerDistrict}
+                    onChange={(e) => setStartForm((s) => ({ ...s, customerDistrict: e.target.value }))}
+                    disabled={!startForm.customer}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm disabled:opacity-50"
+                  >
+                    <option value="">{startForm.customer ? '— Select district —' : '— Pick a customer first —'}</option>
+                    {districts.map((d) => <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>)}
+                  </select>
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location <span className="text-gray-400 font-normal">(optional)</span></label>
+                <Input value={startForm.location} onChange={(e) => setStartForm((s) => ({ ...s, location: e.target.value }))} placeholder="Site / pad / location" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Link to field visit (optional)</label>
