@@ -84,22 +84,35 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   const [panelSearch,   setPanelSearch]   = useState('');
   const [showAllPanels, setShowAllPanels] = useState(false);
 
-  // Fetch next available Visit ID — fetch ALL field_visit_ids and find the true
+  // Fetch next available Visit ID — scan ALL field_visit_ids and find the true
   // numeric max. We can't .order() because Postgres sorts field_visit_id as
-  // text (e.g. "999" > "1500"), and we can't .limit() because that would miss
-  // higher IDs. Mirrors the Event ID logic in IncidentForm.
+  // text (e.g. "999" > "1500"). We MUST paginate: Supabase caps a single
+  // .select() at 1000 rows, so an unbounded select silently misses higher IDs
+  // once the table grows past 1000 (the bug this fixes). Mirrors IncidentForm.
   useEffect(() => {
     if (!open || editing) return;
-    supabase
-      .from('fieldvisits')
-      .select('field_visit_id')
-      .then(({ data }) => {
-        const maxId = (data || []).reduce((max, row: any) => {
+    let cancelled = false;
+    (async () => {
+      const PAGE = 1000;
+      let from = 0;
+      let maxId = 0;
+      // Loop pages until a short page (fewer than PAGE rows) signals the end.
+      while (true) {
+        const { data, error } = await supabase
+          .from('fieldvisits')
+          .select('field_visit_id')
+          .range(from, from + PAGE - 1);
+        if (error || !data) break;
+        for (const row of data as any[]) {
           const n = parseInt(row.field_visit_id, 10);
-          return !isNaN(n) && n > max ? n : max;
-        }, 0);
-        setNextVisitId(String(maxId + 1));
-      });
+          if (!isNaN(n) && n > maxId) maxId = n;
+        }
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      if (!cancelled) setNextVisitId(String(maxId + 1));
+    })();
+    return () => { cancelled = true; };
   }, [open, editing]);
 
   // Pre-fill lat/lng when editing
