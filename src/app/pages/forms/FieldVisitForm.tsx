@@ -26,6 +26,7 @@ import { getSerial } from '../../lib/serialUtils';
 import { projectId } from '../../../../utils/supabase/info';
 import { getAuthHeaders } from '../../lib/authHeaders';
 import { ButtonGroup } from '../../components/ui/button-group';
+import { computeVisitDuration } from '../../lib/visitDuration';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -75,6 +76,11 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   const [locating,      setLocating]      = useState(false);
   const [latLngValue,   setLatLngValue]   = useState('');
   const [xcRep,         setXcRep]         = useState('');
+  // Arrival / departure are controlled so Visit Duration can be live-computed
+  // (arrival → departure). Duration is a derived, read-only display — never an
+  // editable field and never submitted as a manual value.
+  const [arrivalDate,   setArrivalDate]   = useState('');
+  const [departureDate, setDepartureDate] = useState('');
   // Multi-select of panel serials seen on this visit. Replaces the 3 legacy
   // single dropdowns (digital_shooting_panel / communication_panel /
   // surface_tester). Marking a panel here stamps it verified='Y' + last-seen
@@ -121,6 +127,16 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     if (visit) setLatLngValue(visit.lat_long || '');
     else setLatLngValue('');
   }, [visit, open]);
+
+  // Seed arrival / departure (datetime-local wants YYYY-MM-DDTHH:MM).
+  useEffect(() => {
+    if (!open) { setArrivalDate(''); setDepartureDate(''); return; }
+    setArrivalDate(visit?.arrival_date?.slice(0, 16) || '');
+    setDepartureDate(visit?.departure_date?.slice(0, 16) || '');
+  }, [visit, open]);
+
+  // Live-computed, read-only visit duration (HH:MM:SS) from the two timestamps.
+  const computedDuration = computeVisitDuration(arrivalDate, departureDate);
 
   useEffect(() => {
     if (!open) return;
@@ -221,7 +237,8 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
       operating_company:     fd.get('operating_company')     || null,
       pad_name:              fd.get('pad_name')              || null,
       lat_long:              fd.get('lat_long')              || null,
-      visit_duration:        fd.get('visit_duration')        || null,
+      // visit_duration is derived from arrival → departure and is not persisted
+      // from the form (read-only computed display).
       panels_seen:           seenList,
       // Legacy single-value mirrors (derived from panels_seen for back-compat).
       communication_panel:   firstOfType('Communication Panel'),
@@ -333,17 +350,20 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
 
           <F label="Arrival Date / Time" required>
             <Input name="arrival_date" type="datetime-local"
-              defaultValue={visit?.arrival_date?.slice(0, 16) || ''} required />
+              value={arrivalDate} onChange={e => setArrivalDate(e.target.value)} required />
           </F>
 
           <F label="Departure Date / Time" required>
             <Input name="departure_date" type="datetime-local"
-              defaultValue={visit?.departure_date?.slice(0, 16) || ''} required />
+              value={departureDate} onChange={e => setDepartureDate(e.target.value)} required />
           </F>
 
-          <F label="Visit Duration (H:MM:SS)">
-            <Input name="visit_duration" defaultValue={visit?.visit_duration || ''}
-              placeholder="e.g. 2:30:00  —  auto-calculated if left blank" />
+          {/* Visit Duration is derived from arrival → departure: read-only,
+              auto-computed, and never submitted as a manual value. */}
+          <F label="Visit Duration (auto-calculated)">
+            <div className="w-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-md p-2 text-sm text-gray-700 dark:text-gray-200">
+              {computedDuration || '—'}
+            </div>
           </F>
 
           {/* ── Customer ── */}

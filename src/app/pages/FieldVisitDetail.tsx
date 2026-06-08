@@ -26,6 +26,7 @@ import {
 import { toast } from 'sonner';
 import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
+import { displayVisitDuration } from '../lib/visitDuration';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const VISIT_PURPOSE_OPTS = [
@@ -210,12 +211,8 @@ export default function FieldVisitDetail() {
 
   // Validate edit-mode inputs before saving. Returns an error string or null.
   function validateVisit(f: any): string | null {
-    // Duration can't be negative.
-    if (f.visit_duration !== '' && f.visit_duration != null) {
-      const dur = Number(f.visit_duration);
-      if (Number.isNaN(dur)) return 'Visit duration must be a number.';
-      if (dur < 0) return 'Visit duration cannot be less than zero.';
-    }
+    // Visit duration is auto-computed from arrival/departure, not user-entered,
+    // so it is not validated here.
     // Departure can't be in the future.
     if (f.departure_date) {
       const dep = new Date(f.departure_date);
@@ -248,7 +245,8 @@ export default function FieldVisitDetail() {
         field_or_facility: form.field_or_facility || null,
         arrival_date: form.arrival_date || null,
         departure_date: form.departure_date || null,
-        visit_duration: form.visit_duration || null,
+        // visit_duration is derived from arrival/departure and is not persisted
+        // from the form (it would otherwise drift out of sync with the dates).
         customer: form.customer || null,
         customer_district: form.customer_district || null,
         customer_rep: form.customer_rep || null,
@@ -610,18 +608,22 @@ export default function FieldVisitDetail() {
                   />
                 </Field>
 
+                {/* Visit Duration is auto-computed from arrival → departure and
+                    is read-only. In edit mode it updates live from the form's
+                    date fields; otherwise it reflects the saved visit. */}
                 <Field
                   label="Visit Duration"
-                  value={visit.visit_duration ? `${visit.visit_duration} hours` : '—'}
+                  value={
+                    editing
+                      ? displayVisitDuration({
+                          arrival_date: form.arrival_date,
+                          departure_date: form.departure_date,
+                          visit_duration: visit.visit_duration,
+                        })
+                      : displayVisitDuration(visit)
+                  }
                   editing={editing}
-                >
-                  <Input
-                    value={form.visit_duration}
-                    onChange={(e) => setField('visit_duration', e.target.value)}
-                    placeholder="e.g. 4"
-                    className="text-sm"
-                  />
-                </Field>
+                />
 
                 {/* XC Rep — constrained SQM dropdown (FieldVisitForm parity). */}
                 <Field
