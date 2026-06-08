@@ -30,6 +30,10 @@ import QcPallets from './pages/QcPallets';
 import QcPalletDetail from './pages/QcPalletDetail';
 import ManageLists from './pages/ManageLists';
 import Users from './pages/Users';
+import DocumentLibrary from './pages/DocumentLibrary';
+import TrainingChecklists from './pages/TrainingChecklists';
+import TrainingChecklistSession from './pages/TrainingChecklistSession';
+import TrainingChecklistSetup from './pages/TrainingChecklistSetup';
 
 type Role = 'admin' | 'sqm' | 'ops';
 
@@ -80,6 +84,10 @@ export const router = createBrowserRouter([
       { path: "technical-bulletins", Component: TechnicalBulletins },
       { path: "technical-bulletin/:id", element: <AdminOnly><TechnicalBulletin /></AdminOnly> },
       { path: "technical-bulletin-setup", element: <AdminOnly><TechnicalBulletinSetup /></AdminOnly> },
+      { path: "documents", element: <RequireRole roles={['admin','sqm']}><DocumentLibrary /></RequireRole> },
+      { path: "training-checklists", element: <RequireRole roles={['admin','sqm']}><TrainingChecklists /></RequireRole> },
+      { path: "training-checklists/session/:id", element: <RequireRole roles={['admin','sqm']}><TrainingChecklistSession /></RequireRole> },
+      { path: "training-checklist-setup", element: <AdminOnly><TrainingChecklistSetup /></AdminOnly> },
       { path: "manage-lists", element: <AdminOnly><ManageLists /></AdminOnly> },
       { path: "users", element: <AdminOnly><Users /></AdminOnly> },
       { path: "diagnostics", element: <AdminOnly><DiagnosticsPage /></AdminOnly> },

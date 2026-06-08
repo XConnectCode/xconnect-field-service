@@ -20,6 +20,7 @@ import {
   Loader2,
   CheckCircle2,
   FilePlus,
+  GraduationCap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -328,6 +329,18 @@ export default function FieldVisitDetail() {
     navigate(`/incidents?${params.toString()}`);
   }
 
+  // ── Attach a Training Checklist from this visit ──────────────────────────────
+  // Opens the Training Checklists flow pre-linked to this field visit so an SQM
+  // can pick a template and start a session tied to the visit.
+  function handleAttachTraining() {
+    if (!visit) return;
+    const params = new URLSearchParams({ start: '1' });
+    if (visit.field_visit_id) params.set('fieldVisitId', visit.field_visit_id);
+    if (visit.customerName) params.set('customer', visit.customerName);
+    else if (visit.customer) params.set('customer', visit.customer);
+    navigate(`/training-checklists?${params.toString()}`);
+  }
+
   // ── loading / not-found states ──────────────────────────────────────────────
   if (loading) {
     return (
@@ -413,6 +426,18 @@ export default function FieldVisitDetail() {
                     <FilePlus className="w-4 h-4" />
                     Log Incident
                   </Button>
+
+                  {/* Attach a training checklist (shown for Training-purpose visits). */}
+                  {visit.visit_purpose === 'Training' && (
+                    <Button
+                      variant="outline"
+                      onClick={handleAttachTraining}
+                      className="gap-1.5"
+                    >
+                      <GraduationCap className="w-4 h-4" />
+                      Attach Training Checklist
+                    </Button>
+                  )}
 
                   {/* Primary action: mark complete / reopen. */}
                   {isComplete(visit) ? (
