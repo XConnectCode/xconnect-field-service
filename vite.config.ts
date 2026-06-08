@@ -19,4 +19,11 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  server: {
+    // Vite 6 rejects requests whose Host header isn't allowlisted (returns 403,
+    // which surfaces as a tunnel 404 in GitHub Codespaces). Allow the Codespaces
+    // forwarded-port domain so the public *.app.github.dev preview URL works.
+    allowedHosts: ['.app.github.dev'],
+  },
 })
