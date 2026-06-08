@@ -350,22 +350,33 @@ export default function IncidentForm({
 
   // ── Effects ─────────────────────────────────────────────────────────────────
 
-  // Fetch next available Event ID — fetches ALL event_ids and finds the true numeric max.
-  // We can't .order() because Supabase sorts event_id as text (e.g. "99" > "556"),
-  // and we can't .limit() because that would miss higher IDs.
+  // Fetch next available Event ID — scan ALL event_ids and find the true numeric max.
+  // We can't .order() because Supabase sorts event_id as text (e.g. "99" > "556").
+  // We MUST paginate: Supabase caps a single .select() at 1000 rows, so an
+  // unbounded select silently misses higher IDs once incidents grows past 1000.
   useEffect(() => {
     if (!open || editing) return;
-
-    supabase
-      .from('incidents')
-      .select('event_id')
-      .then(({ data }) => {
-        const maxId = (data || []).reduce((max, row: any) => {
+    let cancelled = false;
+    (async () => {
+      const PAGE = 1000;
+      let from = 0;
+      let maxId = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from('incidents')
+          .select('event_id')
+          .range(from, from + PAGE - 1);
+        if (error || !data) break;
+        for (const row of data as any[]) {
           const n = parseInt(row.event_id);
-          return !isNaN(n) && n > max ? n : max;
-        }, 0);
-        setNextEventId(String(maxId + 1));
-      });
+          if (!isNaN(n) && n > maxId) maxId = n;
+        }
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      if (!cancelled) setNextEventId(String(maxId + 1));
+    })();
+    return () => { cancelled = true; };
   }, [open, editing]);
 
   // Load reference tables once per open
