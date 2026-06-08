@@ -35,14 +35,26 @@ export interface TrainingVisitReportOptions {
   returnBlob?: boolean;
 }
 
+/**
+ * Format a date for display. Handles both date-only strings ('2026-06-05') and
+ * full ISO timestamps ('2026-06-05T12:22:00+00:00'); only the date-only form is
+ * anchored to noon to avoid TZ rollover.
+ */
 function fmtDate(val?: string | null): string {
   if (!val) return '—';
-  try { return new Date(val + 'T12:00:00').toLocaleDateString(); } catch { return val; }
+  try {
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(val);
+    const d = new Date(isDateOnly ? val + 'T12:00:00' : val);
+    return isNaN(d.getTime()) ? val : d.toLocaleDateString();
+  } catch { return val; }
 }
 
 function fmtDateTime(val?: string | null): string {
   if (!val) return '—';
-  try { return new Date(val).toLocaleDateString(); } catch { return val; }
+  try {
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? val : d.toLocaleDateString();
+  } catch { return val; }
 }
 
 export async function generateTrainingVisitReportPDF(
