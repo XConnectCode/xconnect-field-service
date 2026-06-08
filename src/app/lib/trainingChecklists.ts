@@ -187,9 +187,27 @@ export async function listTrainingVisits(limit = 200): Promise<Array<{ field_vis
     console.error('listTrainingVisits error:', error);
     return [];
   }
-  return (data || []).map((r: any) => ({
+  const rows = data || [];
+  // `fieldvisits.customer` stores the customer row_id, not the display name.
+  // Resolve to readable customer names (same mapping FieldVisitDetail uses).
+  const custIds = Array.from(
+    new Set(rows.map((r: any) => r.customer).filter((c: any): c is string => !!c))
+  );
+  const nameById = new Map<string, string>();
+  if (custIds.length) {
+    const { data: custs, error: custErr } = await supabase
+      .from('customers')
+      .select('row_id, customer')
+      .in('row_id', custIds);
+    if (custErr) console.error('listTrainingVisits customer lookup error:', custErr);
+    for (const c of custs || []) {
+      if (c?.row_id) nameById.set(c.row_id, c.customer ?? null);
+    }
+  }
+  return rows.map((r: any) => ({
     field_visit_id: r.field_visit_id,
-    customer: r.customer ?? null,
+    // Prefer resolved name; fall back to raw value so the option is never blank.
+    customer: (r.customer && nameById.get(r.customer)) || r.customer || null,
     arrival_date: r.arrival_date ?? null,
   }));
 }

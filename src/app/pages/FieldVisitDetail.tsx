@@ -23,6 +23,7 @@ import {
   GraduationCap,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const VISIT_PURPOSE_OPTS = [
@@ -78,6 +79,7 @@ export default function FieldVisitDetail() {
   const [visit, setVisit] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [relatedIncidents, setRelatedIncidents] = useState<any[]>([]);
+  const [trainingSessions, setTrainingSessions] = useState<ChecklistSession[]>([]);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -144,8 +146,17 @@ export default function FieldVisitDetail() {
           .eq('field_visit_id', data.field_visit_id)
           .order('date_incident', { ascending: false });
         setRelatedIncidents(inc || []);
+
+        // Load any training checklist sessions linked to this visit.
+        try {
+          setTrainingSessions(await listSessionsForVisit(data.field_visit_id));
+        } catch (e) {
+          console.error('Error loading linked training sessions:', e);
+          setTrainingSessions([]);
+        }
       } else {
         setRelatedIncidents([]);
+        setTrainingSessions([]);
       }
     } catch (error: any) {
       console.error('Error loading field visit:', error);
@@ -906,6 +917,68 @@ export default function FieldVisitDetail() {
                                   {inc.incident_description}
                                 </p>
                               )}
+                            </div>
+                            <ExternalLink className="w-4 h-4 text-gray-300 group-hover:text-blue-500 flex-shrink-0 mt-0.5" />
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Linked Training Checklists card */}
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <GraduationCap className="w-4 h-4 text-gray-500" />
+                  Training Checklists
+                  {trainingSessions.length > 0 && (
+                    <Badge variant="secondary" className="ml-1">
+                      {trainingSessions.length}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {trainingSessions.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">
+                    No training checklist linked to this field visit.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {trainingSessions.map((s) => (
+                      <li key={s.id}>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/training-checklists/session/${s.id}`)}
+                          className="w-full text-left py-3 px-2 hover:bg-gray-50 rounded transition-colors group"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 text-sm">
+                                  {s.template_name || 'Training Checklist'}
+                                </span>
+                                {s.status && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {s.status === 'completed' ? 'Completed' : 'In progress'}
+                                  </Badge>
+                                )}
+                                {s.product_line && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {s.product_line}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {[
+                                  s.customer || null,
+                                  s.trainer_name ? `SQM: ${s.trainer_name}` : null,
+                                  s.training_date ? new Date(s.training_date + 'T12:00:00').toLocaleDateString() : null,
+                                ].filter(Boolean).join(' · ')}
+                              </p>
                             </div>
                             <ExternalLink className="w-4 h-4 text-gray-300 group-hover:text-blue-500 flex-shrink-0 mt-0.5" />
                           </div>
