@@ -10,7 +10,9 @@ import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase';
 import {
   getSession, updateSession,
+  listCustomers, listDistrictsForCustomer,
   type ChecklistSession, type ChecklistStepResult,
+  type CustomerOption, type DistrictOption,
 } from '../lib/trainingChecklists';
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
 
@@ -27,12 +29,26 @@ export default function TrainingChecklistSession() {
 
   // editable fields
   const [steps, setSteps] = useState<ChecklistStepResult[]>([]);
-  const [customer, setCustomer] = useState('');
+  const [customer, setCustomer] = useState('');           // customers.row_id (or legacy free-text)
+  const [customerDistrict, setCustomerDistrict] = useState(''); // districts.row_id
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [signoff, setSignoff] = useState('');
 
+  // reference data for the customer / district dropdowns
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [districts, setDistricts] = useState<DistrictOption[]>([]);
+
   useEffect(() => { if (id) load(id); }, [id]);
+
+  // Load the customer list once for the dropdown.
+  useEffect(() => { listCustomers().then(setCustomers).catch(() => {}); }, []);
+
+  // Cascade districts off the selected customer.
+  useEffect(() => {
+    if (!customer) { setDistricts([]); return; }
+    listDistrictsForCustomer(customer).then(setDistricts).catch(() => setDistricts([]));
+  }, [customer]);
 
   const load = async (sid: string) => {
     setLoading(true);
@@ -42,6 +58,7 @@ export default function TrainingChecklistSession() {
         setSession(s);
         setSteps(s.step_results || []);
         setCustomer(s.customer || '');
+        setCustomerDistrict(s.customer_district || '');
         setLocation(s.location || '');
         setNotes(s.notes || '');
         setSignoff(s.signoff_name || '');
@@ -51,6 +68,14 @@ export default function TrainingChecklistSession() {
     }
     setLoading(false);
   };
+
+  // Resolve the stored customer value (row_id or legacy free-text) to a display
+  // name. Falls back to the raw value so legacy sessions never render blank.
+  const customerDisplay = (() => {
+    if (!customer) return '';
+    const match = customers.find((c) => c.row_id === customer);
+    return match ? match.customer : customer;
+  })();
 
   const toggleStep = (stepId: string) => {
     setSteps((prev) => prev.map((r) => (r.id === stepId ? { ...r, done: !r.done } : r)));
@@ -65,7 +90,8 @@ export default function TrainingChecklistSession() {
       const snapshot: ChecklistSession = {
         ...session,
         step_results: steps,
-        customer: customer.trim() || session.customer,
+        customer: customer || session.customer,
+        customer_district: customerDistrict || session.customer_district,
         location: location.trim() || session.location,
         notes: notes.trim() || null,
         signoff_name: signoff.trim() || null,
@@ -97,7 +123,8 @@ export default function TrainingChecklistSession() {
     try {
       const updated = await updateSession(session.id, {
         step_results: steps,
-        customer: customer.trim() || null,
+        customer: customer || null,
+        customer_district: customerDistrict || null,
         location: location.trim() || null,
         notes: notes.trim() || null,
         signoff_name: signoff.trim() || null,
@@ -178,10 +205,50 @@ export default function TrainingChecklistSession() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer</label>
-                <Input value={customer} onChange={(e) => setCustomer(e.target.value)} disabled={!canEdit} placeholder="Customer name" />
+                {canEdit ? (
+                  <select
+                    value={customer}
+                    onChange={(e) => { setCustomer(e.target.value); setCustomerDistrict(''); }}
+                    className="w-full border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded-md p-2 text-sm"
+                  >
+                    <option value="">Select customer…</option>
+                    {/* Preserve a legacy free-text customer that isn't in the table. */}
+                    {customer && !customers.some((c) => c.row_id === customer) && (
+                      <option value={customer}>{customer}</option>
+                    )}
+                    {customers.map((c) => (
+                      <option key={c.row_id} value={c.row_id}>{c.customer}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-sm text-gray-800 dark:text-gray-200 py-2">{customerDisplay || '—'}</p>
+                )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Customer District</label>
+                {canEdit ? (
+                  <select
+                    value={customerDistrict}
+                    onChange={(e) => setCustomerDistrict(e.target.value)}
+                    disabled={!customer}
+                    className="w-full border border-gray-300 dark:border-gray-600 dark:bg-gray-800 rounded-md p-2 text-sm disabled:opacity-60"
+                  >
+                    <option value="">{customer ? 'Select district…' : '— Pick a customer first —'}</option>
+                    {customerDistrict && !districts.some((d) => d.row_id === customerDistrict) && (
+                      <option value={customerDistrict}>{customerDistrict}</option>
+                    )}
+                    {districts.map((d) => (
+                      <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-sm text-gray-800 dark:text-gray-200 py-2">
+                    {districts.find((d) => d.row_id === customerDistrict)?.customer_district || customerDistrict || '—'}
+                  </p>
+                )}
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Location (optional)</label>
                 <Input value={location} onChange={(e) => setLocation(e.target.value)} disabled={!canEdit} placeholder="Site / location" />
               </div>
             </div>

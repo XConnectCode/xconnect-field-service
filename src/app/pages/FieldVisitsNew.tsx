@@ -36,6 +36,27 @@ function getDateRange(tf: string | null): { start: Date | null; end: Date | null
   return { start: null, end: null };
 }
 
+/**
+ * Display the visit duration as HH:MM:SS. Prefers the stored `visit_duration`
+ * (entered manually / synced from AppSheet); when that is missing, derive it
+ * from the arrival → departure timestamps so the column never shows a blank
+ * dash for visits that have both endpoints recorded. Display-only — the stored
+ * value is never mutated here.
+ */
+function displayVisitDuration(visit: any): string {
+  if (visit?.visit_duration) return visit.visit_duration;
+  const { arrival_date, departure_date } = visit || {};
+  if (!arrival_date || !departure_date) return '-';
+  const arr = new Date(arrival_date).getTime();
+  const dep = new Date(departure_date).getTime();
+  if (Number.isNaN(arr) || Number.isNaN(dep) || dep < arr) return '-';
+  let secs = Math.floor((dep - arr) / 1000);
+  const h = Math.floor(secs / 3600); secs -= h * 3600;
+  const m = Math.floor(secs / 60);   secs -= m * 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(secs)}`;
+}
+
 const TIME_FILTER_LABELS: Record<string, string> = {
   this_week: 'This Week', last_week: 'Last Week',
   this_month: 'This Month', last_month: 'Last Month',
@@ -733,7 +754,7 @@ export default function FieldVisitsNew() {
                             <Badge variant="outline">{visit.field_or_facility}</Badge>
                           </TableCell>
                           <TableCell className="text-sm">{visit.xc_rep}</TableCell>
-                          <TableCell className="text-sm">{visit.visit_duration || '-'}</TableCell>
+                          <TableCell className="text-sm">{displayVisitDuration(visit)}</TableCell>
                           <TableCell>
                             <div className="flex gap-2">
                               <Button size="sm" variant="outline" onClick={() => openEdit(visit)}>
