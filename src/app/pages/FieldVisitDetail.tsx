@@ -21,9 +21,11 @@ import {
   CheckCircle2,
   FilePlus,
   GraduationCap,
+  FileDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
+import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const VISIT_PURPOSE_OPTS = [
@@ -80,6 +82,7 @@ export default function FieldVisitDetail() {
   const [loading, setLoading] = useState(true);
   const [relatedIncidents, setRelatedIncidents] = useState<any[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<ChecklistSession[]>([]);
+  const [reportSessionId, setReportSessionId] = useState<string | null>(null);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -338,6 +341,17 @@ export default function FieldVisitDetail() {
     if (visit.customer_district) params.set('districtId', visit.customer_district);
     if (visit.customerName) params.set('customerName', visit.customerName);
     navigate(`/incidents?${params.toString()}`);
+  }
+
+  // ── Download a combined Field Visit + Training Checklist customer report ─────
+  async function handleDownloadTrainingReport(session: ChecklistSession) {
+    setReportSessionId(session.id);
+    try {
+      await generateTrainingVisitReportPDF({ visit, session });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate report');
+    }
+    setReportSessionId(null);
   }
 
   // ── Attach a Training Checklist from this visit ──────────────────────────────
@@ -949,11 +963,11 @@ export default function FieldVisitDetail() {
                 ) : (
                   <ul className="divide-y divide-gray-100">
                     {trainingSessions.map((s) => (
-                      <li key={s.id}>
+                      <li key={s.id} className="flex items-start gap-2 py-1">
                         <button
                           type="button"
                           onClick={() => navigate(`/training-checklists/session/${s.id}`)}
-                          className="w-full text-left py-3 px-2 hover:bg-gray-50 rounded transition-colors group"
+                          className="flex-1 min-w-0 text-left py-2 px-2 hover:bg-gray-50 rounded transition-colors group"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
@@ -983,6 +997,18 @@ export default function FieldVisitDetail() {
                             <ExternalLink className="w-4 h-4 text-gray-300 group-hover:text-blue-500 flex-shrink-0 mt-0.5" />
                           </div>
                         </button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="mt-1 flex-shrink-0 gap-1.5"
+                          disabled={reportSessionId === s.id}
+                          onClick={() => handleDownloadTrainingReport(s)}
+                          title="Download combined field visit + training report"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          {reportSessionId === s.id ? 'Generating…' : 'Report'}
+                        </Button>
                       </li>
                     ))}
                   </ul>

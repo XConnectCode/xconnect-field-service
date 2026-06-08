@@ -35,6 +35,7 @@ export interface ChecklistSession {
   kind: string | null;
   field_visit_id: string | null;
   customer: string | null;
+  customer_district: string | null;
   location: string | null;
   trainer_name: string | null;
   trainer_id: string | null;
@@ -130,12 +131,13 @@ export async function startSession(params: {
   template: ChecklistTemplate;
   fieldVisitId?: string | null;
   customer?: string | null;
+  customerDistrict?: string | null;
   location?: string | null;
   trainerName?: string | null;
   trainerId?: string | null;
   createdBy?: string | null;
 }): Promise<ChecklistSession> {
-  const { template, fieldVisitId, customer, location, trainerName, trainerId, createdBy } = params;
+  const { template, fieldVisitId, customer, customerDistrict, location, trainerName, trainerId, createdBy } = params;
   const step_results: ChecklistStepResult[] = (template.steps || []).map((s) => ({
     id: s.id, text: s.text, done: false,
   }));
@@ -146,6 +148,7 @@ export async function startSession(params: {
     kind: template.kind,
     field_visit_id: fieldVisitId || null,
     customer: customer || null,
+    customer_district: customerDistrict || null,
     location: location || null,
     trainer_name: trainerName || null,
     trainer_id: trainerId || null,
@@ -210,4 +213,80 @@ export async function listTrainingVisits(limit = 200): Promise<Array<{ field_vis
     customer: (r.customer && nameById.get(r.customer)) || r.customer || null,
     arrival_date: r.arrival_date ?? null,
   }));
+}
+
+// ── Customer / district reference data + auto-fill ────────────────────────────
+
+export interface CustomerOption { row_id: string; customer: string; }
+export interface DistrictOption { row_id: string; customer_district: string; }
+
+/** All customers for the start-session dropdown (row_id + display name). */
+export async function listCustomers(): Promise<CustomerOption[]> {
+  const { data, error } = await supabase
+    .from('customers').select('row_id, customer').order('customer');
+  if (error) { console.error('listCustomers error:', error); return []; }
+  return (data || []).filter((c: any) => c?.row_id) as CustomerOption[];
+}
+
+/** Districts belonging to one customer (cascades off the customer select). */
+export async function listDistrictsForCustomer(customerId: string): Promise<DistrictOption[]> {
+  if (!customerId) return [];
+  const { data, error } = await supabase
+    .from('districts').select('row_id, customer_district')
+    .eq('customer', customerId).order('customer_district');
+  if (error) { console.error('listDistrictsForCustomer error:', error); return []; }
+  return (data || []).filter((d: any) => d?.row_id) as DistrictOption[];
+}
+
+/**
+ * Values needed to auto-fill the start-session form from a linked field visit.
+ * Returns the customer row_id, district row_id and pad/location so the modal can
+ * pre-select the matching dropdown options.
+ */
+export async function getVisitAutofill(fieldVisitId: string): Promise<{
+  customer: string | null;
+  customer_district: string | null;
+  location: string | null;
+} | null> {
+  if (!fieldVisitId) return null;
+  const { data, error } = await supabase
+    .from('fieldvisits')
+    .select('customer, customer_district, pad_name')
+    .eq('field_visit_id', fieldVisitId)
+    .maybeSingle();
+  if (error) { console.error('getVisitAutofill error:', error); return null; }
+  if (!data) return null;
+  return {
+    customer: data.customer ?? null,
+    customer_district: data.customer_district ?? null,
+    location: data.pad_name ?? null,
+  };
+}
+
+/**
+ * Resolve a session's stored customer + district (which may be customers.row_id
+ * / districts.row_id, or a legacy free-text customer name) to display names.
+ * Falls back to the raw stored value so nothing renders blank.
+ */
+export async function resolveSessionNames(
+  customer: string | null,
+  customerDistrict: string | null,
+): Promise<{ customerName: string | null; districtName: string | null }> {
+  let customerName = customer || null;
+  let districtName = customerDistrict || null;
+  try {
+    if (customer) {
+      const { data } = await supabase
+        .from('customers').select('customer').eq('row_id', customer).maybeSingle();
+      if (data?.customer) customerName = data.customer;
+    }
+    if (customerDistrict) {
+      const { data } = await supabase
+        .from('districts').select('customer_district').eq('row_id', customerDistrict).maybeSingle();
+      if (data?.customer_district) districtName = data.customer_district;
+    }
+  } catch (e) {
+    console.error('resolveSessionNames error:', e);
+  }
+  return { customerName, districtName };
 }
