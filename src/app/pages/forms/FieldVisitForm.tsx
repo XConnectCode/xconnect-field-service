@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import { getSerial } from '../../lib/serialUtils';
 import { projectId } from '../../../../utils/supabase/info';
 import { getAuthHeaders } from '../../lib/authHeaders';
+import { ButtonGroup } from '../../components/ui/button-group';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -322,10 +323,9 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           </F>
 
           <F label="Field or Facility">
-            <select name="field_or_facility" defaultValue={visit?.field_or_facility || 'Field'}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-              {FIELD_FACILITY_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
+            <ButtonGroup name="field_or_facility"
+              options={FIELD_FACILITY_OPTS}
+              defaultValue={visit?.field_or_facility || 'Field'} />
           </F>
 
           {/* ── Dates ── */}

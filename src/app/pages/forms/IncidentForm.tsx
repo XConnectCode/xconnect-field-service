@@ -24,6 +24,7 @@ import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
 import { Info, Sparkles } from 'lucide-react';
 import IncidentAIAssistant, { type IncidentSnapshot } from '../../components/IncidentAIAssistant';
+import { ButtonGroup, type ButtonGroupOption } from '../../components/ui/button-group';
 import type { AssistantField } from '../../lib/aiAssistantCore';
 import {
   resolveFailedComponentLabel,
@@ -748,68 +749,45 @@ export default function IncidentForm({
             </F>
 
             <F label="Status">
-              <Sel
+              <ButtonGroup
                 name="incident_status"
                 defaultValue={normalizeStatus(incident?.incident_status) || 'New'}
-              >
-                <option value="">— Select —</option>
-                {statusOptionsForRole(currentUser?.role).map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-                {/* Always allow keeping the current value, even if it's not in the
-                    role-allowed list (e.g. Closed for SQMs viewing a closed record). */}
-                {incident?.incident_status &&
-                  !statusOptionsForRole(currentUser?.role).includes(normalizeStatus(incident.incident_status) as any) &&
-                  normalizeStatus(incident.incident_status) && (
-                    <option value={normalizeStatus(incident.incident_status) as string}>
-                      {normalizeStatus(incident.incident_status)} (current)
-                    </option>
-                  )}
-              </Sel>
+                options={(() => {
+                  const roleOpts = statusOptionsForRole(currentUser?.role);
+                  const list: ButtonGroupOption[] = roleOpts.map((o) => ({ value: o, label: o }));
+                  // Always allow keeping the current value, even if it's not in the
+                  // role-allowed list (e.g. Closed for SQMs viewing a closed record).
+                  const cur = normalizeStatus(incident?.incident_status);
+                  if (cur && !roleOpts.includes(cur as any)) {
+                    list.push({ value: cur as string, label: `${cur} (current)` });
+                  }
+                  return list;
+                })()}
+              />
             </F>
 
             <F label="Severity">
-              <Sel
+              <ButtonGroup
                 name="incident_severity"
                 defaultValue={incident?.incident_severity || ''}
-              >
-                <option value="">— Select —</option>
-                {opts(listItems, 'incident_severity').map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </Sel>
+                options={opts(listItems, 'incident_severity')}
+              />
             </F>
 
             <F label="Report Version">
-              <Sel
+              <ButtonGroup
                 name="report_version"
                 defaultValue={incident?.report_version || 'Preliminary'}
-              >
-                <option value="">— Select —</option>
-                {opts(listItems, 'report_version').map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </Sel>
+                options={opts(listItems, 'report_version')}
+              />
             </F>
 
             <F label="Field or Facility">
-              <Sel
+              <ButtonGroup
                 name="field_facility"
                 defaultValue={incident?.field_facility || 'Field'}
-              >
-                <option value="">— Select —</option>
-                {opts(listItems, 'field_facility').map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </Sel>
+                options={opts(listItems, 'field_facility')}
+              />
             </F>
           </SectionCard>
 

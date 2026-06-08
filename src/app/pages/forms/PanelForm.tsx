@@ -23,6 +23,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { XC_PANEL_BASES } from '../../lib/xcLocations';
+import { ButtonGroup } from '../../components/ui/button-group';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -265,11 +266,8 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
 
           {showPlusPanel(panelType) && (
             <F label="Plus Panel?">
-              <select name="plus_panel" defaultValue={panel?.plus_panel || ''}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-                <option value="">— Select —</option>
-                {YES_NO_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
+              <ButtonGroup name="plus_panel" options={YES_NO_OPTS}
+                defaultValue={panel?.plus_panel || ''} />
             </F>
           )}
 
@@ -297,14 +295,10 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
           <Section title="Status & Location" />
 
           <F label="Panel Status" required>
-            <select name="panel_status" defaultValue={panel?.panel_status || 'At Facility'}
-              onChange={e => setPanelStatus(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm" required>
-              <option value="">— Select status —</option>
-              {PANEL_STATUS_OPTS.map(o => (
-                <option key={o} value={o}>{o}</option>
-              ))}
-            </select>
+            <ButtonGroup name="panel_status" required
+              options={PANEL_STATUS_OPTS}
+              value={panelStatus}
+              onChange={v => setPanelStatus(v)} />
           </F>
 
           <F label="XC Base" required>
@@ -400,30 +394,23 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
 
           {showAssign(panelStatus) && (
             <F label="Spare?" required={assignRequired(panelStatus)}>
-              <select name="spare" defaultValue={panel?.is_spare || ''}
+              <ButtonGroup name="spare" options={YES_NO_OPTS}
                 required={assignRequired(panelStatus)}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-                <option value="">— Select —</option>
-                {YES_NO_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
+                defaultValue={panel?.is_spare || ''} />
             </F>
           )}
 
           <F label="Verified?">
-            <select name="verified" defaultValue={panel?.verified || 'N'}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-              {VERIFIED_OPTS.map(o => <option key={o} value={o}>{o === 'Y' ? 'Yes (Y)' : 'No (N)'}</option>)}
-            </select>
+            <ButtonGroup name="verified"
+              options={VERIFIED_OPTS.map(o => ({ value: o, label: o === 'Y' ? 'Yes (Y)' : 'No (N)' }))}
+              defaultValue={panel?.verified || 'N'} />
           </F>
 
           {showAssign(panelStatus) && (
             <F label="Activity Flag" required={assignRequired(panelStatus)}>
-              <select name="activity" defaultValue={panel?.activity || ''}
+              <ButtonGroup name="activity" options={ACTIVITY_OPTS}
                 required={assignRequired(panelStatus)}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-                <option value="">— Select —</option>
-                {ACTIVITY_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
+                defaultValue={panel?.activity || ''} />
             </F>
           )}
 
