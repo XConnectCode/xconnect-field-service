@@ -334,7 +334,7 @@ export default function TrainingChecklistSession() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Signoff (customer / trainer name)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Signoff (customer / trainee name)</label>
               <Input value={signoff} onChange={(e) => setSignoff(e.target.value)} disabled={!canEdit} placeholder="Name of person signing off" />
             </div>
             <div>

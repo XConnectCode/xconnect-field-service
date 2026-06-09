@@ -57,6 +57,98 @@ function fmtDateTime(val?: string | null): string {
   } catch { return val; }
 }
 
+/**
+ * Format the visit duration for display. Prefers the stored `visit_duration`
+ * (an "H:MM:SS" wall-clock string, e.g. "1:30:00") and renders it as a friendly
+ * "1h 30m". If that column is empty, falls back to computing the delta between
+ * arrival and departure. Both timestamps share the same offset so the delta is
+ * timezone-invariant (treated as naive wall-clock per the app-wide rule).
+ */
+function fmtDuration(
+  stored?: string | null,
+  arrival?: string | null,
+  departure?: string | null,
+): string | null {
+  // 1. Parse the stored "H:MM:SS" string.
+  if (stored && /^\d+:\d{1,2}(:\d{1,2})?$/.test(stored.trim())) {
+    const parts = stored.trim().split(':').map((p) => parseInt(p, 10));
+    const h = parts[0] || 0;
+    const m = parts[1] || 0;
+    return formatHM(h, m);
+  }
+  // 2. Fall back to arrival → departure delta.
+  if (arrival && departure) {
+    try {
+      const ms = new Date(departure).getTime() - new Date(arrival).getTime();
+      if (isFinite(ms) && ms > 0) {
+        const totalMin = Math.round(ms / 60000);
+        return formatHM(Math.floor(totalMin / 60), totalMin % 60);
+      }
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
+function formatHM(h: number, m: number): string {
+  if (h <= 0 && m <= 0) return '0m';
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  return parts.join(' ');
+}
+
+/** Detect a jsPDF image format string from a mime / URL. */
+function pickSigFormat(mime: string | null, url: string): string {
+  const m = (mime || '').toLowerCase();
+  if (m.includes('jpeg') || m.includes('jpg')) return 'JPEG';
+  if (m.includes('webp')) return 'WEBP';
+  const path = url.split('?')[0].toLowerCase();
+  if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'JPEG';
+  if (path.endsWith('.webp')) return 'WEBP';
+  return 'PNG'; // SignaturePad uploads PNG
+}
+
+/** Fetch an image URL as a data URL so jsPDF can embed it without CORS dances. */
+async function fetchSigDataUrl(url: string): Promise<{ dataUrl: string; mime: string } | null> {
+  try {
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    const mime = blob.type || resp.headers.get('content-type') || '';
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const r = new FileReader();
+      r.onloadend = () => res(typeof r.result === 'string' ? r.result : '');
+      r.onerror = () => rej(new Error('reader failed'));
+      r.readAsDataURL(blob);
+    });
+    return { dataUrl, mime };
+  } catch { return null; }
+}
+
+/**
+ * Resolve the signoff signature URL: prefer the persisted column, otherwise look
+ * it up from the polymorphic images table (newest signoff_signature for this
+ * session). Mirrors the rehydration the session page does on load.
+ */
+async function resolveSignatureUrl(session: ChecklistSession): Promise<string | null> {
+  if (session.signoff_sig_url) return session.signoff_sig_url;
+  try {
+    const { projectId, publicAnonKey } = await import('/utils/supabase/info');
+    const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
+    const resp = await fetch(
+      `${baseUrl}/images/training_checklist_sessions/${encodeURIComponent(session.id)}`,
+      { headers: { Authorization: `Bearer ${publicAnonKey}` } },
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const files = Array.isArray(data.files) ? data.files : [];
+    const sig = files
+      .filter((f: any) => f.fieldName === 'signoff_signature' && f.url)
+      .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+    return sig?.url || null;
+  } catch { return null; }
+}
+
 export async function generateTrainingVisitReportPDF(
   opts: TrainingVisitReportOptions,
 ): Promise<Blob | void> {
@@ -74,6 +166,31 @@ export async function generateTrainingVisitReportPDF(
     customerName = resolved.customerName;
     districtName = resolved.districtName;
   }
+
+  // Resolve + pre-fetch the drawn signature so we can embed it later. Done up
+  // front (await) since the render pass below is synchronous.
+  let sigDataUrl: string | null = null;
+  let sigFmt = 'PNG';
+  let sigDims: { w: number; h: number } | null = null;
+  try {
+    const sigUrl = await resolveSignatureUrl(session);
+    if (sigUrl) {
+      const fetched = await fetchSigDataUrl(sigUrl);
+      if (fetched?.dataUrl) {
+        sigDataUrl = fetched.dataUrl;
+        sigFmt = pickSigFormat(fetched.mime, sigUrl);
+        // Read intrinsic pixel dimensions to preserve aspect ratio in the box.
+        sigDims = await new Promise<{ w: number; h: number } | null>((res) => {
+          try {
+            const img = new Image();
+            img.onload = () => res({ w: img.width, h: img.height });
+            img.onerror = () => res(null);
+            img.src = fetched.dataUrl;
+          } catch { res(null); }
+        });
+      }
+    }
+  } catch { /* signature is best-effort — never block the report */ }
 
   const doc = await loadJsPDF();
   const colW = CONT_W / 2;
@@ -156,6 +273,8 @@ export async function generateTrainingVisitReportPDF(
     { label: 'Pad / Well',        value: v.pad_name || session.location },
     { label: 'XC Representative', value: v.customer_rep || session.trainer_name },
     { label: 'Arrival Date',      value: fmtDate(v.arrival_date) },
+    { label: 'Departure Date',    value: fmtDate(v.departure_date) },
+    { label: 'Visit Duration',    value: fmtDuration(v.visit_duration, v.arrival_date, v.departure_date) },
     { label: 'Field Visit ID',    value: session.field_visit_id },
   ]);
 
@@ -212,9 +331,47 @@ export async function generateTrainingVisitReportPDF(
   twoColGrid([
     { label: 'Trainer (SQM)', value: session.trainer_name },
     { label: 'Training Date', value: fmtDate(session.training_date) },
-    { label: 'Customer Sign-off', value: session.signoff_name },
+    { label: 'Customer / Trainee Sign-off', value: session.signoff_name },
     { label: 'Completed',     value: session.completed_at ? fmtDateTime(session.completed_at) : null },
   ]);
+
+  // ── Drawn signature image ──
+  if (sigDataUrl) {
+    const sigBoxW = 70;   // mm
+    const sigBoxH = 28;   // mm
+    checkPage(sigBoxH + 14);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...XC_DARK);
+    doc.text('Signature:', MARGIN, y);
+    y += 4;
+    // Framed box that the signature sits inside (scaled to fit, aspect-preserved).
+    doc.setDrawColor(...XC_BORDER); doc.setLineWidth(0.3);
+    doc.roundedRect(MARGIN, y, sigBoxW, sigBoxH, 1, 1, 'S');
+    try {
+      const pad = 2;
+      let drawW = sigBoxW - pad * 2;
+      let drawH = sigBoxH - pad * 2;
+      if (sigDims && sigDims.w > 0 && sigDims.h > 0) {
+        const ratio = sigDims.h / sigDims.w;
+        drawH = drawW * ratio;
+        if (drawH > sigBoxH - pad * 2) {
+          drawH = sigBoxH - pad * 2;
+          drawW = drawH / ratio;
+        }
+      }
+      const ix = MARGIN + (sigBoxW - drawW) / 2;
+      const iy = y + (sigBoxH - drawH) / 2;
+      doc.addImage(sigDataUrl, sigFmt, ix, iy, drawW, drawH);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('Signature embed failed:', err);
+    }
+    y += sigBoxH + 4;
+    if (session.signoff_name) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(...GRAY_TEXT);
+      doc.text(`Signed: ${session.signoff_name}`, MARGIN, y);
+      y += 6;
+    }
+  }
 
   drawFooters(doc);
 
