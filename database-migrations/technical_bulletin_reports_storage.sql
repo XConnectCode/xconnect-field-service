@@ -49,9 +49,12 @@ create unique index if not exists technical_bulletin_reports_unique_type_idx
 alter table public.technical_bulletin_reports disable row level security;
 
 -- 2. Storage bucket -----------------------------------------------------
-insert into storage.buckets (id, name, public)
-values ('technical-bulletins', 'technical-bulletins', false)
-on conflict (id) do nothing;
+-- 25 MB cap: generated PDFs always downscale + JPEG-encode their images in
+-- generateTechnicalBulletinPDF.ts, so even image-heavy Standard PDFs land
+-- well under this. The cap is a safety guardrail against pathological uploads.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('technical-bulletins', 'technical-bulletins', false, 26214400)
+on conflict (id) do update set file_size_limit = excluded.file_size_limit;
 
 -- 3. Storage policies — authenticated users only -----------------------
 do $$

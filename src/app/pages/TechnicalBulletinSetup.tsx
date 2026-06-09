@@ -83,10 +83,10 @@ CREATE INDEX IF NOT EXISTS idx_tb_reports_report_type ON technical_bulletin_repo
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tb_reports_unique_type ON technical_bulletin_reports(bulletin_id, report_type);
 ALTER TABLE technical_bulletin_reports DISABLE ROW LEVEL SECURITY;
 
--- Private storage bucket for the generated PDFs
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('technical-bulletins', 'technical-bulletins', false)
-ON CONFLICT (id) DO NOTHING;
+-- Private storage bucket for the generated PDFs (25 MB safety cap)
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('technical-bulletins', 'technical-bulletins', false, 26214400)
+ON CONFLICT (id) DO UPDATE SET file_size_limit = EXCLUDED.file_size_limit;
 
 -- Authenticated users can read/write the generated PDFs (shared across users)
 DO $$

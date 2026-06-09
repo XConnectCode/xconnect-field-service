@@ -57,14 +57,24 @@ const fmtDate = (d: string) => {
 };
 
 // ── Canvas-based image load (preserves EXIF orientation via browser renderer) ─
-// compact=true: caps pixels at MAX_PX and encodes as JPEG to keep PDF under ~25 MB
-const COMPACT_MAX_PX = 1400;
-const COMPACT_JPEG_Q = 0.72;
+// Images are ALWAYS downscaled + JPEG-encoded so the resulting PDF stays small
+// enough to upload to shared storage. Without this, a single full-resolution
+// PNG embedded full-width could push a Standard PDF past ~50-100 MB and blow
+// past the storage upload limit. Two tiers:
+//   compact=true  → tighter cap / lower quality (one-page handout)
+//   compact=false → higher cap / higher quality for print-grade Standard PDFs
+// Both stay comfortably in the low-single-digit MB range.
+const COMPACT_MAX_PX  = 1400;
+const COMPACT_JPEG_Q  = 0.72;
+const STANDARD_MAX_PX = 2000;
+const STANDARD_JPEG_Q = 0.82;
 
 function loadImageViaCanvas(
   url: string,
-  compress = false,
+  compact = false,
 ): Promise<{ dataUrl: string; fmt: string; nw: number; nh: number } | null> {
+  const maxPx   = compact ? COMPACT_MAX_PX : STANDARD_MAX_PX;
+  const quality = compact ? COMPACT_JPEG_Q : STANDARD_JPEG_Q;
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -73,8 +83,9 @@ function loadImageViaCanvas(
         let w = img.naturalWidth  || img.width;
         let h = img.naturalHeight || img.height;
 
-        if (compress && Math.max(w, h) > COMPACT_MAX_PX) {
-          const s = COMPACT_MAX_PX / Math.max(w, h);
+        // Always cap the longest edge so we never embed a giant bitmap.
+        if (Math.max(w, h) > maxPx) {
+          const s = maxPx / Math.max(w, h);
           w = Math.round(w * s);
           h = Math.round(h * s);
         }
@@ -83,11 +94,13 @@ function loadImageViaCanvas(
         canvas.width = w; canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (!ctx) { resolve(null); return; }
+        // White matte so any transparent PNG flattens cleanly under JPEG.
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
 
-        const fmt    = compress ? 'image/jpeg' : 'image/png';
-        const quality = compress ? COMPACT_JPEG_Q : undefined;
-        resolve({ dataUrl: canvas.toDataURL(fmt, quality), fmt: compress ? 'JPEG' : 'PNG', nw: w, nh: h });
+        // Always JPEG — far smaller than PNG for photographic content.
+        resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), fmt: 'JPEG', nw: w, nh: h });
       } catch { resolve(null); }
     };
     img.onerror = () => resolve(null);
@@ -99,9 +112,9 @@ function loadImageViaCanvas(
 async function addContainedImage(
   doc: any, url: string,
   x: number, y: number, maxW: number, maxH: number,
-  compress = false,
+  compact = false,
 ): Promise<number> {
-  const res = await loadImageViaCanvas(url, compress);
+  const res = await loadImageViaCanvas(url, compact);
   if (!res) return 0;
   const scale = Math.min(maxW / res.nw, maxH / res.nh);
   const rw = res.nw * scale;
