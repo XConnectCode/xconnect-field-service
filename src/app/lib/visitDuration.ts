@@ -49,3 +49,37 @@ export function displayVisitDuration(visit: {
   if (visit.visit_duration) return visit.visit_duration;
   return '-';
 }
+
+/**
+ * Timestamps are stored in Postgres as `timestamptz` (UTC). A native
+ * `<input type="datetime-local">` works in the user's LOCAL time zone, so we
+ * must convert in both directions or the displayed time drifts by the UTC
+ * offset (e.g. 6 hours in America/Denver).
+ *
+ * `toLocalInputValue` turns a stored ISO/UTC timestamp into the
+ * `YYYY-MM-DDTHH:mm` string a datetime-local input expects, expressed in the
+ * browser's local time zone. This makes the edit field match what the
+ * read-only view (which uses `toLocaleString`) shows.
+ */
+export function toLocalInputValue(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  // Shift by the local offset so toISOString()'s UTC slice reflects local wall-clock time.
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+/**
+ * Inverse of `toLocalInputValue`: take the local-wall-clock string produced by
+ * a datetime-local input and return a full ISO (UTC) string suitable for
+ * storage in a `timestamptz` column. Returns null for empty/invalid input.
+ */
+export function fromLocalInputValue(localStr?: string | null): string | null {
+  if (!localStr) return null;
+  // `new Date('YYYY-MM-DDTHH:mm')` is parsed as LOCAL time by browsers, which
+  // is exactly what the user typed; toISOString() then normalises to UTC.
+  const d = new Date(localStr);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
