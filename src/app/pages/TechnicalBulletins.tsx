@@ -377,7 +377,7 @@ export default function TechnicalBulletins() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => navigate(`/technical-bulletin/${bulletin.id}/edit`)}
+                          onClick={() => navigate(`/technical-bulletin/${bulletin.id}`)}
                           title="Edit"
                         >
                           <Pencil className="w-4 h-4" />
