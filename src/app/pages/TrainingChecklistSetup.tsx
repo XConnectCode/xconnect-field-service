@@ -9,10 +9,9 @@ import { toast } from 'sonner';
 import { useAuth } from '../lib/auth-context';
 import {
   listTemplates, saveTemplate, deleteTemplate, isMissingTableError,
+  listProductLines,
   type ChecklistTemplate, type ChecklistStep,
 } from '../lib/trainingChecklists';
-
-const PRODUCT_LINES = ['XC', 'RAIL', 'DSX', 'LynX', 'XC Oriented', 'XC 2.75"', 'ReConnect', 'mRAIL'];
 
 function newStepId() {
   return `s_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -34,6 +33,9 @@ export default function TrainingChecklistSetup() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [templates, setTemplates] = useState<ChecklistTemplate[]>([]);
+  // Product lines come from the canonical lists.xc_products source (Manage
+  // Lists) so the dropdown always reflects every product line, no hard-coding.
+  const [productLines, setProductLines] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [tableMissing, setTableMissing] = useState(false);
 
@@ -49,6 +51,12 @@ export default function TrainingChecklistSetup() {
       const tpls = await listTemplates(true);
       setTemplates(tpls);
       setTableMissing(false);
+      // Load all product lines, folding in any value already on a template so an
+      // existing template's product line is never missing from the dropdown.
+      try {
+        const pls = await listProductLines(tpls.map((t) => t.product_line));
+        setProductLines(pls);
+      } catch { /* non-fatal: dropdown just shows existing values */ }
     } catch (err: any) {
       if (isMissingTableError(err)) setTableMissing(true);
       else toast.error('Failed to load templates');
@@ -188,7 +196,12 @@ export default function TrainingChecklistSetup() {
                       className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
                     >
                       <option value="">— Select —</option>
-                      {PRODUCT_LINES.map((p) => <option key={p} value={p}>{p}</option>)}
+                      {/* Ensure the currently-selected value is always present
+                          even if it is not (yet) in the loaded list. */}
+                      {(editing.product_line && !productLines.includes(editing.product_line)
+                        ? [editing.product_line, ...productLines]
+                        : productLines
+                      ).map((p) => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
                 )}
