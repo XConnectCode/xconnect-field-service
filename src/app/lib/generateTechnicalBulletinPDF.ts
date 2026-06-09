@@ -264,12 +264,14 @@ function drawSummary(doc: any, text: string, y: number, severity: string, compac
 
 // ── Section label with rule ───────────────────────────────────────────────────
 function sectionLabel(doc: any, label: string, y: number, compact: boolean): number {
-  const fs = compact ? 7.5 : 8;
+  const fs = compact ? 9.5 : 10.5;
   doc.setFont('helvetica', 'bold'); doc.setFontSize(fs); doc.setTextColor(...GRAY_TEXT);
   doc.text(label.toUpperCase(), MARGIN, y);
   doc.setDrawColor(...XC_BORDER); doc.setLineWidth(0.3);
-  doc.line(MARGIN + doc.getTextWidth(label.toUpperCase()) + 2, y - 1, MARGIN + CONT_W, y - 1);
-  return y + (compact ? 3 : 4);
+  // Center the rule on the cap-height of the (now larger) label text.
+  const ruleY = y - fs * 0.353 * 0.34;
+  doc.line(MARGIN + doc.getTextWidth(label.toUpperCase()) + 2, ruleY, MARGIN + CONT_W, ruleY);
+  return y + (compact ? 3.8 : 5);
 }
 
 // ── Tech details + side image — sm scales trailing gap ────────────────────────
@@ -326,10 +328,12 @@ function drawActions(doc: any, actions: string[], y: number, compact: boolean, s
 
   let ay = y + padV;
   lineArrays.forEach((ls, idx) => {
+    // Center the numbered marker on the optical center of the first text line.
+    const markerCy = ay - fs * 0.353 * 0.32;
     doc.setFillColor(34,197,94);
-    doc.circle(MARGIN + 7, ay + fs * 0.176, 2, 'F');
+    doc.circle(MARGIN + 7, markerCy, 2, 'F');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(255,255,255);
-    doc.text(String(idx + 1), MARGIN + 7, ay + fs * 0.176 + 0.8, { align: 'center' });
+    doc.text(String(idx + 1), MARGIN + 7, markerCy + 1.05, { align: 'center' });
     doc.setFont('helvetica', 'normal'); doc.setFontSize(fs); doc.setTextColor(30,30,30);
     ls.forEach((l: string, i: number) => doc.text(l, MARGIN + 12, ay + i * lineH));
     ay += ls.length * lineH + 2;
@@ -380,7 +384,10 @@ async function drawSection(
       doc.setFont('helvetica', 'normal'); doc.setFontSize(fs);
       const ls: string[] = doc.splitTextToSize(b, wrapW);
       doc.setFillColor(...XC_GREEN);
-      doc.circle(indentX, by + fs * 0.176 - 0.4, 0.9, 'F');
+      // Align the bullet to the optical center of the FIRST text line. Text is
+      // drawn with its baseline at `by`, so the cap-height center sits roughly
+      // fs*0.353*0.32 mm ABOVE the baseline (pt→mm = 0.353).
+      doc.circle(indentX, by - fs * 0.353 * 0.32, 0.9, 'F');
       doc.setFont('helvetica', 'normal'); doc.setFontSize(fs); doc.setTextColor(40, 40, 40);
       ls.forEach((l: string, i: number) => doc.text(l, textX, by + i * lineH));
       by += ls.length * lineH + 1.2;
