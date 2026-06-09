@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS technical_bulletins (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bulletin_number TEXT NOT NULL,
   bulletin_type TEXT NOT NULL DEFAULT 'Informational',
+  sections JSONB DEFAULT '[]',
   title TEXT NOT NULL,
   date DATE NOT NULL,
   severity TEXT NOT NULL CHECK (severity IN ('Critical', 'High', 'Medium', 'Low', 'Information')),
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS technical_bulletins (
 ALTER TABLE technical_bulletins ADD COLUMN IF NOT EXISTS customer_file_url TEXT;
 ALTER TABLE technical_bulletins ADD COLUMN IF NOT EXISTS customer_file_label TEXT;
 ALTER TABLE technical_bulletins ADD COLUMN IF NOT EXISTS bulletin_type TEXT NOT NULL DEFAULT 'Informational';
+ALTER TABLE technical_bulletins ADD COLUMN IF NOT EXISTS sections JSONB DEFAULT '[]';
 
 CREATE INDEX IF NOT EXISTS idx_technical_bulletins_bulletin_number ON technical_bulletins(bulletin_number);
 CREATE INDEX IF NOT EXISTS idx_technical_bulletins_date ON technical_bulletins(date DESC);
@@ -60,7 +62,53 @@ DROP POLICY IF EXISTS "Allow all users to delete bulletins" ON technical_bulleti
 DROP POLICY IF EXISTS "Allow authenticated users to read bulletins" ON technical_bulletins;
 DROP POLICY IF EXISTS "Allow authenticated users to insert bulletins" ON technical_bulletins;
 DROP POLICY IF EXISTS "Allow authenticated users to update bulletins" ON technical_bulletins;
-DROP POLICY IF EXISTS "Allow authenticated users to delete bulletins" ON technical_bulletins;`;
+DROP POLICY IF EXISTS "Allow authenticated users to delete bulletins" ON technical_bulletins;
+
+-- =====================================================================
+-- Generated-PDF storage (so a saved bulletin keeps its generated docs,
+-- just like incidents). Creates a private bucket + a tracking table.
+-- Safe to run multiple times.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS technical_bulletin_reports (
+  row_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bulletin_id  UUID NOT NULL REFERENCES technical_bulletins(id) ON DELETE CASCADE,
+  report_type  TEXT NOT NULL,            -- 'Standard' | 'Compact'
+  file_path    TEXT,
+  file_name    TEXT,
+  generated_at TIMESTAMPTZ DEFAULT NOW(),
+  generated_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tb_reports_bulletin_id ON technical_bulletin_reports(bulletin_id);
+CREATE INDEX IF NOT EXISTS idx_tb_reports_report_type ON technical_bulletin_reports(report_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tb_reports_unique_type ON technical_bulletin_reports(bulletin_id, report_type);
+ALTER TABLE technical_bulletin_reports DISABLE ROW LEVEL SECURITY;
+
+-- Private storage bucket for the generated PDFs
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('technical-bulletins', 'technical-bulletins', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- Authenticated users can read/write the generated PDFs (shared across users)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects' AND policyname='technical_bulletins_authenticated_read') THEN
+    CREATE POLICY technical_bulletins_authenticated_read ON storage.objects FOR SELECT
+      USING (bucket_id = 'technical-bulletins' AND auth.role() = 'authenticated');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects' AND policyname='technical_bulletins_authenticated_insert') THEN
+    CREATE POLICY technical_bulletins_authenticated_insert ON storage.objects FOR INSERT
+      WITH CHECK (bucket_id = 'technical-bulletins' AND auth.role() = 'authenticated');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects' AND policyname='technical_bulletins_authenticated_update') THEN
+    CREATE POLICY technical_bulletins_authenticated_update ON storage.objects FOR UPDATE
+      USING (bucket_id = 'technical-bulletins' AND auth.role() = 'authenticated')
+      WITH CHECK (bucket_id = 'technical-bulletins' AND auth.role() = 'authenticated');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='storage' AND tablename='objects' AND policyname='technical_bulletins_authenticated_delete') THEN
+    CREATE POLICY technical_bulletins_authenticated_delete ON storage.objects FOR DELETE
+      USING (bucket_id = 'technical-bulletins' AND auth.role() = 'authenticated');
+  END IF;
+END $$;`;
 
   const handleCopy = () => {
     // Try modern clipboard API first
