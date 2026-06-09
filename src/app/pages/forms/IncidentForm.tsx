@@ -206,6 +206,13 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  /**
+   * Render shell. 'modal' (default) wraps the form in a Radix Dialog. 'page'
+   * renders the exact same header/form/footer inline so a parent route can show
+   * editing as a full page (matching the Field Visits edit UX). The form body,
+   * validation, and status-machine logic are identical in both variants.
+   */
+  variant?: 'modal' | 'page';
   incident?: any;
   // Initial values for a NEW incident (e.g. "Log Incident" from a Field Visit).
   // Unlike `incident`, this does NOT switch the form into edit mode — the record
@@ -225,6 +232,7 @@ export default function IncidentForm({
   open,
   onClose,
   onSaved,
+  variant = 'modal',
   incident,
   prefill,
   currentUser,
@@ -667,57 +675,29 @@ export default function IncidentForm({
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) onClose();
-      }}
-    >
-      <DialogContent
-        className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0"
-        // The AI Assistant panel is portal'd to <body>, so it lives outside this
-        // Dialog's DOM tree. Without these guards, Radix treats any click/focus
-        // inside the panel as an "outside" interaction and auto-dismisses the
-        // Dialog (closing both the form and the panel). Keep the Dialog open
-        // when the interaction originated inside the AI panel.
-        onPointerDownOutside={(e) => {
-          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
-            e.preventDefault();
-          }
-        }}
-        onInteractOutside={(e) => {
-          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
-            e.preventDefault();
-          }
-        }}
-        onFocusOutside={(e) => {
-          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
-            e.preventDefault();
-          }
-        }}
-      >
-        <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
-          <div className="flex items-center justify-between gap-3">
-            <DialogTitle>
-              {editing
-                ? `Edit Incident #${incident.event_id}`
-                : 'Report New Incident'}
-            </DialogTitle>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5 mr-8"
-              onClick={() => setAiOpen(true)}
-              title="Open the AI writing/review assistant"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
-              AI Assistant
-            </Button>
-          </div>
-        </DialogHeader>
+  const titleText = editing
+    ? `Edit Incident #${incident.event_id}`
+    : 'Report New Incident';
 
+  // AI Assistant trigger button — shared by both shells.
+  const aiButton = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="gap-1.5"
+      onClick={() => setAiOpen(true)}
+      title="Open the AI writing/review assistant"
+    >
+      <Sparkles className="h-3.5 w-3.5 text-indigo-600" />
+      AI Assistant
+    </Button>
+  );
+
+  // The form body + AI assistant panel + sticky footer are identical in both
+  // the modal and full-page shells. Only the surrounding chrome differs.
+  const formBody = (
+    <>
         <form
           id="incident-form"
           ref={formRef}
@@ -1324,6 +1304,67 @@ export default function IncidentForm({
             {saving ? 'Saving…' : editing ? 'Update Incident' : 'Submit Incident'}
           </Button>
         </div>
+    </>
+  );
+
+  // ── Full-page shell (variant='page') ──
+  // Renders the same header/body/footer inline, sized to fill the routed page,
+  // so incident editing looks like the Field Visits full-page edit instead of a
+  // modal. No Radix Dialog overlay/focus-trap.
+  if (variant === 'page') {
+    return (
+      <div className="flex flex-col h-[calc(100vh-4rem)] bg-white dark:bg-gray-900">
+        <div className="px-6 pt-5 pb-3 border-b shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {titleText}
+            </h1>
+            {aiButton}
+          </div>
+        </div>
+        {formBody}
+      </div>
+    );
+  }
+
+  // ── Modal shell (default) ──
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
+      <DialogContent
+        className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0"
+        // The AI Assistant panel is portal'd to <body>, so it lives outside this
+        // Dialog's DOM tree. Without these guards, Radix treats any click/focus
+        // inside the panel as an "outside" interaction and auto-dismisses the
+        // Dialog (closing both the form and the panel). Keep the Dialog open
+        // when the interaction originated inside the AI panel.
+        onPointerDownOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
+            e.preventDefault();
+          }
+        }}
+        onFocusOutside={(e) => {
+          if ((e.target as HTMLElement)?.closest?.('[data-ai-assistant-panel]')) {
+            e.preventDefault();
+          }
+        }}
+      >
+        <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle>{titleText}</DialogTitle>
+            <div className="mr-8">{aiButton}</div>
+          </div>
+        </DialogHeader>
+        {formBody}
       </DialogContent>
     </Dialog>
   );
