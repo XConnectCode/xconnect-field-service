@@ -618,16 +618,27 @@ async function renderBulletin(
     }
   }
 
-  checkPage(compact ? 22 : 28);
-  y = await drawContactDownload(doc, y, roleText, customerFileUrl, customerFileLabel, compact, sm);
-
-  // Disclaimer
-  checkPage(10);
-  doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(...GRAY_TEXT);
+  // Measure the contact row + disclaimer as ONE trailing block so a short
+  // closing line (e.g. the 2-line disclaimer) never gets orphaned on a new
+  // page just a few mm over the limit. We only break to a new page if the
+  // whole block genuinely won't fit above the footer (with a small tolerance).
+  const contactRowH = (compact ? 16 : 19) + (compact ? 4 * sm : 6); // mirrors drawContactDownload return
+  doc.setFont('helvetica', 'italic'); doc.setFontSize(7);
   const disc = 'This technical bulletin is provided for informational purposes. Contact XConnect technical support for specific guidance related to your operations.';
   const discLines: string[] = doc.splitTextToSize(disc, CONT_W);
+  const discH = discLines.length * 3.5;
+  // Tolerance: allow the trailing block to use the full page down to the footer
+  // rule. USABLE_H already excludes the footer band, so anything that fits
+  // within USABLE_H + a hair (1mm) is fine and shouldn't spill to a new page.
+  const TRAILING_TOL = 1;
+  if (y + contactRowH + discH > USABLE_H + TRAILING_TOL) newPage();
+
+  y = await drawContactDownload(doc, y, roleText, customerFileUrl, customerFileLabel, compact, sm);
+
+  // Disclaimer (kept with the contact row above — no separate page-break check)
+  doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(...GRAY_TEXT);
   discLines.forEach((l: string, i: number) => doc.text(l, MARGIN, y + i * 3.5));
-  y += discLines.length * 3.5;
+  y += discH;
 
   drawFooters(doc);
 

@@ -6,10 +6,17 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
-import { FileText, Download, Plus, X, Upload, Image as ImageIcon, Save, ArrowLeft, ChevronUp, ChevronDown, Trash2, List as ListIcon, AlignLeft } from 'lucide-react';
+import { FileText, Download, Plus, X, Upload, Image as ImageIcon, Save, ArrowLeft, ChevronUp, ChevronDown, Trash2, List as ListIcon, AlignLeft, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { generateTechnicalBulletinPDF } from '../lib/generateTechnicalBulletinPDF';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/auth-context';
+import {
+  uploadBulletinReport,
+  getBulletinReportUrl,
+  listBulletinReports,
+  type BulletinReportRow,
+} from '../lib/bulletinReportStorage';
 
 const SEVERITY_OPTIONS = ['Critical', 'High', 'Medium', 'Low', 'Information'] as const;
 
@@ -199,6 +206,7 @@ const getBulletinFileStore = (): Record<string, { url: string; label: string }> 
 export default function TechnicalBulletin() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [bulletinNumber, setBulletinNumber] = useState('');
   const [nextNumberPreview, setNextNumberPreview] = useState('');
   const [bulletinType, setBulletinType] = useState<string>('Informational');
@@ -219,9 +227,18 @@ export default function TechnicalBulletin() {
   const [problemImages, setProblemImages] = useState<Array<{ url: string; caption: string }>>([]);
   const [fixImages, setFixImages] = useState<Array<{ url: string; caption: string }>>([]);
   const [generating, setGenerating] = useState(false);
+  const [generatingVariant, setGeneratingVariant] = useState<'standard' | 'compact' | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [storedReports, setStoredReports] = useState<BulletinReportRow[]>([]);
   const isEditMode = id && id !== 'new';
+
+  // Load any previously-generated/stored PDFs for this saved bulletin.
+  const loadStoredReports = async (bulletinId: string) => {
+    if (!bulletinId) return;
+    const rows = await listBulletinReports(bulletinId);
+    setStoredReports(rows);
+  };
 
   // Load existing bulletin if editing
   useEffect(() => {
@@ -262,6 +279,8 @@ export default function TechnicalBulletin() {
       const fileEntry = getBulletinFileStore()[data.id] || {};
       setCustomerFileUrl(fileEntry.url || '');
       setCustomerFileLabel(fileEntry.label || '');
+      // Pull any previously-generated PDFs so the user can grab them directly.
+      loadStoredReports(data.id);
     }
     setLoading(false);
   };
@@ -497,8 +516,11 @@ export default function TechnicalBulletin() {
     }
 
     setGenerating(true);
+    setGeneratingVariant(compact ? 'compact' : 'standard');
     try {
-      await generateTechnicalBulletinPDF({
+      // Build the PDF as a Blob so we can both download it locally AND persist
+      // it to shared storage (so the saved bulletin keeps its generated doc).
+      const blob = await generateTechnicalBulletinPDF({
         bulletinNumber: bulletinNumber.trim(),
         title: title.trim(),
         date,
@@ -513,14 +535,69 @@ export default function TechnicalBulletin() {
         problemImages: problemImages.length > 0 ? problemImages : undefined,
         fixImages: fixImages.length > 0 ? fixImages : undefined,
         compact,
-        returnBlob: false,
-      });
+        returnBlob: true,
+      }) as Blob;
+
+      const fileName = `Technical_Bulletin_TB-${bulletinNumber.trim()}_${compact ? 'Compact' : 'Standard'}.pdf`;
+
+      // 1) Trigger the local download (same UX as before).
+      const localUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = localUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(localUrl), 4000);
       toast.success(`${compact ? 'Compact' : 'Standard'} PDF generated successfully!`);
+
+      // 2) Persist to shared storage so it's grabbable from the saved entry.
+      //    Only possible once the bulletin row exists (edit mode / has id).
+      const savedId = isEditMode ? (id as string) : '';
+      if (savedId) {
+        try {
+          const inserted = await uploadBulletinReport({
+            blob,
+            bulletinId: savedId,
+            bulletinNumber: bulletinNumber.trim(),
+            variant: compact ? 'compact' : 'standard',
+            generatedBy: user?.email || (user as any)?.name || null,
+          });
+          setStoredReports(prev => {
+            const filtered = prev.filter(r => r.report_type !== inserted.report_type);
+            return [inserted, ...filtered];
+          });
+          toast.success(`${compact ? 'Compact' : 'Standard'} PDF saved to this bulletin.`);
+        } catch (storeErr: any) {
+          console.warn('Could not store bulletin PDF:', storeErr?.message);
+          toast.info('PDF downloaded, but could not be saved to the bulletin (storage unavailable).');
+        }
+      }
     } catch (error) {
       console.error('PDF generation error:', error);
       toast.error('Failed to generate PDF');
     } finally {
       setGenerating(false);
+      setGeneratingVariant(null);
+    }
+  };
+
+  // Preview/download a previously-stored PDF straight from the saved bulletin.
+  const openStoredReport = async (report: BulletinReportRow, download: boolean) => {
+    try {
+      const url = await getBulletinReportUrl(report);
+      if (!url) return;
+      const a = document.createElement('a');
+      a.href = url;
+      if (download) a.download = report.file_name || 'bulletin.pdf';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Could not open the stored document');
     }
   };
 
@@ -1172,7 +1249,7 @@ export default function TechnicalBulletin() {
                   variant="outline"
                   className="w-full border-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-900 hover:text-white"
                 >
-                  {generating ? (
+                  {generatingVariant === 'standard' ? (
                     <>Generating…</>
                   ) : (
                     <>
@@ -1187,7 +1264,7 @@ export default function TechnicalBulletin() {
                   size="lg"
                   className="w-full bg-gray-900 hover:bg-gray-700 text-white"
                 >
-                  {generating ? (
+                  {generatingVariant === 'compact' ? (
                     <>Generating…</>
                   ) : (
                     <>
@@ -1198,7 +1275,62 @@ export default function TechnicalBulletin() {
                 </Button>
               </div>
               <p className="text-xs text-gray-400">Compact mode targets a single page — tighter spacing, side-panel image, condensed layout.</p>
+              {isEditMode ? (
+                <p className="text-xs text-gray-400">Generated PDFs are also saved to this bulletin so you can grab them anytime below.</p>
+              ) : (
+                <p className="text-xs text-gray-400">Save the bulletin first to keep its generated PDFs on the entry.</p>
+              )}
             </div>
+
+            {/* Saved Documents — previously generated PDFs stored on this bulletin */}
+            {isEditMode && storedReports.length > 0 && (
+              <div className="pt-4 border-t space-y-2">
+                <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">Saved Documents</p>
+                <div className="space-y-2">
+                  {storedReports.map((report) => (
+                    <div
+                      key={report.row_id}
+                      className="flex items-center justify-between gap-3 rounded-md border border-gray-200 dark:border-gray-700 px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-4 h-4 text-gray-500 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {report.report_type} PDF
+                          </p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {report.file_name}
+                            {report.generated_at
+                              ? ` · ${new Date(report.generated_at).toLocaleString()}`
+                              : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          title="Open"
+                          onClick={() => openStoredReport(report, false)}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          title="Download"
+                          onClick={() => openStoredReport(report, true)}
+                        >
+                          <Download className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Save Button */}
             <div className="pt-4 border-t">
