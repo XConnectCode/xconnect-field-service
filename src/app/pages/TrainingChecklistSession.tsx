@@ -15,6 +15,10 @@ import {
   type CustomerOption, type DistrictOption,
 } from '../lib/trainingChecklists';
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
+import SignaturePad from '../components/SignaturePad';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
+
+const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
 export default function TrainingChecklistSession() {
   const { id } = useParams();
@@ -34,6 +38,7 @@ export default function TrainingChecklistSession() {
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
   const [signoff, setSignoff] = useState('');
+  const [signoffSigUrl, setSignoffSigUrl] = useState<string | null>(null);
 
   // reference data for the customer / district dropdowns
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -62,6 +67,7 @@ export default function TrainingChecklistSession() {
         setLocation(s.location || '');
         setNotes(s.notes || '');
         setSignoff(s.signoff_name || '');
+        setSignoffSigUrl(s.signoff_sig_url || null);
       }
     } catch (err: any) {
       toast.error(err?.message || 'Failed to load session');
@@ -95,6 +101,7 @@ export default function TrainingChecklistSession() {
         location: location.trim() || session.location,
         notes: notes.trim() || null,
         signoff_name: signoff.trim() || null,
+        signoff_sig_url: signoffSigUrl || null,
       };
       // Pull the full linked field visit (if any) for the visit-details section.
       let visit: Record<string, any> | null = null;
@@ -128,6 +135,7 @@ export default function TrainingChecklistSession() {
         location: location.trim() || null,
         notes: notes.trim() || null,
         signoff_name: signoff.trim() || null,
+        signoff_sig_url: signoffSigUrl || null,
         ...(markComplete ? { status: 'completed' } : {}),
       });
       setSession(updated);
@@ -306,6 +314,19 @@ export default function TrainingChecklistSession() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Signoff (customer / trainer name)</label>
               <Input value={signoff} onChange={(e) => setSignoff(e.target.value)} disabled={!canEdit} placeholder="Name of person signing off" />
             </div>
+            <div>
+              <SignaturePad
+                parentTable="training_checklist_sessions"
+                parentRowId={id!}
+                fieldName="signoff_signature"
+                label="Signature"
+                baseUrl={baseUrl}
+                publicAnonKey={publicAnonKey}
+                existingUrl={signoffSigUrl}
+                disabled={!canEdit}
+                onSaved={(url) => setSignoffSigUrl(url)}
+              />
+            </div>
           </CardContent>
         </Card>
 
@@ -316,7 +337,7 @@ export default function TrainingChecklistSession() {
               <Save className="w-4 h-4 mr-2" />{saving ? 'Saving...' : 'Save'}
             </Button>
             {session.status !== 'completed' && (
-              <Button onClick={() => persist(true)} disabled={saving || !allDone} title={!allDone ? 'Complete all steps first' : 'Mark training complete'}>
+              <Button onClick={() => persist(true)} disabled={saving || !allDone || !signoffSigUrl} title={!allDone ? 'Complete all steps first' : !signoffSigUrl ? 'Save a signature before completing' : 'Mark training complete'}>
                 <CheckCircle2 className="w-4 h-4 mr-2" />Mark Complete
               </Button>
             )}

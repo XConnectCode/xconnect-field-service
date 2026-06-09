@@ -43,6 +43,7 @@ export interface ChecklistSession {
   step_results: ChecklistStepResult[];
   notes: string | null;
   signoff_name: string | null;
+  signoff_sig_url: string | null;
   status: 'in_progress' | 'completed' | string;
   completed_at: string | null;
   created_by: string | null;
