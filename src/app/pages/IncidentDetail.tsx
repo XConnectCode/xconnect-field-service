@@ -737,6 +737,21 @@ export default function IncidentDetail() {
   // Force re-renders on regenerate (pdfPreviewUrl signed URLs are short-lived).
   void pdfTick;
 
+  // Full-page edit: when editing, the whole page becomes the IncidentForm (same
+  // UX as Field Visits) instead of a modal floating over the read-only detail.
+  if (formOpen) {
+    return (
+      <IncidentForm
+        open
+        variant="page"
+        onClose={() => setFormOpen(false)}
+        onSaved={() => { setFormOpen(false); loadAll(); }}
+        incident={incident}
+        currentUser={user}
+      />
+    );
+  }
+
   return (
     <div className="p-8">
       <div className="max-w-5xl mx-auto">
@@ -1291,14 +1306,7 @@ export default function IncidentDetail() {
         </div>
       </div>
 
-      {/* ── Edit Form ── */}
-      <IncidentForm
-        open={formOpen}
-        onClose={() => setFormOpen(false)}
-        onSaved={() => { setFormOpen(false); loadAll(); }}
-        incident={incident}
-        currentUser={user}
-      />
+      {/* Edit is rendered as a full page above (early return when formOpen). */}
 
       {/* ── PDF Image Picker ── */}
       {pickerVersion && incident?.row_id && (
