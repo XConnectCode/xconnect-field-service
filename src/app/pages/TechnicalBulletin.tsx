@@ -619,7 +619,8 @@ export default function TechnicalBulletin() {
       }
       toast.success(isEditMode ? 'Bulletin updated successfully!' : 'Bulletin created successfully!');
       if (!isEditMode && data) {
-        navigate(`/technical-bulletin/${data.id}/edit`);
+        // Edit mode is the same route with the row id (no `/edit` suffix).
+        navigate(`/technical-bulletin/${data.id}`);
       }
     }
   };
