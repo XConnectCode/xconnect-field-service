@@ -23,7 +23,7 @@ const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775
 export default function TrainingChecklistSession() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, accessToken } = useAuth();
   const canEdit = user?.role === 'admin' || user?.role === 'sqm';
 
   const [session, setSession] = useState<ChecklistSession | null>(null);
@@ -67,7 +67,30 @@ export default function TrainingChecklistSession() {
         setLocation(s.location || '');
         setNotes(s.notes || '');
         setSignoff(s.signoff_name || '');
-        setSignoffSigUrl(s.signoff_sig_url || null);
+        // Prefer the persisted column; otherwise rehydrate the latest uploaded
+        // signoff signature from the images table so a reload before an explicit
+        // Save still shows the drawn signature.
+        if (s.signoff_sig_url) {
+          setSignoffSigUrl(s.signoff_sig_url);
+        } else {
+          try {
+            const resp = await fetch(`${baseUrl}/images/training_checklist_sessions/${encodeURIComponent(sid)}`, {
+              headers: { Authorization: `Bearer ${accessToken ?? publicAnonKey}` },
+            });
+            if (resp.ok) {
+              const imgData = await resp.json();
+              const files = Array.isArray(imgData.files) ? imgData.files : [];
+              const sig = files
+                .filter((f: any) => f.fieldName === 'signoff_signature' && f.url)
+                .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+              setSignoffSigUrl(sig?.url || null);
+            } else {
+              setSignoffSigUrl(null);
+            }
+          } catch {
+            setSignoffSigUrl(null);
+          }
+        }
       }
     } catch (err: any) {
       toast.error(err?.message || 'Failed to load session');
