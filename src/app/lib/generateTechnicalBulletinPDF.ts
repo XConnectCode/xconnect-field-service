@@ -179,6 +179,7 @@ function drawTitleBar(doc: any, title: string, severity: string, y: number, comp
   const sev  = SEV[severity] || SEV.Information;
   const fs   = compact ? 10.5 : 12;
   const padV = compact ? 4 : 5;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(fs);
   const lines: string[] = doc.splitTextToSize(title, CONT_W - 4);
   const barH = lines.length * (fs * 0.353 + 1.2) + padV * 2;
   doc.setFillColor(...sev.bg);
@@ -208,6 +209,7 @@ function drawMetadata(
     { label: 'DISTRIBUTION',      val: distribution },
   ];
 
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(valSize);
   const colLines = cols.map(c => doc.splitTextToSize(c.val, colW - 8) as string[]);
   const maxRows  = Math.max(...colLines.map((a: string[]) => a.length));
   const boxH     = padH + 4 + maxRows * lineH + padH;
@@ -236,6 +238,7 @@ function drawSummary(doc: any, text: string, y: number, severity: string, compac
   const fs    = compact ? 9.5 : 11;
   const lineH = compact ? 4.2 : 4.8;
   const padV  = compact ? 4 : 5;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(fs);
   const lines: string[] = doc.splitTextToSize(text, CONT_W - 8);
   const boxH  = lines.length * lineH + padV * 2;
   doc.setFillColor(...sev.light); doc.setDrawColor(...sev.bg); doc.setLineWidth(0.4);
@@ -351,6 +354,8 @@ async function drawSection(
 
   let contentH = 0;
 
+  // IMPORTANT: set font + size BEFORE splitTextToSize so wrapping is measured at
+  // the real render size (otherwise lines overflow the right margin).
   if (section.format === 'bullets') {
     const bullets = (section.bullets || []).map(b => b.trim()).filter(Boolean);
     const indentX = MARGIN + 5;
@@ -359,18 +364,19 @@ async function drawSection(
     let by = y;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(fs); doc.setTextColor(40, 40, 40);
     bullets.forEach((b) => {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(fs);
       const ls: string[] = doc.splitTextToSize(b, wrapW);
       doc.setFillColor(...XC_GREEN);
       doc.circle(indentX, by + fs * 0.176 - 0.4, 0.9, 'F');
-      doc.setTextColor(40, 40, 40);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(fs); doc.setTextColor(40, 40, 40);
       ls.forEach((l: string, i: number) => doc.text(l, textX, by + i * lineH));
       by += ls.length * lineH + 1.2;
     });
     contentH = by - y;
   } else {
     const text = (section.body || '').trim();
-    const lines: string[] = doc.splitTextToSize(text, bodyW - 2);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(fs); doc.setTextColor(40, 40, 40);
+    const lines: string[] = doc.splitTextToSize(text, bodyW - 2);
     lines.forEach((l: string, i: number) => doc.text(l, MARGIN, y + i * lineH));
     contentH = lines.length * lineH;
   }
@@ -488,8 +494,9 @@ async function renderBulletin(
       : !!(s.body || '').trim();
 
   let bodySections: BulletinPdfSection[] = (sections || []).filter(hasContent);
+  const usingSections = bodySections.length > 0;
 
-  if (bodySections.length === 0) {
+  if (!usingSections) {
     const legacy: BulletinPdfSection[] = [];
     if (summary && summary.trim())
       legacy.push({ heading: 'Summary', format: 'paragraph', body: summary });
@@ -501,6 +508,17 @@ async function renderBulletin(
     if (acts.length)
       legacy.push({ heading: 'Recommended Actions', format: 'bullets', bullets: acts });
     bodySections = legacy;
+  }
+
+  // Drop a leading section whose body merely repeats the title (common with a
+  // "Subject" section seeded equal to the title) to avoid a duplicate heading.
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (
+    bodySections.length > 1 &&
+    bodySections[0].format === 'paragraph' &&
+    norm(bodySections[0].body || '') === norm(title)
+  ) {
+    bodySections = bodySections.slice(1);
   }
 
   let y = 0;
@@ -520,44 +538,55 @@ async function renderBulletin(
   y = drawMetadata(doc, y, productsText, partsText, distText, compact, sm);
 
   // ── Body: ordered editable sections ──────────────────────────────────────────
-  // The first paragraph section renders as the severity-colored summary callout
-  // for visual prominence; the first problem image floats beside the first
-  // following section (mirroring the old tech-details + side-image layout).
+  // First problem image floats beside the first SUFFICIENTLY LONG paragraph
+  // section (so it doesn't leave a tall gap beside two lines); otherwise it
+  // renders full-width inline after the body. A side image is only attached when
+  // the section text is tall enough to sit alongside it, preventing overlap.
   const firstProblem = problemImages && problemImages.length > 0 ? problemImages[0] : undefined;
+  const fs    = compact ? 9.5 : 11;
+  const lineH = compact ? 4.2 : 4.8;
 
-  let sideImageUsed = false;
-  let startIdx = 0;
-
-  // Use the leading paragraph section as the callout when available.
-  if (bodySections.length > 0 && bodySections[0].format === 'paragraph') {
-    checkPage(14);
-    y = drawSummary(doc, (bodySections[0].body || '').trim(), y, severity, compact, sm);
-    startIdx = 1;
+  // Decide which section (if any) the side image attaches to: the first
+  // paragraph section whose wrapped text is at least as tall as the image.
+  let sideTargetIdx = -1;
+  if (firstProblem) {
+    const sideBodyW = CONT_W * 0.57;
+    const minImgH   = compact ? 42 : 72;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(fs);
+    for (let i = 0; i < bodySections.length; i++) {
+      const sec = bodySections[i];
+      if (sec.format !== 'paragraph') continue;
+      const ls: string[] = doc.splitTextToSize((sec.body || '').trim(), sideBodyW - 2);
+      // require text at least ~70% of the image height so the gap is acceptable
+      if (ls.length * lineH >= minImgH * 0.7) { sideTargetIdx = i; break; }
+    }
   }
 
-  for (let i = startIdx; i < bodySections.length; i++) {
+  let sideImageUsed = false;
+
+  for (let i = 0; i < bodySections.length; i++) {
     const sec = bodySections[i];
-    checkPage(compact ? 24 : 36);
-    // Attach the problem image beside the first paragraph section we draw
-    // generically (skip for bullet sections, which use full width).
-    const side =
-      !sideImageUsed && firstProblem && sec.format === 'paragraph'
-        ? firstProblem
-        : undefined;
+    const side = firstProblem && i === sideTargetIdx ? firstProblem : undefined;
+    // Reserve enough room for a side image so it never spills past the footer.
+    const reserve = side ? (compact ? 50 : 84) : (compact ? 24 : 36);
+    checkPage(reserve);
     if (side) sideImageUsed = true;
     y = await drawSection(doc, y, sec, compact, sm, side);
   }
 
-  // If no section consumed the side image, render the first problem image inline
-  // below the body so it is never dropped.
+  // If no section was tall enough, render the first problem image full-width
+  // inline so it is never dropped and never overlaps text.
   if (firstProblem && !sideImageUsed) {
-    checkPage(compact ? 28 : 50);
-    if (firstProblem.caption) {
-      doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(...GRAY_TEXT);
-      doc.text(firstProblem.caption, MARGIN, y); y += 4;
+    checkPage(compact ? 30 : 56);
+    y = sectionLabel(doc, 'Reference Image', y, compact);
+    const h = await addContainedImage(doc, firstProblem.url, MARGIN, y, CONT_W, compact ? 40 : 78, compact);
+    y += (h || 0) + 2;
+    if (firstProblem.caption && (h || 0) > 0) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(...GRAY_TEXT);
+      doc.text(firstProblem.caption, MARGIN, y);
+      y += 4;
     }
-    const h = await addContainedImage(doc, firstProblem.url, MARGIN, y, CONT_W, compact ? 35 : 70, compact);
-    y += (h || 0) + (compact ? 4 * sm : 6);
+    y += (compact ? 4 * sm : 6);
   }
 
   const extraProblems = problemImages ? problemImages.slice(1) : [];
