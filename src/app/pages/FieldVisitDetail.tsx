@@ -26,7 +26,7 @@ import {
 import { toast } from 'sonner';
 import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
-import { displayVisitDuration, toLocalInputValue, fromLocalInputValue } from '../lib/visitDuration';
+import { displayVisitDuration, toInputValue, formatVisitTimestamp } from '../lib/visitDuration';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const VISIT_PURPOSE_OPTS = [
@@ -255,11 +255,10 @@ export default function FieldVisitDetail() {
       const payload = {
         visit_purpose: form.visit_purpose || null,
         field_or_facility: form.field_or_facility || null,
-        // datetime-local inputs hold LOCAL wall-clock strings; normalise back
-        // to UTC ISO before persisting to the timestamptz columns so the saved
-        // instant matches what the user picked (no UTC-offset drift).
-        arrival_date: fromLocalInputValue(form.arrival_date),
-        departure_date: fromLocalInputValue(form.departure_date),
+        // Persist the datetime-local strings verbatim (naive wall-clock), matching
+        // the Edit modal. No UTC conversion — that would shift the stored time.
+        arrival_date: form.arrival_date || null,
+        departure_date: form.departure_date || null,
         // visit_duration is derived from arrival/departure and is not persisted
         // from the form (it would otherwise drift out of sync with the dates).
         customer: form.customer || null,
@@ -403,12 +402,9 @@ export default function FieldVisitDetail() {
 
   // ── format helpers ──────────────────────────────────────────────────────────
   function fmtDate(val: string | null | undefined) {
-    if (!val) return '—';
-    try {
-      return new Date(val).toLocaleString();
-    } catch {
-      return val;
-    }
+    // Render the stored wall-clock verbatim (no time-zone conversion) so the
+    // detail view matches the Edit modal, which treats timestamps as naive.
+    return formatVisitTimestamp(val);
   }
 
   // ── render ──────────────────────────────────────────────────────────────────
@@ -600,7 +596,7 @@ export default function FieldVisitDetail() {
                 >
                   <Input
                     type="datetime-local"
-                    value={toLocalInputValue(form.arrival_date)}
+                    value={toInputValue(form.arrival_date)}
                     onChange={(e) => setField('arrival_date', e.target.value)}
                     className="text-sm"
                   />
@@ -613,7 +609,7 @@ export default function FieldVisitDetail() {
                 >
                   <Input
                     type="datetime-local"
-                    value={toLocalInputValue(form.departure_date)}
+                    value={toInputValue(form.departure_date)}
                     onChange={(e) => setField('departure_date', e.target.value)}
                     className="text-sm"
                   />

@@ -51,35 +51,43 @@ export function displayVisitDuration(visit: {
 }
 
 /**
- * Timestamps are stored in Postgres as `timestamptz` (UTC). A native
- * `<input type="datetime-local">` works in the user's LOCAL time zone, so we
- * must convert in both directions or the displayed time drifts by the UTC
- * offset (e.g. 6 hours in America/Denver).
- *
- * `toLocalInputValue` turns a stored ISO/UTC timestamp into the
- * `YYYY-MM-DDTHH:mm` string a datetime-local input expects, expressed in the
- * browser's local time zone. This makes the edit field match what the
- * read-only view (which uses `toLocaleString`) shows.
+ * Visit timestamps were imported from AppSheet as NAIVE wall-clock values:
+ * the string `2026-06-05 12:22:00+00` means "12:22 PM" literally, regardless
+ * of time zone. The Edit Visit modal treats them this way (it slices the raw
+ * string into the datetime-local input and saves it back unchanged), so the
+ * whole app must do the same to stay consistent. We therefore NEVER apply a
+ * UTC↔local conversion (no `toLocaleString`, no offset shifting) — doing so
+ * shifts the displayed time by the local offset (e.g. 6h in America/Denver)
+ * and makes the detail page disagree with the modal.
  */
-export function toLocalInputValue(iso?: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  // Shift by the local offset so toISOString()'s UTC slice reflects local wall-clock time.
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+
+/** Pull the `YYYY-MM-DDTHH:mm` slice a datetime-local input expects, verbatim. */
+export function toInputValue(stored?: string | null): string {
+  if (!stored) return '';
+  // Stored form is `YYYY-MM-DD HH:MM:SS+00` or ISO `YYYY-MM-DDTHH:MM...`.
+  // Normalise the date/time separator to 'T' and take the first 16 chars.
+  return stored.replace(' ', 'T').slice(0, 16);
 }
 
 /**
- * Inverse of `toLocalInputValue`: take the local-wall-clock string produced by
- * a datetime-local input and return a full ISO (UTC) string suitable for
- * storage in a `timestamptz` column. Returns null for empty/invalid input.
+ * Format a stored timestamp for read-only display as `M/D/YYYY, h:mm:ss AM/PM`
+ * using its RAW wall-clock components — no time-zone conversion. This matches
+ * the wall-clock the Edit modal shows/saves.
  */
-export function fromLocalInputValue(localStr?: string | null): string | null {
-  if (!localStr) return null;
-  // `new Date('YYYY-MM-DDTHH:mm')` is parsed as LOCAL time by browsers, which
-  // is exactly what the user typed; toISOString() then normalises to UTC.
-  const d = new Date(localStr);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+export function formatVisitTimestamp(stored?: string | null): string {
+  if (!stored) return '—';
+  // Match `YYYY-MM-DD[ T]HH:MM[:SS]`.
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(stored);
+  if (!m) return stored;
+  const [, y, mo, d, hh, mm, ss] = m;
+  const year = Number(y);
+  const month = Number(mo);
+  const day = Number(d);
+  let hour = Number(hh);
+  const minute = mm;
+  const second = ss ?? '00';
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+  return `${month}/${day}/${year}, ${hour}:${minute}:${second} ${ampm}`;
 }
