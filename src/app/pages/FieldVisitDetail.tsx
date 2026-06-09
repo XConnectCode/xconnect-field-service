@@ -26,7 +26,7 @@ import {
 import { toast } from 'sonner';
 import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
-import { displayVisitDuration } from '../lib/visitDuration';
+import { displayVisitDuration, toLocalInputValue, fromLocalInputValue } from '../lib/visitDuration';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const VISIT_PURPOSE_OPTS = [
@@ -56,9 +56,10 @@ interface FieldProps {
   value: string | null | undefined;
   editing: boolean;
   children?: React.ReactNode; // edit-mode input; omit to make read-only
+  readOnlyHint?: string;      // shown under a read-only field while editing
 }
 
-function Field({ label, value, editing, children }: FieldProps) {
+function Field({ label, value, editing, children, readOnlyHint }: FieldProps) {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
@@ -66,6 +67,17 @@ function Field({ label, value, editing, children }: FieldProps) {
       </span>
       {editing && children ? (
         children
+      ) : editing ? (
+        // Read-only field in edit mode: render a disabled-looking box so it is
+        // visually obvious the value can't be typed (it is auto-calculated).
+        <>
+          <div className="text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 cursor-not-allowed select-none">
+            {value || '—'}
+          </div>
+          {readOnlyHint && (
+            <span className="text-xs text-gray-400">{readOnlyHint}</span>
+          )}
+        </>
       ) : (
         <p className="text-sm text-gray-900 dark:text-gray-100">{value || '—'}</p>
       )}
@@ -243,8 +255,11 @@ export default function FieldVisitDetail() {
       const payload = {
         visit_purpose: form.visit_purpose || null,
         field_or_facility: form.field_or_facility || null,
-        arrival_date: form.arrival_date || null,
-        departure_date: form.departure_date || null,
+        // datetime-local inputs hold LOCAL wall-clock strings; normalise back
+        // to UTC ISO before persisting to the timestamptz columns so the saved
+        // instant matches what the user picked (no UTC-offset drift).
+        arrival_date: fromLocalInputValue(form.arrival_date),
+        departure_date: fromLocalInputValue(form.departure_date),
         // visit_duration is derived from arrival/departure and is not persisted
         // from the form (it would otherwise drift out of sync with the dates).
         customer: form.customer || null,
@@ -585,7 +600,7 @@ export default function FieldVisitDetail() {
                 >
                   <Input
                     type="datetime-local"
-                    value={form.arrival_date ? form.arrival_date.slice(0, 16) : ''}
+                    value={toLocalInputValue(form.arrival_date)}
                     onChange={(e) => setField('arrival_date', e.target.value)}
                     className="text-sm"
                   />
@@ -598,11 +613,7 @@ export default function FieldVisitDetail() {
                 >
                   <Input
                     type="datetime-local"
-                    value={
-                      form.departure_date
-                        ? form.departure_date.slice(0, 16)
-                        : ''
-                    }
+                    value={toLocalInputValue(form.departure_date)}
                     onChange={(e) => setField('departure_date', e.target.value)}
                     className="text-sm"
                   />
@@ -623,6 +634,7 @@ export default function FieldVisitDetail() {
                       : displayVisitDuration(visit)
                   }
                   editing={editing}
+                  readOnlyHint="Auto-calculated from arrival → departure"
                 />
 
                 {/* XC Rep — constrained SQM dropdown (FieldVisitForm parity). */}
