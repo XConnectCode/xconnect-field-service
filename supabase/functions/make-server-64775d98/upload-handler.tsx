@@ -82,6 +82,7 @@ const ALLOWED_PARENTS = new Set([
   'components',
   'driver_loads',
   'qc_pallets',
+  'training_checklist_sessions',
 ]);
 
 function isValidParentTable(t: string): boolean {
