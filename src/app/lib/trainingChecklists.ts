@@ -228,6 +228,29 @@ export async function listCustomers(): Promise<CustomerOption[]> {
   return (data || []).filter((c: any) => c?.row_id) as CustomerOption[];
 }
 
+/**
+ * All product lines for the checklist-template dropdown, pulled from the
+ * canonical `lists.xc_products` column (the same source the Manage Lists screen
+ * and the Incident form use). This replaces a stale hard-coded array so newly
+ * added product lines (e.g. DSX2, Haptix, RAIL 2.75", 3rd Party) appear without
+ * a code change. `extra` lets the caller fold in any value already saved on an
+ * existing template so it is never dropped from its own dropdown.
+ */
+export async function listProductLines(extra: (string | null | undefined)[] = []): Promise<string[]> {
+  const { data, error } = await supabase.from('lists').select('xc_products');
+  if (error) console.error('listProductLines error:', error);
+  const set = new Set<string>();
+  for (const row of (data || [])) {
+    const v = (row?.xc_products ?? '').toString().trim();
+    if (v) set.add(v);
+  }
+  for (const v of extra) {
+    const t = (v ?? '').toString().trim();
+    if (t) set.add(t);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
 /** Districts belonging to one customer (cascades off the customer select). */
 export async function listDistrictsForCustomer(customerId: string): Promise<DistrictOption[]> {
   if (!customerId) return [];
