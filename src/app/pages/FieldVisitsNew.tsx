@@ -338,16 +338,16 @@ export default function FieldVisitsNew() {
   };
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
 
         {/* ── Header ── */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Field Visits</h1>
             <p className="text-gray-600 dark:text-gray-300 mt-2">Track all customer site visits by Service Quality Managers</p>
           </div>
-          <Button onClick={() => { setEditingVisit(null); setDialogOpen(true); }}>
+          <Button onClick={() => { setEditingVisit(null); setDialogOpen(true); }} className="w-full md:w-auto">
             <Plus className="w-4 h-4 mr-2" />
             New Field Visit
           </Button>
@@ -401,7 +401,7 @@ export default function FieldVisitsNew() {
         {tab === 'dashboard' && (
           <>
             {/* ── Metric cards ── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-6">
               <MetricCard cardKey="total"    count={totalVisits}          label="Total Visits" />
               <MetricCard cardKey="month"    count={thisMonthVisits.length} label="This Month" />
               <MetricCard cardKey="90days"   count={last90Visits.length}  label="Last 90 Days" />
@@ -591,44 +591,46 @@ export default function FieldVisitsNew() {
                   {drillRows.length === 0 ? (
                     <p className="text-sm text-gray-500 py-4 text-center">No visits match this filter.</p>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Visit ID</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Customer / District</TableHead>
-                          <TableHead>Purpose</TableHead>
-                          <TableHead>Location</TableHead>
-                          <TableHead>SQM</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {drillRows.map((visit) => (
-                          <TableRow key={visit.row_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                            <TableCell className="font-medium">
-                              <Link to={`/field-visits/${visit.row_id}`} className="flex items-center gap-1 text-blue-600 hover:underline">
-                                {visit.field_visit_id}
-                                <ExternalLink className="w-3 h-3" />
-                              </Link>
-                            </TableCell>
-                            <TableCell>{visit.arrival_date ? new Date(visit.arrival_date).toLocaleDateString() : '-'}</TableCell>
-                            <TableCell>
-                              <div className="font-medium text-sm">{visit.customerName || '-'}</div>
-                              <div className="text-xs text-gray-500">{visit.districtName || '-'}</div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={visit.visit_purpose === 'Incident' ? 'destructive' : 'default'}>
-                                {visit.visit_purpose}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{visit.field_or_facility}</Badge>
-                            </TableCell>
-                            <TableCell className="text-sm">{visit.xc_rep}</TableCell>
+                    <div className="overflow-x-auto w-full">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Visit ID</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Customer / District</TableHead>
+                            <TableHead>Purpose</TableHead>
+                            <TableHead>Location</TableHead>
+                            <TableHead>SQM</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {drillRows.map((visit) => (
+                            <TableRow key={visit.row_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                              <TableCell className="font-medium">
+                                <Link to={`/field-visits/${visit.row_id}`} className="flex items-center gap-1 text-blue-600 hover:underline whitespace-nowrap">
+                                  {visit.field_visit_id}
+                                  <ExternalLink className="w-3 h-3" />
+                                </Link>
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">{visit.arrival_date ? new Date(visit.arrival_date).toLocaleDateString() : '-'}</TableCell>
+                              <TableCell className="min-w-[150px]">
+                                <div className="font-medium text-sm">{visit.customerName || '-'}</div>
+                                <div className="text-xs text-gray-500">{visit.districtName || '-'}</div>
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                <Badge variant={visit.visit_purpose === 'Incident' ? 'destructive' : 'default'}>
+                                  {visit.visit_purpose}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">{visit.field_or_facility}</Badge>
+                              </TableCell>
+                              <TableCell className="text-sm whitespace-nowrap">{visit.xc_rep}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   )}
                 </CardContent>
               )}
@@ -739,70 +741,72 @@ export default function FieldVisitsNew() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Visit ID</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Customer / District</TableHead>
-                      <TableHead>Purpose</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>SQM</TableHead>
-                      <TableHead>Duration</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredVisits.length === 0 ? (
+                <div className="overflow-x-auto w-full">
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center text-gray-500 py-8">
-                          {filtersActive ? 'No visits match the current filters.' : 'No field visits found.'}
-                          {filtersActive && (
-                            <button onClick={clearFilters} className="ml-2 text-blue-600 underline text-sm">Clear filters</button>
-                          )}
-                        </TableCell>
+                        <TableHead>Visit ID</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Customer / District</TableHead>
+                        <TableHead>Purpose</TableHead>
+                        <TableHead>Location</TableHead>
+                        <TableHead>SQM</TableHead>
+                        <TableHead>Duration</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
-                    ) : (
-                      filteredVisits.map((visit) => (
-                        <TableRow key={visit.row_id} className="hover:bg-gray-50">
-                          <TableCell className="font-medium">
-                            <Link to={`/field-visits/${visit.row_id}`} className="flex items-center gap-1 text-blue-600 hover:underline">
-                              {visit.field_visit_id}
-                              <ExternalLink className="w-3 h-3" />
-                            </Link>
-                          </TableCell>
-                          <TableCell>{visit.arrival_date ? new Date(visit.arrival_date).toLocaleDateString() : '-'}</TableCell>
-                          <TableCell>
-                            <div className="font-medium text-sm">{visit.customerName || '-'}</div>
-                            <div className="text-xs text-gray-500">{visit.districtName || '-'}</div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={visit.visit_purpose === 'Incident' ? 'destructive' : 'default'}>
-                              {visit.visit_purpose}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{visit.field_or_facility}</Badge>
-                          </TableCell>
-                          <TableCell className="text-sm">{visit.xc_rep}</TableCell>
-                          <TableCell className="text-sm">{displayVisitDuration(visit)}</TableCell>
-                          <TableCell>
-                            <div className="flex gap-2">
-                              <Button size="sm" variant="outline" onClick={() => openEdit(visit)}>
-                                <Edit className="w-4 h-4" />
-                              </Button>
-                              {user?.role !== 'sqm' && (
-                                <Button size="sm" variant="destructive" onClick={() => handleDelete(visit.row_id)}>
-                                  <Trash className="w-4 h-4" />
-                                </Button>
-                              )}
-                            </div>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredVisits.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center text-gray-500 py-8">
+                            {filtersActive ? 'No visits match the current filters.' : 'No field visits found.'}
+                            {filtersActive && (
+                              <button onClick={clearFilters} className="ml-2 text-blue-600 underline text-sm">Clear filters</button>
+                            )}
                           </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                      ) : (
+                        filteredVisits.map((visit) => (
+                          <TableRow key={visit.row_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                            <TableCell className="font-medium">
+                              <Link to={`/field-visits/${visit.row_id}`} className="flex items-center gap-1 text-blue-600 hover:underline whitespace-nowrap">
+                                {visit.field_visit_id}
+                                <ExternalLink className="w-3 h-3" />
+                              </Link>
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">{visit.arrival_date ? new Date(visit.arrival_date).toLocaleDateString() : '-'}</TableCell>
+                            <TableCell className="min-w-[150px]">
+                              <div className="font-medium text-sm">{visit.customerName || '-'}</div>
+                              <div className="text-xs text-gray-500">{visit.districtName || '-'}</div>
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              <Badge variant={visit.visit_purpose === 'Incident' ? 'destructive' : 'default'}>
+                                {visit.visit_purpose}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{visit.field_or_facility}</Badge>
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-nowrap">{visit.xc_rep}</TableCell>
+                            <TableCell className="text-sm whitespace-nowrap">{displayVisitDuration(visit)}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" onClick={() => openEdit(visit)}>
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                                {user?.role !== 'sqm' && (
+                                  <Button size="sm" variant="destructive" onClick={() => handleDelete(visit.row_id)}>
+                                    <Trash className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </>

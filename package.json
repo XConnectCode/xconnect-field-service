@@ -11,7 +11,8 @@
     "test": "tsx ./src/app/lib/serialUtils.test.ts && tsx ./src/app/lib/authHeader.test.ts && tsx ./src/app/lib/incidentReportStorage.test.ts && tsx ./src/app/lib/incidentPdfImages.test.ts && tsx ./src/app/lib/failedComponent.test.ts && tsx ./src/app/lib/incidentWorkflow.test.ts && tsx ./src/app/lib/aiAssistantCore.test.ts && node --test ./netlify/functions/_slack-bridge/__tests__/slackBridge.test.js",
     "test:slack-bridge": "node --test ./netlify/functions/_slack-bridge/__tests__/slackBridge.test.js",
     "edge:sync": "node scripts/sync-edge-function.mjs",
-    "edge:deploy": "pnpm edge:sync && supabase functions deploy make-server-64775d98 --project-ref gbllxumuogsncoiaksum"
+    "edge:deploy": "pnpm edge:sync && npx supabase functions deploy make-server-64775d98 --project-ref qbexqpvzmssmifimlfos",
+    "edge:deploy:prod": "pnpm edge:sync && npx supabase functions deploy make-server-64775d98 --project-ref gbllxumuogsncoiaksum"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
