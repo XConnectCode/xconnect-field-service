@@ -42,7 +42,7 @@ jobs:
     steps:
       - name: Hit /health on make-server-64775d98
         env:
-          EDGE_URL: https://gbllxumuogsncoiaksum.functions.supabase.co/make-server-64775d98
+          EDGE_URL: https://qbexqpvzmssmifimlfos.functions.supabase.co/make-server-64775d98
           ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
