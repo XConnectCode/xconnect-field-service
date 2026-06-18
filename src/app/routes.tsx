@@ -15,6 +15,7 @@ import Login from "./pages/Login";
 import Setup from "./pages/Setup";
 import NotFound from "./pages/NotFound";
 import FieldVisitDetail from "./pages/FieldVisitDetail";
+import HardwareInspection from "./pages/HardwareInspection";
 import IncidentDetail from "./pages/IncidentDetail";
 import PanelDetail from "./pages/PanelDetail";
 import CustomerDetail from "./pages/CustomerDetail";
@@ -73,6 +74,7 @@ export const router = createBrowserRouter([
       { path: "districts/:id", Component: DistrictDetail },
       { path: "field-visits", Component: FieldVisitsNew },
       { path: "field-visits/:id", Component: FieldVisitDetail },
+      { path: "field-visits/:visitId/hardware-inspection", Component: HardwareInspection },
       { path: "field-visit-map", Component: FieldVisitMap }, // <-- Added here
       { path: "incidents", Component: IncidentsNew },
       { path: "incidents/:id", Component: IncidentDetail },

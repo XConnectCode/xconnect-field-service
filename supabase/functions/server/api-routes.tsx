@@ -3526,3 +3526,172 @@ apiRoutes.delete('/users', requireAdmin, async (c) => {
     return c.json({ error: String(error) }, 500);
   }
 });
+
+// ============ HARDWARE INSPECTIONS (reusable hardware wear check) ============
+// One inspection per field visit; each inspection has N component line items.
+// Mirrors the driver-loads parent+items pattern (replace-all item sync).
+
+const HW_INSPECTION_FIELDS = [
+  'field_visit_id', 'customer', 'customer_district', 'inspector',
+  'inspection_date', 'overall_status', 'notes', 'updated_by',
+];
+function pickHwInspection(body: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const k of HW_INSPECTION_FIELDS) if (k in body) out[k] = body[k];
+  return out;
+}
+
+const HW_ITEM_CHECK_FIELDS = [
+  'chk_threads', 'chk_pitting', 'chk_corrosion', 'chk_sealing_surfaces',
+  'chk_makeup_feel', 'chk_bore_retainer', 'chk_general_damage',
+];
+
+// Catalog: distinct reusable mechanical hardware names from the components
+// table, grouped into categories for the inspection dropdown.
+apiRoutes.get("/hardware-components", async (c) => {
+  try {
+    const { data, error } = await supabase
+      .from('components').select('failed_component');
+    if (error) return c.json({ error: error.message }, 500);
+    const names = Array.from(new Set(
+      (data || [])
+        .map((r: Record<string, unknown>) => String(r.failed_component || '').trim())
+        .filter(Boolean)
+    )).sort();
+    return c.json({ components: names });
+  } catch (error) {
+    console.error('Error in hardware-components endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// List inspections (optionally filter by field_visit_id via query param).
+apiRoutes.get("/hardware-inspections", async (c) => {
+  try {
+    const visitId = c.req.query('field_visit_id');
+    let q = supabase.from('hardware_inspections').select('*')
+      .order('inspection_date', { ascending: false });
+    if (visitId) q = q.eq('field_visit_id', visitId);
+    const { data, error } = await q;
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json(data || []);
+  } catch (error) {
+    console.error('Error in hardware-inspections list endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Convenience: the (single) inspection for a given field visit, with items.
+apiRoutes.get("/hardware-inspections/by-visit/:visitId", async (c) => {
+  try {
+    const visitId = c.req.param('visitId');
+    const { data: insp } = await supabase
+      .from('hardware_inspections').select('*')
+      .eq('field_visit_id', visitId)
+      .order('inspection_date', { ascending: false })
+      .limit(1).maybeSingle();
+    if (!insp) return c.json(null);
+    const { data: items } = await supabase
+      .from('hardware_inspection_items').select('*')
+      .eq('inspection_id', insp.row_id).order('sort_order');
+    return c.json({ ...insp, items: items || [] });
+  } catch (error) {
+    console.error('Error in hardware-inspection by-visit endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Detail: one inspection + its items.
+apiRoutes.get("/hardware-inspections/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { data: insp, error } = await supabase
+      .from('hardware_inspections').select('*').eq('row_id', id).single();
+    if (error) return c.json({ error: error.message }, 500);
+    const { data: items } = await supabase
+      .from('hardware_inspection_items').select('*')
+      .eq('inspection_id', id).order('sort_order');
+    return c.json({ ...insp, items: items || [] });
+  } catch (error) {
+    console.error('Error in hardware-inspection detail endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.post("/hardware-inspections", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { data, error } = await supabase
+      .from('hardware_inspections').insert(pickHwInspection(body)).select().single();
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json(data);
+  } catch (error) {
+    console.error('Error creating hardware inspection:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.put("/hardware-inspections/:id", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const patch = pickHwInspection(body);
+    patch.updated_at = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('hardware_inspections').update(patch).eq('row_id', id).select().single();
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json(data);
+  } catch (error) {
+    console.error('Error updating hardware inspection:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+apiRoutes.delete("/hardware-inspections/:id", requireAdmin, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { error } = await supabase
+      .from('hardware_inspections').delete().eq('row_id', id);
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting hardware inspection:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Replace the full set of component line items for an inspection.
+apiRoutes.post("/hardware-inspections/:id/items", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const items = Array.isArray(body.items) ? body.items : [];
+    const { error: delErr } = await supabase
+      .from('hardware_inspection_items').delete().eq('inspection_id', id);
+    if (delErr) return c.json({ error: delErr.message }, 500);
+    if (items.length) {
+      const rows = items.map((it: Record<string, unknown>, idx: number) => {
+        const row: Record<string, unknown> = {
+          inspection_id: id,
+          component_category: it.component_category ?? null,
+          component_name: it.component_name ?? null,
+          status: it.status ?? 'pass',
+          note: it.note ?? null,
+          sort_order: typeof it.sort_order === 'number' ? it.sort_order : idx,
+        };
+        for (const k of HW_ITEM_CHECK_FIELDS) row[k] = it[k] ?? false;
+        return row;
+      });
+      const { error: insErr } = await supabase
+        .from('hardware_inspection_items').insert(rows);
+      if (insErr) return c.json({ error: insErr.message }, 500);
+    }
+    const { data: saved } = await supabase
+      .from('hardware_inspection_items').select('*')
+      .eq('inspection_id', id).order('sort_order');
+    return c.json({ items: saved || [] });
+  } catch (error) {
+    console.error('Error in hardware-inspection items endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
