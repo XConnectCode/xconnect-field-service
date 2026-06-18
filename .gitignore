@@ -16,3 +16,5 @@ supabase/config.toml.bak
 # Database Dumps
 scripts/dump/
 
+# Executables
+scripts/*.exe
