@@ -69,7 +69,12 @@ const NAV_GROUPS = [
   },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  setIsOpen: (isOpen: boolean) => void;
+}
+
+export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const location = useLocation();
   const { user, signOut } = useAuth();
   const { isDark, toggleTheme } = useTheme();
@@ -83,20 +88,23 @@ export default function Sidebar() {
     .filter(g => g.items.length > 0);
 
   return (
-    <aside style={{
-      width: 240,
-      minHeight: '100vh',
-      background: isDark ? '#0f172a' : '#ffffff',
-      borderRight: `1px solid ${isDark ? '#1e293b' : '#e2e8f0'}`,
-      display: 'flex',
-      flexDirection: 'column',
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      bottom: 0,
-      zIndex: 50,
-      fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
-    }}>
+    <>
+      {/* Mobile Backdrop */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+
+      <aside 
+        className={`fixed inset-y-0 left-0 z-50 w-[240px] flex flex-col transform transition-transform duration-300 md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{
+          background: isDark ? '#0f172a' : '#ffffff',
+          borderRight: `1px solid ${isDark ? '#1e293b' : '#e2e8f0'}`,
+          fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
+        }}
+      >
 
       {/* ── Logo / XConnect branding ── */}
       <div style={{
@@ -248,7 +256,6 @@ export default function Sidebar() {
           </button>
         </div>
 
-        {/* Company attribution */}
         <div style={{
           marginTop: 10,
           textAlign: 'center',
@@ -261,5 +268,6 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }

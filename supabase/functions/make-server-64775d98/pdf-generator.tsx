@@ -9,7 +9,8 @@ const supabase = createClient(
     auth: {
       autoRefreshToken: false,
       persistSession: false
-    }
+    },
+    db: { schema: 'fst_app' }
   }
 );
 

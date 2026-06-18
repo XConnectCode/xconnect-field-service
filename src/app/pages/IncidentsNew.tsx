@@ -647,16 +647,16 @@ export default function IncidentsNew() {
   const tooltipStyle = isDark ? { backgroundColor: '#1e293b', border: '1px solid #334155', color: '#f1f5f9' } : undefined;
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Incident Management</h1>
             <p className="text-gray-600 dark:text-gray-300 mt-2">Track and investigate field incidents</p>
           </div>
-          <Button className="bg-gray-900 hover:bg-gray-800 text-white"
+          <Button className="w-full md:w-auto bg-gray-900 hover:bg-gray-800 text-white"
             onClick={() => { setEditingIncident(null); setFormOpen(true); }}>
             <Plus className="w-4 h-4 mr-2" />
             Report Incident
@@ -696,7 +696,7 @@ export default function IncidentsNew() {
           <div className="space-y-6">
 
             {/* Metric cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               {/* Total */}
               <button
                 type="button"
@@ -1165,7 +1165,7 @@ export default function IncidentsNew() {
 
         {/* ── View All Data Dialog ── */}
         <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogContent className="max-w-4xl w-[95vw] md:w-full max-h-[90vh] flex flex-col p-4 md:p-6">
             <DialogHeader className="shrink-0">
               <DialogTitle className="flex items-center gap-3 pr-8">
                 <span>Incident #{viewingIncident?.event_id}</span>
@@ -1187,7 +1187,7 @@ export default function IncidentsNew() {
                     {/* General Information */}
                     <section>
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 border-b pb-1">General Information</p>
-                      <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                         <Field label="Date">{r.date_incident ? new Date(r.date_incident + 'T12:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : null}</Field>
                         <Field label="Event ID">{r.event_id}</Field>
                         <Field label="Customer">{r.customerName}</Field>
@@ -1208,7 +1208,7 @@ export default function IncidentsNew() {
                     {/* Technical Investigation */}
                     <section>
                       <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 border-b pb-1">Technical Investigation</p>
-                      <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                         <Field label="XC Caused"><XcCausedBadge caused={r.xc_caused} /></Field>
                         <Field label="Event Category">{r.event_category}</Field>
                         <Field label="Product Line">{r.product_line}</Field>
@@ -1240,7 +1240,7 @@ export default function IncidentsNew() {
                         <div className="space-y-4">
                           <TextBlock label="Corrective Action"  value={r.corrective_action} />
                           <TextBlock label="Preventive Action"  value={r.preventive_action} />
-                          <div className="grid grid-cols-3 gap-x-8 gap-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-4">
                             <Field label="Assigned To">{r.action_assigned_to}</Field>
                             <Field label="Due Date">{r.action_due_date ? new Date(r.action_due_date + 'T12:00:00').toLocaleDateString() : null}</Field>
                             <Field label="Action Status">{(() => {
@@ -1256,7 +1256,7 @@ export default function IncidentsNew() {
                     {(r.closed_date || r.closed_by) && (
                       <section>
                         <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 border-b pb-1">Closure</p>
-                        <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                           <Field label="Closed Date">{r.closed_date ? new Date(r.closed_date + 'T12:00:00').toLocaleDateString() : null}</Field>
                           <Field label="Closed By">{r.closed_by}</Field>
                         </div>
@@ -1371,7 +1371,7 @@ export default function IncidentsNew() {
 
       {/* ── PDF Preview Modal ── */}
       <Dialog open={pdfPreviewOpen} onOpenChange={setPdfPreviewOpen}>
-        <DialogContent className="max-w-5xl max-h-[95vh] flex flex-col p-0 gap-0">
+        <DialogContent className="max-w-5xl w-[95vw] md:w-full max-h-[95vh] flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 py-4 border-b shrink-0">
             <DialogTitle className="flex items-center justify-between pr-8">
               <span className="flex items-center gap-2">

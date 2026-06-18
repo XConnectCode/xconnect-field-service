@@ -12,3 +12,7 @@ dist/
 # Supabase CLI artifacts
 supabase/.temp/
 supabase/config.toml.bak
+
+# Database Dumps
+scripts/dump/
+

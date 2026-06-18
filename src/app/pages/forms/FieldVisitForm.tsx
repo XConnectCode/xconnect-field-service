@@ -37,7 +37,7 @@ const FIELD_FACILITY_OPTS = ['Field', 'Facility'];
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function F({ label, required, children, span }: { label: string; required?: boolean; children: React.ReactNode; span?: boolean }) {
   return (
-    <div className={span ? 'col-span-2' : ''}>
+    <div className={span ? 'col-span-1 md:col-span-2' : ''}>
       <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">
         {label}{required && <span className="text-red-500 ml-0.5">*</span>}
       </Label>
@@ -48,7 +48,7 @@ function F({ label, required, children, span }: { label: string; required?: bool
 
 function Section({ title }: { title: string }) {
   return (
-    <div className="col-span-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
+    <div className="col-span-1 md:col-span-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
       <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{title}</span>
     </div>
   );
@@ -307,12 +307,12 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl w-[95vw] md:w-full max-h-[90vh] overflow-y-auto p-4 md:p-6">
         <DialogHeader>
           <DialogTitle>{editing ? `Edit Visit ${visit.field_visit_id}` : 'New Field Visit'}</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-x-6 gap-y-4 mt-2">
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mt-2">
 
           {/* ── Core ── */}
           <Section title="Visit Info" />
@@ -466,7 +466,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           {/* ── Panels Seen ── */}
           <Section title="Panels Seen" />
 
-          <div className="col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">
               Flag every panel you saw on this visit
               <span className="ml-2 font-normal text-gray-400">
@@ -588,7 +588,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           {/* ── Summary ── */}
           <Section title="Summary" />
 
-          <div className="col-span-2">
+          <div className="col-span-1 md:col-span-2">
             <F label="Visit Summary" required>
               <Textarea name="visit_summary" rows={4} required
                 defaultValue={visit?.visit_summary || ''}
@@ -597,7 +597,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           </div>
 
           {/* ── Actions ── */}
-          <div className="col-span-2 flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
+          <div className="col-span-1 md:col-span-2 flex justify-end gap-3 pt-4 border-t border-gray-100 dark:border-gray-700">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
               {saving ? 'Saving…' : editing ? 'Update Visit' : 'Create Visit'}

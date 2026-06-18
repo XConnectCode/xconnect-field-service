@@ -702,7 +702,7 @@ export default function IncidentForm({
           id="incident-form"
           ref={formRef}
           onSubmit={handleSubmit}
-          className="flex-1 overflow-y-auto px-6 py-5 space-y-5"
+          className="flex-1 overflow-y-auto px-4 md:px-6 py-4 md:py-5 space-y-5"
         >
           {/* 1. General Info */}
           <SectionCard title="General Info">
@@ -1296,7 +1296,7 @@ export default function IncidentForm({
         />
 
         {/* Sticky footer actions — always visible regardless of scroll */}
-        <div className="flex justify-end gap-3 px-6 py-3 border-t bg-white dark:bg-gray-800 shrink-0">
+        <div className="flex justify-end gap-3 px-4 md:px-6 py-3 border-t bg-white dark:bg-gray-800 shrink-0">
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
@@ -1314,7 +1314,7 @@ export default function IncidentForm({
   if (variant === 'page') {
     return (
       <div className="flex flex-col h-[calc(100vh-4rem)] bg-white dark:bg-gray-900">
-        <div className="px-6 pt-5 pb-3 border-b shrink-0">
+        <div className="px-4 md:px-6 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {titleText}
@@ -1336,7 +1336,7 @@ export default function IncidentForm({
       }}
     >
       <DialogContent
-        className="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0"
+        className="max-w-4xl w-[95vw] md:w-full max-h-[90vh] flex flex-col p-0 gap-0"
         // The AI Assistant panel is portal'd to <body>, so it lives outside this
         // Dialog's DOM tree. Without these guards, Radix treats any click/focus
         // inside the panel as an "outside" interaction and auto-dismisses the
@@ -1358,7 +1358,7 @@ export default function IncidentForm({
           }
         }}
       >
-        <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
+        <DialogHeader className="px-4 md:px-6 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-center justify-between gap-3">
             <DialogTitle>{titleText}</DialogTitle>
             <div className="mr-8">{aiButton}</div>

@@ -18,7 +18,8 @@ const supabase = createClient(
     auth: {
       autoRefreshToken: false,
       persistSession: false
-    }
+    },
+    db: { schema: 'fst_app' }
   }
 );
 
@@ -228,7 +229,8 @@ app.post("/make-server-64775d98/signin", async (c) => {
     // Create a Supabase client with anon key for this request
     const authClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { db: { schema: 'fst_app' } }
     );
     
     const { data, error } = await authClient.auth.signInWithPassword({
@@ -350,7 +352,8 @@ app.get("/make-server-64775d98/session", async (c) => {
     
     const authClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { db: { schema: 'fst_app' } }
     );
     
     const { data: { user }, error } = await authClient.auth.getUser(token);
