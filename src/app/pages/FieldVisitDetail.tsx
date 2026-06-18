@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { detailApi, fieldVisitApi } from '../lib/api';
+import { detailApi, fieldVisitApi, hardwareInspectionApi } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { getSerial } from '../lib/serialUtils';
 import { Button } from '../components/ui/button';
@@ -22,6 +22,7 @@ import {
   FilePlus,
   GraduationCap,
   FileDown,
+  Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
@@ -96,6 +97,7 @@ export default function FieldVisitDetail() {
   const [relatedIncidents, setRelatedIncidents] = useState<any[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<ChecklistSession[]>([]);
   const [reportSessionId, setReportSessionId] = useState<string | null>(null);
+  const [hwInspection, setHwInspection] = useState<any>(null);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -170,9 +172,20 @@ export default function FieldVisitDetail() {
           console.error('Error loading linked training sessions:', e);
           setTrainingSessions([]);
         }
+
+        // Load any hardware inspection linked to this visit.
+        try {
+          setHwInspection(
+            await hardwareInspectionApi.getByVisit(String(data.field_visit_id), accessToken ?? undefined)
+          );
+        } catch (e) {
+          console.error('Error loading hardware inspection:', e);
+          setHwInspection(null);
+        }
       } else {
         setRelatedIncidents([]);
         setTrainingSessions([]);
+        setHwInspection(null);
       }
     } catch (error: any) {
       console.error('Error loading field visit:', error);
@@ -1023,6 +1036,60 @@ export default function FieldVisitDetail() {
                     ))}
                   </ul>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Hardware Inspection card */}
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wrench className="w-4 h-4 text-gray-500" />
+                  Hardware Inspection
+                  {hwInspection?.overall_status && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        hwInspection.overall_status === 'pass'
+                          ? 'bg-green-100 text-green-800 border-green-200'
+                          : hwInspection.overall_status === 'monitor'
+                          ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
+                          : hwInspection.overall_status === 'replace_soon'
+                          ? 'bg-orange-100 text-orange-800 border-orange-200'
+                          : 'bg-red-100 text-red-800 border-red-200'
+                      }
+                    >
+                      {hwInspection.overall_status === 'pass' ? 'Pass'
+                        : hwInspection.overall_status === 'monitor' ? 'Monitor'
+                        : hwInspection.overall_status === 'replace_soon' ? 'Replace soon'
+                        : 'Remove from service'}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {hwInspection?.row_id ? (
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    {(hwInspection.items?.length || 0)} component{(hwInspection.items?.length || 0) === 1 ? '' : 's'} checked
+                    {hwInspection.inspection_date
+                      ? ` · ${new Date(hwInspection.inspection_date).toLocaleDateString()}`
+                      : ''}
+                    {hwInspection.inspector ? ` · ${hwInspection.inspector}` : ''}
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-400 italic">
+                    No hardware inspection recorded for this visit.
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => navigate(`/field-visits/${visit.field_visit_id}/hardware-inspection`)}
+                >
+                  <Wrench className="w-4 h-4" />
+                  {hwInspection?.row_id ? 'View / edit inspection' : 'Start hardware inspection'}
+                </Button>
               </CardContent>
             </Card>
           </div>

@@ -148,6 +148,24 @@ export const driverLoadApi = {
     apiRequest(`/driver-loads/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }, token),
 };
 
+// Hardware Inspection APIs (reusable hardware wear check on field visits)
+export const hardwareInspectionApi = {
+  // Distinct reusable hardware part names (for the component dropdown).
+  getComponents: (token?: string) => apiRequest('/hardware-components', {}, token),
+  getByVisit: (visitId: string, token?: string) =>
+    apiRequest(`/hardware-inspections/by-visit/${visitId}`, {}, token),
+  get: (id: string, token?: string) =>
+    apiRequest(`/hardware-inspections/${id}`, {}, token),
+  create: (insp: any, token?: string) =>
+    apiRequest('/hardware-inspections', { method: 'POST', body: JSON.stringify(insp) }, token),
+  update: (id: string, updates: any, token?: string) =>
+    apiRequest(`/hardware-inspections/${id}`, { method: 'PUT', body: JSON.stringify(updates) }, token),
+  remove: (id: string, token?: string) =>
+    apiRequest(`/hardware-inspections/${id}`, { method: 'DELETE' }, token),
+  saveItems: (id: string, items: any[], token?: string) =>
+    apiRequest(`/hardware-inspections/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }, token),
+};
+
 // QC Pallet APIs (perforating gun inspection)
 export const qcPalletApi = {
   getAll: (token?: string) => apiRequest('/qc-pallets', {}, token),
