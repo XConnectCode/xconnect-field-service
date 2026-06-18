@@ -124,6 +124,20 @@ export default function FieldVisitMap() {
     }).addTo(mapInstance.current);
 
     markersLayer.current = L.layerGroup().addTo(mapInstance.current);
+
+    // Dynamically invalidate map size if the container element changes size (e.g. mobile stacking)
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapInstance.current) {
+        mapInstance.current.invalidateSize();
+      }
+    });
+    if (mapRef.current) {
+      resizeObserver.observe(mapRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
   }, [leafletReady]);
 
   // ── Update markers when data/filters change ───────────────────────────────
@@ -159,7 +173,7 @@ export default function FieldVisitMap() {
   const custName = (custId: string) => customers.find(c => c.row_id === custId)?.customer || '-';
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
@@ -217,9 +231,9 @@ export default function FieldVisitMap() {
         </Card>
 
         {/* Map + sidebar */}
-        <div className="flex gap-4" style={{ height: 600 }}>
+        <div className="flex flex-col md:flex-row gap-4 h-auto md:h-[600px]">
           {/* Map */}
-          <div style={{ flex: 1, borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0', position: 'relative' }}>
+          <div className="w-full h-[400px] md:h-full md:flex-1 relative" style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
             {loading && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', zIndex: 10, fontSize: 14, color: '#64748b' }}>
                 Loading map data…
@@ -229,7 +243,7 @@ export default function FieldVisitMap() {
           </div>
 
           {/* Detail panel */}
-          <div style={{ width: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="w-full md:w-[280px] shrink-0 flex flex-col gap-2 overflow-y-auto max-h-[400px] md:max-h-full">
             {selected ? (
               <Card style={{ flexShrink: 0 }}>
                 <CardHeader className="pb-2">
