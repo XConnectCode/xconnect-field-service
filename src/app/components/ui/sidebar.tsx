@@ -19,7 +19,7 @@ import {
   LayoutDashboard, Users, ClipboardList, AlertTriangle,
   Cpu, TrendingUp, FileBarChart,
   Sun, Moon, LogOut, Map, FileText, BarChart3,
-  Truck, ClipboardCheck, ListChecks, FolderOpen, GraduationCap,
+  ListChecks, FolderOpen, GraduationCap,
 } from 'lucide-react';
 
 type Role = 'admin' | 'sqm' | 'ops';
@@ -53,13 +53,9 @@ const NAV_GROUPS = [
       { path: '/training-checklists', label: 'Training',       icon: GraduationCap, roles: ['admin', 'sqm'] as Role[] },
     ],
   },
-  {
-    label: 'Production',
-    items: [
-      { path: '/driver', label: 'Driver Loads', icon: Truck,           roles: ['admin', 'ops'] as Role[] },
-      { path: '/qc',     label: 'QC',           icon: ClipboardCheck,  roles: ['admin', 'ops'] as Role[] },
-    ],
-  },
+  // NOTE: The 'Production' group (Driver Loads, QC) was removed from the UI;
+  // those features are moving to the operations/manufacturing app. Routes and
+  // pages are intentionally retained but no longer surfaced in navigation.
   {
     label: 'Settings',
     items: [
