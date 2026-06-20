@@ -48,6 +48,7 @@ const CHECK_LABELS: { key: string; label: string }[] = [
   { key: 'chk_corrosion', label: 'Corrosion' },
   { key: 'chk_sealing_surfaces', label: 'Sealing surfaces' },
   { key: 'chk_makeup_feel', label: 'Make-up feel' },
+  { key: 'chk_makeup_cleanliness', label: 'Make-up cleanliness' },
   { key: 'chk_bore_retainer', label: 'Bore/Retainer' },
   { key: 'chk_general_damage', label: 'General damage' },
 ];

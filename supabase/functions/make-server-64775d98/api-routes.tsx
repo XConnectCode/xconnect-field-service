@@ -3544,7 +3544,7 @@ function pickHwInspection(body: Record<string, unknown>) {
 
 const HW_ITEM_CHECK_FIELDS = [
   'chk_threads', 'chk_pitting', 'chk_corrosion', 'chk_sealing_surfaces',
-  'chk_makeup_feel', 'chk_bore_retainer', 'chk_general_damage',
+  'chk_makeup_feel', 'chk_makeup_cleanliness', 'chk_bore_retainer', 'chk_general_damage',
 ];
 
 // Catalog: distinct reusable mechanical hardware names from the components

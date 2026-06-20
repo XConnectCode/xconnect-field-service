@@ -58,13 +58,14 @@ const CHECK_DEFS: { key: ChkKey; label: string; hint: string }[] = [
   { key: 'chk_corrosion', label: 'Corrosion', hint: 'Rust / erosion' },
   { key: 'chk_sealing_surfaces', label: 'Sealing surface damage', hint: 'Nicks, scoring, gouges, O-ring groove damage' },
   { key: 'chk_makeup_feel', label: 'Hard make-up', hint: "Doesn't thread / torque with ease; binding" },
+  { key: 'chk_makeup_cleanliness', label: 'Make-up cleanliness', hint: 'Debris, contamination or residue on make-up surfaces' },
   { key: 'chk_bore_retainer', label: 'Bore / retainer nut issue', hint: 'Firing head: bore obstruction or retainer nut not flush (Op. Alert)' },
   { key: 'chk_general_damage', label: 'Cracks / deformation', hint: 'Impact damage, cracks, excessive general wear' },
 ];
 
 type ChkKey =
   | 'chk_threads' | 'chk_pitting' | 'chk_corrosion' | 'chk_sealing_surfaces'
-  | 'chk_makeup_feel' | 'chk_bore_retainer' | 'chk_general_damage';
+  | 'chk_makeup_feel' | 'chk_makeup_cleanliness' | 'chk_bore_retainer' | 'chk_general_damage';
 
 const ITEM_STATUSES = ['pass', 'monitor', 'replace_soon', 'remove'] as const;
 type ItemStatus = typeof ITEM_STATUSES[number];
@@ -93,6 +94,7 @@ interface InspItem {
   chk_corrosion: boolean;
   chk_sealing_surfaces: boolean;
   chk_makeup_feel: boolean;
+  chk_makeup_cleanliness: boolean;
   chk_bore_retainer: boolean;
   chk_general_damage: boolean;
   status: ItemStatus;
@@ -110,6 +112,7 @@ function newItem(): InspItem {
     chk_corrosion: false,
     chk_sealing_surfaces: false,
     chk_makeup_feel: false,
+    chk_makeup_cleanliness: false,
     chk_bore_retainer: false,
     chk_general_damage: false,
     status: 'pass',
@@ -191,6 +194,7 @@ export default function HardwareInspection() {
             chk_corrosion: !!it.chk_corrosion,
             chk_sealing_surfaces: !!it.chk_sealing_surfaces,
             chk_makeup_feel: !!it.chk_makeup_feel,
+            chk_makeup_cleanliness: !!it.chk_makeup_cleanliness,
             chk_bore_retainer: !!it.chk_bore_retainer,
             chk_general_damage: !!it.chk_general_damage,
             status: (ITEM_STATUSES.includes(it.status) ? it.status : 'pass') as ItemStatus,
@@ -294,6 +298,7 @@ export default function HardwareInspection() {
         chk_corrosion: it.chk_corrosion,
         chk_sealing_surfaces: it.chk_sealing_surfaces,
         chk_makeup_feel: it.chk_makeup_feel,
+        chk_makeup_cleanliness: it.chk_makeup_cleanliness,
         chk_bore_retainer: it.chk_bore_retainer,
         chk_general_damage: it.chk_general_damage,
         status: it.status,
