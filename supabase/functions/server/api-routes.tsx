@@ -3566,16 +3566,36 @@ apiRoutes.get("/hardware-components", async (c) => {
   }
 });
 
-// List inspections (optionally filter by field_visit_id via query param).
+// List inspections. Optional query filters: field_visit_id, customer_district.
+// When with_items=1 (or a customer_district filter is supplied), each inspection
+// is returned with its line items so callers can roll up component quantities /
+// status without an extra round-trip per inspection.
 apiRoutes.get("/hardware-inspections", async (c) => {
   try {
     const visitId = c.req.query('field_visit_id');
+    const district = c.req.query('customer_district');
+    const withItems = c.req.query('with_items') === '1' || !!district;
     let q = supabase.from('hardware_inspections').select('*')
       .order('inspection_date', { ascending: false });
     if (visitId) q = q.eq('field_visit_id', visitId);
+    if (district) q = q.eq('customer_district', district);
     const { data, error } = await q;
     if (error) return c.json({ error: error.message }, 500);
-    return c.json(data || []);
+    const inspections = data || [];
+    if (!withItems || !inspections.length) return c.json(inspections);
+    const ids = inspections.map((i: Record<string, unknown>) => i.row_id);
+    const { data: items } = await supabase
+      .from('hardware_inspection_items').select('*')
+      .in('inspection_id', ids).order('sort_order');
+    const byInsp: Record<string, unknown[]> = {};
+    for (const it of (items || [])) {
+      const key = String((it as Record<string, unknown>).inspection_id);
+      (byInsp[key] ||= []).push(it);
+    }
+    return c.json(inspections.map((i: Record<string, unknown>) => ({
+      ...i,
+      items: byInsp[String(i.row_id)] || [],
+    })));
   } catch (error) {
     console.error('Error in hardware-inspections list endpoint:', error);
     return c.json({ error: String(error) }, 500);
@@ -3676,6 +3696,7 @@ apiRoutes.post("/hardware-inspections/:id/items", async (c) => {
           inspection_id: id,
           component_category: it.component_category ?? null,
           component_name: it.component_name ?? null,
+          quantity: typeof it.quantity === 'number' && it.quantity > 0 ? it.quantity : 1,
           status: it.status ?? 'pass',
           note: it.note ?? null,
           sort_order: typeof it.sort_order === 'number' ? it.sort_order : idx,

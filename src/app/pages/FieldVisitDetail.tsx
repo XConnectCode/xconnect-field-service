@@ -27,6 +27,7 @@ import {
 import { toast } from 'sonner';
 import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
+import { generateCombinedFieldVisitPDF } from '../lib/generateCombinedFieldVisitPDF';
 import { displayVisitDuration, toInputValue, formatVisitTimestamp } from '../lib/visitDuration';
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -98,6 +99,7 @@ export default function FieldVisitDetail() {
   const [trainingSessions, setTrainingSessions] = useState<ChecklistSession[]>([]);
   const [reportSessionId, setReportSessionId] = useState<string | null>(null);
   const [hwInspection, setHwInspection] = useState<any>(null);
+  const [combinedPdfLoading, setCombinedPdfLoading] = useState(false);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -379,6 +381,24 @@ export default function FieldVisitDetail() {
     setReportSessionId(null);
   }
 
+  // ── Download the combined Field Visit PDF (visit + training + hardware + photos) ─
+  async function handleDownloadCombinedPDF() {
+    if (!visit) return;
+    setCombinedPdfLoading(true);
+    try {
+      await generateCombinedFieldVisitPDF({
+        visit,
+        customerName: visit.customerName ?? null,
+        districtName: visit.districtName ?? null,
+        accessToken: accessToken ?? null,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate combined PDF');
+    } finally {
+      setCombinedPdfLoading(false);
+    }
+  }
+
   // ── Attach a Training Checklist from this visit ──────────────────────────────
   // Opens the Training Checklists flow pre-linked to this field visit so an SQM
   // can pick a template and start a session tied to the visit.
@@ -464,6 +484,21 @@ export default function FieldVisitDetail() {
               )}
               {!editing ? (
                 <>
+                  {/* Combined export: visit details + training + hardware + photos. */}
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadCombinedPDF}
+                    disabled={combinedPdfLoading}
+                    className="gap-1.5"
+                  >
+                    {combinedPdfLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <FileDown className="w-4 h-4" />
+                    )}
+                    {combinedPdfLoading ? 'Generating…' : 'Download Combined PDF'}
+                  </Button>
+
                   {/* Primary action: log an incident pre-linked to this visit. */}
                   <Button
                     variant="outline"

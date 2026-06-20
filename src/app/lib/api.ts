@@ -154,6 +154,9 @@ export const hardwareInspectionApi = {
   getComponents: (token?: string) => apiRequest('/hardware-components', {}, token),
   getByVisit: (visitId: string, token?: string) =>
     apiRequest(`/hardware-inspections/by-visit/${visitId}`, {}, token),
+  // All inspections for a district, each with its line items (for summaries).
+  getByDistrict: (districtId: string, token?: string) =>
+    apiRequest(`/hardware-inspections?customer_district=${encodeURIComponent(districtId)}`, {}, token),
   get: (id: string, token?: string) =>
     apiRequest(`/hardware-inspections/${id}`, {}, token),
   create: (insp: any, token?: string) =>

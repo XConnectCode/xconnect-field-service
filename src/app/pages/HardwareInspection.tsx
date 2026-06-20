@@ -28,29 +28,26 @@ const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775
 // The SQM picks a category, then optionally a specific part from the live
 // catalog (filtered by keywords below).
 const COMPONENT_CATEGORIES = [
-  'Top Sub / Connection',
-  'Bottom Connection / End Plate',
-  'Tandem Sub (Reusable)',
+  'Top Sub Connection',
+  'Quick Change',
+  'Tandem Sub',
+  'Crossover/Adapter',
   'Firing Head',
-  'Retainer Nut',
-  'Quick Change (Bell / Body / Neck / Insert)',
-  'Direct Connect Sub',
-  'Crossover / Adapter',
-  'Pumpdown Sub / Ring',
+  'PSA',
+  'Pump Down Sub',
   'Other',
 ];
 
 // Keyword filters used to narrow the catalog dropdown per category.
+// PSA = Plug Shoot Adapter.
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  'Top Sub / Connection': ['top sub', 'attenuator sub', 'ccl', 'top end'],
-  'Bottom Connection / End Plate': ['bottom end plate', 'bottom plug', 'bottom sub', 'lower cap'],
-  'Tandem Sub (Reusable)': ['tandem sub'],
+  'Top Sub Connection': ['top sub', 'attenuator sub', 'ccl', 'top end'],
+  'Quick Change': ['quick change'],
+  'Tandem Sub': ['tandem sub'],
+  'Crossover/Adapter': ['crossover', 'adapter', 'acme'],
   'Firing Head': ['firing head'],
-  'Retainer Nut': ['retainer nut', 'castle nut', 'retaining nut'],
-  'Quick Change (Bell / Body / Neck / Insert)': ['quick change'],
-  'Direct Connect Sub': ['direct connect'],
-  'Crossover / Adapter': ['crossover', 'adapter', 'acme'],
-  'Pumpdown Sub / Ring': ['pumpdown', 'pump down'],
+  'PSA': ['plug shoot adapter', 'psa', 'switch stem', 'switch tube', 'adapter tube'],
+  'Pump Down Sub': ['pumpdown', 'pump down'],
   'Other': [],
 };
 
@@ -90,6 +87,7 @@ interface InspItem {
   client_key: string;       // stable key for React + photo tagging
   component_category: string;
   component_name: string;
+  quantity: number;
   chk_threads: boolean;
   chk_pitting: boolean;
   chk_corrosion: boolean;
@@ -106,6 +104,7 @@ function newItem(): InspItem {
     client_key: Math.random().toString(36).slice(2),
     component_category: COMPONENT_CATEGORIES[0],
     component_name: '',
+    quantity: 1,
     chk_threads: false,
     chk_pitting: false,
     chk_corrosion: false,
@@ -132,7 +131,8 @@ export default function HardwareInspection() {
   const { visitId } = useParams<{ visitId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
+  const currentUserName = user?.name || '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -173,7 +173,9 @@ export default function HardwareInspection() {
         );
         if (alive && existing && existing.row_id) {
           setInspectionId(existing.row_id);
-          setInspector(existing.inspector || v?.xc_rep || '');
+          // Keep the stored inspector on an existing record; fall back to the
+          // current user, then the visit rep.
+          setInspector(existing.inspector || currentUserName || v?.xc_rep || '');
           setInspectionDate(
             (existing.inspection_date || '').slice(0, 10) ||
             new Date().toISOString().slice(0, 10)
@@ -183,6 +185,7 @@ export default function HardwareInspection() {
             client_key: it.row_id || Math.random().toString(36).slice(2),
             component_category: it.component_category || COMPONENT_CATEGORIES[0],
             component_name: it.component_name || '',
+            quantity: typeof it.quantity === 'number' && it.quantity > 0 ? it.quantity : 1,
             chk_threads: !!it.chk_threads,
             chk_pitting: !!it.chk_pitting,
             chk_corrosion: !!it.chk_corrosion,
@@ -195,7 +198,8 @@ export default function HardwareInspection() {
           }));
           setItems(loaded.length ? loaded : [newItem()]);
         } else if (alive) {
-          setInspector(v?.xc_rep || '');
+          // New inspection: default the inspector to the logged-in user.
+          setInspector(currentUserName || v?.xc_rep || '');
           setItems([newItem()]);
           // Auto-create a draft inspection so per-component photo uploads are
           // available immediately (ImageUpload needs a parent row id). The
@@ -206,7 +210,7 @@ export default function HardwareInspection() {
                 field_visit_id: String(fvId),
                 customer: v?.customer ?? null,
                 customer_district: v?.customer_district ?? null,
-                inspector: v?.xc_rep || null,
+                inspector: currentUserName || v?.xc_rep || null,
                 overall_status: 'pass',
               },
               accessToken ?? undefined
@@ -284,6 +288,7 @@ export default function HardwareInspection() {
       const payloadItems = items.map((it, idx) => ({
         component_category: it.component_category,
         component_name: it.component_name || null,
+        quantity: it.quantity && it.quantity > 0 ? it.quantity : 1,
         chk_threads: it.chk_threads,
         chk_pitting: it.chk_pitting,
         chk_corrosion: it.chk_corrosion,
@@ -365,8 +370,12 @@ export default function HardwareInspection() {
             <Input type="date" value={inspectionDate} onChange={(e) => setInspectionDate(e.target.value)} />
           </div>
           <div className="flex flex-col gap-1 sm:col-span-1">
-            <Label className="text-xs uppercase tracking-wide text-gray-500">Components checked</Label>
-            <div className="text-sm text-gray-700 dark:text-gray-200 py-2">{items.length}</div>
+            <Label className="text-xs uppercase tracking-wide text-gray-500">Parts checked</Label>
+            <div className="text-sm text-gray-700 dark:text-gray-200 py-2">
+              {items.length} type{items.length === 1 ? '' : 's'}
+              {' · '}
+              {items.reduce((sum, it) => sum + (it.quantity || 1), 0)} total
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -380,7 +389,7 @@ export default function HardwareInspection() {
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <CardTitle className="text-base flex items-center gap-2">
-                    Component {idx + 1}
+                    Component {idx + 1}{it.quantity > 1 ? ` (×${it.quantity})` : ''}
                     {flaggedCount > 0 && (
                       <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
                         {flaggedCount} issue{flaggedCount > 1 ? 's' : ''} flagged
@@ -401,8 +410,8 @@ export default function HardwareInspection() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Category + specific part */}
-                <div className="grid sm:grid-cols-2 gap-4">
+                {/* Category + specific part + quantity */}
+                <div className="grid sm:grid-cols-3 gap-4">
                   <div className="flex flex-col gap-1">
                     <Label className="text-xs uppercase tracking-wide text-gray-500">Category</Label>
                     <select
@@ -417,18 +426,54 @@ export default function HardwareInspection() {
                     <Label className="text-xs uppercase tracking-wide text-gray-500">
                       Specific part (optional)
                     </Label>
-                    <input
-                      list={`catalog-${it.client_key}`}
-                      className="border rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900"
-                      value={it.component_name}
-                      onChange={(e) => setItem(it.client_key, { component_name: e.target.value })}
-                      placeholder="Start typing or pick from catalog…"
+                    {(() => {
+                      const opts = catalogFor(it.component_category);
+                      const isCustom = !!it.component_name && !opts.includes(it.component_name);
+                      return (
+                        <>
+                          <select
+                            className="border rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900"
+                            value={isCustom ? '__other__' : it.component_name}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '__other__') {
+                                setItem(it.client_key, { component_name: ' ' });
+                              } else {
+                                setItem(it.client_key, { component_name: val });
+                              }
+                            }}
+                          >
+                            <option value="">— Select a part —</option>
+                            {opts.map((name) => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                            <option value="__other__">Other (type below)…</option>
+                          </select>
+                          {(isCustom || it.component_name === ' ') && (
+                            <input
+                              className="border rounded-md px-3 py-2 text-sm bg-white dark:bg-gray-900 mt-1"
+                              value={it.component_name === ' ' ? '' : it.component_name}
+                              onChange={(e) => setItem(it.client_key, { component_name: e.target.value })}
+                              placeholder="Enter part name…"
+                              autoFocus
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs uppercase tracking-wide text-gray-500">Quantity</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={it.quantity}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        setItem(it.client_key, { quantity: Number.isFinite(n) && n > 0 ? n : 1 });
+                      }}
                     />
-                    <datalist id={`catalog-${it.client_key}`}>
-                      {catalogFor(it.component_category).slice(0, 200).map((name) => (
-                        <option key={name} value={name} />
-                      ))}
-                    </datalist>
+                    <span className="text-xs text-gray-400">How many of this part inspected (same condition)</span>
                   </div>
                 </div>
 
