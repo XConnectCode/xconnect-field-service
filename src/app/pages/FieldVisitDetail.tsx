@@ -1045,7 +1045,7 @@ export default function FieldVisitDetail() {
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Wrench className="w-4 h-4 text-gray-500" />
                   Hardware Inspection
-                  {hwInspection?.overall_status && (
+                  {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0 && hwInspection.overall_status && (
                     <Badge
                       variant="outline"
                       className={
@@ -1067,7 +1067,7 @@ export default function FieldVisitDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {hwInspection?.row_id ? (
+                {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0 ? (
                   <p className="text-sm text-gray-600 dark:text-gray-300">
                     {(hwInspection.items?.length || 0)} component{(hwInspection.items?.length || 0) === 1 ? '' : 's'} checked
                     {hwInspection.inspection_date
@@ -1088,7 +1088,7 @@ export default function FieldVisitDetail() {
                   onClick={() => navigate(`/field-visits/${visit.field_visit_id}/hardware-inspection`)}
                 >
                   <Wrench className="w-4 h-4" />
-                  {hwInspection?.row_id ? 'View / edit inspection' : 'Start hardware inspection'}
+                  {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0 ? 'View / edit inspection' : 'Start hardware inspection'}
                 </Button>
               </CardContent>
             </Card>

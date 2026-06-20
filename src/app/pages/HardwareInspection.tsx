@@ -197,6 +197,25 @@ export default function HardwareInspection() {
         } else if (alive) {
           setInspector(v?.xc_rep || '');
           setItems([newItem()]);
+          // Auto-create a draft inspection so per-component photo uploads are
+          // available immediately (ImageUpload needs a parent row id). The
+          // draft is a normal record; the first explicit Save just updates it.
+          try {
+            const draft = await hardwareInspectionApi.create(
+              {
+                field_visit_id: String(fvId),
+                customer: v?.customer ?? null,
+                customer_district: v?.customer_district ?? null,
+                inspector: v?.xc_rep || null,
+                overall_status: 'pass',
+              },
+              accessToken ?? undefined
+            );
+            if (alive && draft?.row_id) setInspectionId(draft.row_id);
+          } catch (draftErr) {
+            console.error('Could not pre-create draft inspection', draftErr);
+            // Non-fatal: photos will simply appear after the first save instead.
+          }
         }
       } catch (e) {
         console.error('Failed to load hardware inspection', e);
