@@ -3676,6 +3676,7 @@ apiRoutes.post("/hardware-inspections/:id/items", async (c) => {
           inspection_id: id,
           component_category: it.component_category ?? null,
           component_name: it.component_name ?? null,
+          quantity: typeof it.quantity === 'number' && it.quantity > 0 ? it.quantity : 1,
           status: it.status ?? 'pass',
           note: it.note ?? null,
           sort_order: typeof it.sort_order === 'number' ? it.sort_order : idx,
