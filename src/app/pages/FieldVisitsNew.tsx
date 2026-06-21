@@ -491,7 +491,7 @@ export default function FieldVisitsNew() {
                     <BarChart
                       data={drill?.dim === 'customer' ? customerDistrictData : customerData}
                       layout="vertical"
-                      margin={{ top: 4, right: 16, left: 80, bottom: 4 }}
+                      margin={{ top: 4, right: 16, left: 12, bottom: 4 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} />
                       <XAxis type="number" tick={{ fontSize: 11, fill: axisColor }} allowDecimals={false} />
@@ -499,7 +499,11 @@ export default function FieldVisitsNew() {
                         type="category"
                         dataKey="name"
                         tick={{ fontSize: 11, fill: axisColor }}
-                        width={80}
+                        width={180}
+                        interval={0}
+                        tickFormatter={(value: string) =>
+                          value.length > 24 ? `${value.slice(0, 24)}…` : value
+                        }
                       />
                       <Tooltip contentStyle={tooltipStyle} />
                       <Bar
