@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../lib/auth-context';
 import { supabase } from '../lib/supabase';
 import {
-  getSession, updateSession,
+  getSession, updateSession, getTemplate,
   listCustomers, listDistrictsForCustomer,
   type ChecklistSession, type ChecklistStepResult,
   type CustomerOption, type DistrictOption,
@@ -39,6 +39,9 @@ export default function TrainingChecklistSession() {
   const [notes, setNotes] = useState('');
   const [signoff, setSignoff] = useState('');
   const [signoffSigUrl, setSignoffSigUrl] = useState<string | null>(null);
+  // Human-readable template title (TC1) resolved when the session's stored
+  // template_name is missing or is just the raw template id.
+  const [templateTitle, setTemplateTitle] = useState<string | null>(null);
 
   // reference data for the customer / district dropdowns
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -62,6 +65,18 @@ export default function TrainingChecklistSession() {
       if (s) {
         setSession(s);
         setSteps(s.step_results || []);
+        // TC1: show the readable template title, not a raw id. If the stored
+        // template_name is empty or equals the template id, resolve the real
+        // template name.
+        const looksLikeId =
+          !s.template_name || (s.template_id != null && s.template_name === s.template_id);
+        if (looksLikeId && s.template_id) {
+          getTemplate(s.template_id)
+            .then((tpl) => setTemplateTitle(tpl?.name || s.template_name || null))
+            .catch(() => setTemplateTitle(s.template_name || null));
+        } else {
+          setTemplateTitle(s.template_name || null);
+        }
         setCustomer(s.customer || '');
         setCustomerDistrict(s.customer_district || '');
         setLocation(s.location || '');
@@ -105,6 +120,23 @@ export default function TrainingChecklistSession() {
     const match = customers.find((c) => c.row_id === customer);
     return match ? match.customer : customer;
   })();
+
+  // Navigate to the linked field visit's detail page. The session stores the
+  // business field_visit_id, but the detail route resolves by row_id, so look
+  // up the row_id first; fall back to the list view if it can't be resolved.
+  const openLinkedVisit = async (fieldVisitId: string) => {
+    try {
+      const { data } = await supabase
+        .from('fieldvisits')
+        .select('row_id')
+        .eq('field_visit_id', fieldVisitId)
+        .maybeSingle();
+      if (data?.row_id) navigate(`/field-visits/${data.row_id}`);
+      else navigate('/field-visits');
+    } catch {
+      navigate('/field-visits');
+    }
+  };
 
   const toggleStep = (stepId: string) => {
     setSteps((prev) => prev.map((r) => (r.id === stepId ? { ...r, done: !r.done } : r)));
@@ -195,7 +227,7 @@ export default function TrainingChecklistSession() {
           <CardContent className="p-6">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{session.template_name}</h1>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{templateTitle || session.template_name || 'Training Checklist'}</h1>
                 <div className="flex gap-2 mt-2 flex-wrap">
                   {session.product_line && <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">{session.product_line}</Badge>}
                   {session.kind === 'xfire' && <Badge className="bg-indigo-100 text-indigo-800 border-indigo-200">XFire</Badge>}
@@ -220,7 +252,7 @@ export default function TrainingChecklistSession() {
             </div>
             {session.field_visit_id && (
               <button
-                onClick={() => navigate(`/field-visits`)}
+                onClick={() => openLinkedVisit(session.field_visit_id!)}
                 className="mt-3 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
               >
                 <ExternalLink className="w-3.5 h-3.5" />Linked field visit: {session.field_visit_id}

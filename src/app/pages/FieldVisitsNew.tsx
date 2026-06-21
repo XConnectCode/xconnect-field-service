@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
-import { Plus, Edit, Trash, ExternalLink, X, Search } from 'lucide-react';
+import { Plus, Edit, Trash, ExternalLink, X, Search, Eye, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   startOfWeek, endOfWeek, startOfMonth, endOfMonth,
@@ -82,6 +82,11 @@ export default function FieldVisitsNew() {
   // ── Dialog state ────────────────────────────────────────────────────────────
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingVisit, setEditingVisit] = useState<any>(null);
+  // E2: prefill for a brand-new visit copied from an existing one.
+  const [prefillVisit, setPrefillVisit] = useState<any>(null);
+
+  // E1: quick-view (eye) modal — preview a visit without leaving the list.
+  const [quickView, setQuickView] = useState<any>(null);
 
   // ── Dashboard drill state ────────────────────────────────────────────────────
   const [drill, setDrill] = useState<{ dim: string; value: string; customer?: string } | null>(null);
@@ -96,6 +101,7 @@ export default function FieldVisitsNew() {
   useEffect(() => {
     if (searchParams.get('new') === '1') {
       setEditingVisit(null);
+      setPrefillVisit(null);
       setDialogOpen(true);
     }
   }, [searchParams]);
@@ -304,8 +310,25 @@ export default function FieldVisitsNew() {
     } catch { toast.error('Failed to delete field visit'); }
   };
 
-  const openEdit    = (visit: any) => { setEditingVisit(visit); setDialogOpen(true); };
-  const closeDialog = () => { setDialogOpen(false); setEditingVisit(null); };
+  const openEdit    = (visit: any) => { setEditingVisit(visit); setPrefillVisit(null); setDialogOpen(true); };
+  const closeDialog = () => { setDialogOpen(false); setEditingVisit(null); setPrefillVisit(null); };
+
+  // E2: Copy / Start New — open the create dialog seeded with only the durable
+  // location/customer context. xc_rep auto-populates from the logged-in user;
+  // dates, times, duration, reps, summary, status, signatures and linked
+  // checklists/inspections are intentionally left fresh.
+  const openCopy = (visit: any) => {
+    setEditingVisit(null);
+    setQuickView(null);
+    setPrefillVisit({
+      customer: visit.customer ?? null,
+      customer_district: visit.customer_district ?? null,
+      operating_company: visit.operating_company ?? null,
+      pad_name: visit.pad_name ?? null,
+      lat_long: visit.lat_long ?? null,
+    });
+    setDialogOpen(true);
+  };
 
   if (loading) return <div className="p-8">Loading...</div>;
 
@@ -347,7 +370,7 @@ export default function FieldVisitsNew() {
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Field Visits</h1>
             <p className="text-gray-600 dark:text-gray-300 mt-2">Track all customer site visits by Service Quality Managers</p>
           </div>
-          <Button onClick={() => { setEditingVisit(null); setDialogOpen(true); }} className="w-full md:w-auto">
+          <Button onClick={() => { setEditingVisit(null); setPrefillVisit(null); setDialogOpen(true); }} className="w-full md:w-auto">
             <Plus className="w-4 h-4 mr-2" />
             New Field Visit
           </Button>
@@ -795,11 +818,17 @@ export default function FieldVisitsNew() {
                             <TableCell className="text-sm whitespace-nowrap">{displayVisitDuration(visit)}</TableCell>
                             <TableCell>
                               <div className="flex gap-2">
-                                <Button size="sm" variant="outline" onClick={() => openEdit(visit)}>
+                                <Button size="sm" variant="outline" title="Quick view" onClick={() => setQuickView(visit)}>
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                                <Button size="sm" variant="outline" title="Copy / Start New" onClick={() => openCopy(visit)}>
+                                  <Copy className="w-4 h-4" />
+                                </Button>
+                                <Button size="sm" variant="outline" title="Edit" onClick={() => openEdit(visit)}>
                                   <Edit className="w-4 h-4" />
                                 </Button>
                                 {user?.role !== 'sqm' && (
-                                  <Button size="sm" variant="destructive" onClick={() => handleDelete(visit.row_id)}>
+                                  <Button size="sm" variant="destructive" title="Delete" onClick={() => handleDelete(visit.row_id)}>
                                     <Trash className="w-4 h-4" />
                                   </Button>
                                 )}
@@ -822,10 +851,78 @@ export default function FieldVisitsNew() {
           onClose={closeDialog}
           onSaved={loadData}
           visit={editingVisit}
+          prefill={prefillVisit}
           currentUser={user}
         />
 
+        {/* ── E1: Quick-view modal — preview a visit without leaving the list ── */}
+        <Dialog open={!!quickView} onOpenChange={(v) => { if (!v) setQuickView(null); }}>
+          <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                Field Visit {quickView?.field_visit_id || ''}
+                {quickView?.visit_purpose && (
+                  <Badge variant={quickView.visit_purpose === 'Incident' ? 'destructive' : 'default'}>
+                    {quickView.visit_purpose}
+                  </Badge>
+                )}
+              </DialogTitle>
+            </DialogHeader>
+            {quickView && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                  <QuickField label="Customer" value={quickView.customerName} />
+                  <QuickField label="District" value={quickView.districtName} />
+                  <QuickField label="Operating Company" value={quickView.operating_company} />
+                  <QuickField label="Field / Facility" value={quickView.field_or_facility} />
+                  <QuickField label="Pad / Well" value={quickView.pad_name} />
+                  <QuickField label="Lat / Long" value={quickView.lat_long} />
+                  <QuickField label="XC Rep (SQM)" value={quickView.xc_rep} />
+                  <QuickField label="Customer Rep" value={quickView.customer_rep} />
+                  <QuickField
+                    label="Arrival"
+                    value={quickView.arrival_date ? new Date(quickView.arrival_date).toLocaleString() : null}
+                  />
+                  <QuickField
+                    label="Departure"
+                    value={quickView.departure_date ? new Date(quickView.departure_date).toLocaleString() : null}
+                  />
+                  <QuickField label="Duration" value={displayVisitDuration(quickView)} />
+                </div>
+                {quickView.visit_summary && (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Visit Summary</div>
+                    <p className="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap">{quickView.visit_summary}</p>
+                  </div>
+                )}
+                <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                  <Button variant="outline" size="sm" onClick={() => openCopy(quickView)}>
+                    <Copy className="w-4 h-4 mr-1.5" /> Copy / Start New
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => { const v = quickView; setQuickView(null); openEdit(v); }}>
+                    <Edit className="w-4 h-4 mr-1.5" /> Edit
+                  </Button>
+                  <Link to={`/field-visits/${quickView.row_id}`}>
+                    <Button size="sm">
+                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open full detail
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
       </div>
+    </div>
+  );
+}
+
+function QuickField({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className="text-sm text-gray-800 dark:text-gray-100">{value || '—'}</div>
     </div>
   );
 }

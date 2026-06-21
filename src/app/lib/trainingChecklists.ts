@@ -179,11 +179,49 @@ export async function deleteSession(id: string): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Training sessions not yet linked to any field visit (field_visit_id is null).
+ * Used by the Field Visit "Attach Training Checklist" flow so an SQM can link a
+ * previously-logged, unlinked checklist instead of always creating a new one.
+ */
+export async function listUnlinkedSessions(): Promise<ChecklistSession[]> {
+  const { data, error } = await supabase
+    .from('training_checklist_sessions').select('*')
+    .is('field_visit_id', null)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+  return (data || []) as ChecklistSession[];
+}
+
+/** Link an existing session to a field visit (sets field_visit_id). */
+export async function linkSessionToVisit(sessionId: string, fieldVisitId: string): Promise<ChecklistSession> {
+  return updateSession(sessionId, { field_visit_id: fieldVisitId });
+}
+
+/** Unlink a session from its field visit (clears field_visit_id). */
+export async function unlinkSession(sessionId: string): Promise<ChecklistSession> {
+  return updateSession(sessionId, { field_visit_id: null });
+}
+
+export interface TrainingVisitOption {
+  field_visit_id: string;
+  /** Resolved customer display name (for the option label). */
+  customer: string | null;
+  arrival_date: string | null;
+  /** Raw customers.row_id stored on the visit (for filtering by selected customer). */
+  customer_id: string | null;
+  /** Raw districts.row_id stored on the visit (for filtering by selected district). */
+  customer_district_id: string | null;
+}
+
 /** Load Training-purpose field visits for the link picker. */
-export async function listTrainingVisits(limit = 200): Promise<Array<{ field_visit_id: string; customer: string | null; arrival_date: string | null; }>> {
+export async function listTrainingVisits(limit = 200): Promise<TrainingVisitOption[]> {
   const { data, error } = await supabase
     .from('fieldvisits')
-    .select('field_visit_id, customer, arrival_date, visit_purpose')
+    .select('field_visit_id, customer, customer_district, arrival_date, visit_purpose')
     .eq('visit_purpose', 'Training')
     .order('arrival_date', { ascending: false })
     .limit(limit);
@@ -213,6 +251,8 @@ export async function listTrainingVisits(limit = 200): Promise<Array<{ field_vis
     // Prefer resolved name; fall back to raw value so the option is never blank.
     customer: (r.customer && nameById.get(r.customer)) || r.customer || null,
     arrival_date: r.arrival_date ?? null,
+    customer_id: r.customer ?? null,
+    customer_district_id: r.customer_district ?? null,
   }));
 }
 

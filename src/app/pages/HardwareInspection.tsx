@@ -41,7 +41,9 @@ const COMPONENT_CATEGORIES = [
 // Keyword filters used to narrow the catalog dropdown per category.
 // PSA = Plug Shoot Adapter.
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  'Top Sub Connection': ['top sub', 'attenuator sub', 'ccl', 'top end'],
+  // 'Direct Connects' now lives under Top Sub Connection (HW1). 'top end' and
+  // 'ccl' keywords removed so retired parts no longer surface here.
+  'Top Sub Connection': ['top sub', 'attenuator sub', 'direct connect'],
   'Quick Change': ['quick change'],
   'Tandem Sub': ['tandem sub'],
   'Crossover/Adapter': ['crossover', 'adapter', 'acme'],
@@ -50,6 +52,15 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'Pump Down Sub': ['pumpdown', 'pump down'],
   'Other': [],
 };
+
+// Parts removed from selection entirely (HW1): any "Top End Plate" variant and
+// "CCL Cable". Matched case-insensitively against the catalog part name.
+const EXCLUDED_PART_KEYWORDS = ['top end plate', 'ccl cable'];
+
+function isExcludedPart(name: string): boolean {
+  const lower = name.toLowerCase();
+  return EXCLUDED_PART_KEYWORDS.some((kw) => lower.includes(kw));
+}
 
 // ── Per-component wear checks. Checking a box means "issue found". ──────────────
 const CHECK_DEFS: { key: ChkKey; label: string; hint: string }[] = [
@@ -250,9 +261,10 @@ export default function HardwareInspection() {
   }
 
   function catalogFor(category: string): string[] {
+    const available = catalog.filter((name) => !isExcludedPart(name));
     const kws = CATEGORY_KEYWORDS[category] || [];
-    if (!kws.length) return catalog;
-    return catalog.filter((name) => {
+    if (!kws.length) return available;
+    return available.filter((name) => {
       const lower = name.toLowerCase();
       return kws.some((kw) => lower.includes(kw));
     });
@@ -308,6 +320,9 @@ export default function HardwareInspection() {
       await hardwareInspectionApi.saveItems(id, payloadItems, accessToken ?? undefined);
 
       toast.success('Hardware inspection saved.');
+      // Return to the Field Visit Detail page after saving.
+      const backTarget = visit?.row_id ?? visitId;
+      if (backTarget) navigate(`/field-visits/${backTarget}`);
     } catch (e: any) {
       console.error('Save failed', e);
       toast.error(e?.message || 'Failed to save inspection.');

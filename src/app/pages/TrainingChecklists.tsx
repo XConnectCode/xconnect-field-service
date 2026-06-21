@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -15,7 +15,7 @@ import {
   listCustomers, listDistrictsForCustomer, getVisitAutofill,
   isMissingTableError,
   type ChecklistTemplate, type ChecklistSession,
-  type CustomerOption, type DistrictOption,
+  type CustomerOption, type DistrictOption, type TrainingVisitOption,
 } from '../lib/trainingChecklists';
 
 export default function TrainingChecklists() {
@@ -33,7 +33,7 @@ export default function TrainingChecklists() {
   // Start-session modal
   const [showStart, setShowStart] = useState(false);
   const [starting, setStarting] = useState(false);
-  const [trainingVisits, setTrainingVisits] = useState<Array<{ field_visit_id: string; customer: string | null; arrival_date: string | null }>>([]);
+  const [trainingVisits, setTrainingVisits] = useState<TrainingVisitOption[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [districts, setDistricts] = useState<DistrictOption[]>([]);
   const [startForm, setStartForm] = useState({
@@ -73,6 +73,20 @@ export default function TrainingChecklists() {
       }));
     });
   }, [startForm.fieldVisitId]);
+
+  // T1: once a customer (and optionally district) is selected, the field-visit
+  // link dropdown must only show Training-purpose visits for that customer
+  // (filtered further by district when one is chosen). The currently-selected
+  // visit is always kept so an already-linked option never disappears.
+  const visibleTrainingVisits = useMemo(() => {
+    if (!startForm.customer) return trainingVisits;
+    return trainingVisits.filter((v) => {
+      if (v.field_visit_id === startForm.fieldVisitId) return true;
+      if (v.customer_id !== startForm.customer) return false;
+      if (startForm.customerDistrict && v.customer_district_id !== startForm.customerDistrict) return false;
+      return true;
+    });
+  }, [trainingVisits, startForm.customer, startForm.customerDistrict, startForm.fieldVisitId]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -361,13 +375,16 @@ export default function TrainingChecklists() {
                   className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
                 >
                   <option value="">— Not linked —</option>
-                  {trainingVisits.map((v) => (
+                  {visibleTrainingVisits.map((v) => (
                     <option key={v.field_visit_id} value={v.field_visit_id}>
                       {v.field_visit_id}{v.customer ? ` · ${v.customer}` : ''}{v.arrival_date ? ` · ${new Date(v.arrival_date).toLocaleDateString()}` : ''}
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-gray-500 mt-1">Only Training-purpose field visits are shown.</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Only Training-purpose field visits are shown
+                  {startForm.customer ? ' for the selected customer' : ''}.
+                </p>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-6">
