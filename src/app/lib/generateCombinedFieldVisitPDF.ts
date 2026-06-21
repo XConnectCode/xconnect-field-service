@@ -137,10 +137,55 @@ function readImageDims(dataUrl: string): Promise<{ w: number; h: number } | null
 }
 
 // A fetched + decoded photo ready to embed.
-interface PreparedPhoto {
+export interface PreparedPhoto {
   dataUrl: string;
   fmt: string;
   dims: { w: number; h: number } | null;
+}
+
+/**
+ * HW3: lay out component photos two-per-row with noticeably larger thumbnails.
+ * Each cell is half the content width, so two cells fill the row. Pagination is
+ * kept clean by reserving a full row height before drawing each row. The caller
+ * passes getY/setY closures so this works with either report's `y` cursor.
+ */
+export function drawComponentPhotos(
+  doc: any,
+  photos: PreparedPhoto[],
+  getY: () => number,
+  setY: (y: number) => void,
+  checkPage: (needed: number) => void,
+): void {
+  const gap = 6;
+  const cellW = (CONT_W - gap) / 2; // two per row
+  const cellH = Math.round(cellW * 0.7); // taller cells for bigger photos
+  let col = 0;
+  photos.forEach((p) => {
+    if (col === 0) checkPage(cellH + gap); // reserve a full row before starting it
+    const rowX = MARGIN + col * (cellW + gap);
+    const y = getY();
+    doc.setDrawColor(...XC_BORDER); doc.setLineWidth(0.3);
+    doc.roundedRect(rowX, y, cellW, cellH, 1, 1, 'S');
+    try {
+      const pad = 2;
+      let drawW = cellW - pad * 2;
+      let drawH = cellH - pad * 2;
+      if (p.dims && p.dims.w > 0 && p.dims.h > 0) {
+        const ratio = p.dims.h / p.dims.w;
+        drawH = drawW * ratio;
+        if (drawH > cellH - pad * 2) {
+          drawH = cellH - pad * 2;
+          drawW = drawH / ratio;
+        }
+      }
+      const ix = rowX + (cellW - drawW) / 2;
+      const iy = y + (cellH - drawH) / 2;
+      doc.addImage(p.dataUrl, p.fmt, ix, iy, drawW, drawH);
+    } catch { /* skip a bad image */ }
+    col++;
+    if (col === 2) { col = 0; setY(getY() + cellH + gap); }
+  });
+  if (col !== 0) setY(getY() + cellH + gap);
 }
 
 export async function generateCombinedFieldVisitPDF(
@@ -432,41 +477,11 @@ export async function generateCombinedFieldVisitPDF(
         });
       }
 
-      // Embedded photos for this component
+      // Embedded photos for this component (HW3: two per row, larger thumbnails).
       const photos = photosByComponent[idx + 1] || [];
       if (photos.length) {
         y += 2;
-        const thumbW = 42; // mm
-        const thumbH = 32; // mm
-        const gap = 4;
-        const perRow = Math.max(1, Math.floor((CONT_W + gap) / (thumbW + gap)));
-        let col = 0;
-        let rowX = MARGIN;
-        photos.forEach((p) => {
-          if (col === 0) checkPage(thumbH + 6);
-          rowX = MARGIN + col * (thumbW + gap);
-          doc.setDrawColor(...XC_BORDER); doc.setLineWidth(0.3);
-          doc.roundedRect(rowX, y, thumbW, thumbH, 1, 1, 'S');
-          try {
-            const pad = 1.5;
-            let drawW = thumbW - pad * 2;
-            let drawH = thumbH - pad * 2;
-            if (p.dims && p.dims.w > 0 && p.dims.h > 0) {
-              const ratio = p.dims.h / p.dims.w;
-              drawH = drawW * ratio;
-              if (drawH > thumbH - pad * 2) {
-                drawH = thumbH - pad * 2;
-                drawW = drawH / ratio;
-              }
-            }
-            const ix = rowX + (thumbW - drawW) / 2;
-            const iy = y + (thumbH - drawH) / 2;
-            doc.addImage(p.dataUrl, p.fmt, ix, iy, drawW, drawH);
-          } catch { /* skip a bad image */ }
-          col++;
-          if (col === perRow) { col = 0; y += thumbH + gap; }
-        });
-        if (col !== 0) y += thumbH + gap;
+        drawComponentPhotos(doc, photos, () => y, (ny) => { y = ny; }, checkPage);
       }
 
       y += 4;

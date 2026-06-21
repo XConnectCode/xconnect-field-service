@@ -23,11 +23,19 @@ import {
   GraduationCap,
   FileDown,
   Wrench,
+  Link2,
+  Unlink,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { listSessionsForVisit, type ChecklistSession } from '../lib/trainingChecklists';
+import {
+  listSessionsForVisit, listUnlinkedSessions, linkSessionToVisit, unlinkSession,
+  type ChecklistSession,
+} from '../lib/trainingChecklists';
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
 import { generateCombinedFieldVisitPDF } from '../lib/generateCombinedFieldVisitPDF';
+import { generateHardwareInspectionPDF } from '../lib/generateHardwareInspectionPDF';
 import { displayVisitDuration, toInputValue, formatVisitTimestamp } from '../lib/visitDuration';
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -100,6 +108,15 @@ export default function FieldVisitDetail() {
   const [reportSessionId, setReportSessionId] = useState<string | null>(null);
   const [hwInspection, setHwInspection] = useState<any>(null);
   const [combinedPdfLoading, setCombinedPdfLoading] = useState(false);
+  const [hwReportLoading, setHwReportLoading] = useState(false);
+  const [hwDeleting, setHwDeleting] = useState(false);
+
+  // Attach-training-checklist picker (L1): choose an existing unlinked session
+  // or jump to the new-session flow.
+  const [showAttachTraining, setShowAttachTraining] = useState(false);
+  const [unlinkedSessions, setUnlinkedSessions] = useState<ChecklistSession[]>([]);
+  const [attachLoading, setAttachLoading] = useState(false);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -399,16 +416,95 @@ export default function FieldVisitDetail() {
     }
   }
 
+  // ── HW5: isolated hardware-only inspection report ────────────────────────────
+  async function handleDownloadHardwareReport() {
+    if (!visit) return;
+    setHwReportLoading(true);
+    try {
+      await generateHardwareInspectionPDF({
+        visit,
+        inspection: hwInspection,
+        customerName: visit.customerName ?? null,
+        districtName: visit.districtName ?? null,
+        accessToken: accessToken ?? null,
+      });
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate hardware report');
+    } finally {
+      setHwReportLoading(false);
+    }
+  }
+
+  // ── HW4: delete the hardware inspection (with confirm) ───────────────────────
+  async function handleDeleteHardwareInspection() {
+    if (!hwInspection?.row_id) return;
+    if (!confirm('Delete this hardware inspection? This cannot be undone.')) return;
+    setHwDeleting(true);
+    try {
+      await hardwareInspectionApi.remove(hwInspection.row_id, accessToken ?? undefined);
+      setHwInspection(null);
+      toast.success('Hardware inspection deleted');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete inspection');
+    } finally {
+      setHwDeleting(false);
+    }
+  }
+
   // ── Attach a Training Checklist from this visit ──────────────────────────────
-  // Opens the Training Checklists flow pre-linked to this field visit so an SQM
-  // can pick a template and start a session tied to the visit.
-  function handleAttachTraining() {
+  // Opens a picker (L1): link an existing UNLINKED training checklist to this
+  // visit, or start a brand-new session pre-linked to it.
+  async function handleAttachTraining() {
+    if (!visit) return;
+    setShowAttachTraining(true);
+    setAttachLoading(true);
+    try {
+      setUnlinkedSessions(await listUnlinkedSessions());
+    } catch (e: any) {
+      console.error('Error loading unlinked training sessions:', e);
+      toast.error('Failed to load unlinked checklists');
+      setUnlinkedSessions([]);
+    } finally {
+      setAttachLoading(false);
+    }
+  }
+
+  // Start a brand-new session pre-linked to this field visit (the prior behavior).
+  function handleStartNewTraining() {
     if (!visit) return;
     const params = new URLSearchParams({ start: '1' });
     if (visit.field_visit_id) params.set('fieldVisitId', visit.field_visit_id);
     if (visit.customerName) params.set('customer', visit.customerName);
     else if (visit.customer) params.set('customer', visit.customer);
     navigate(`/training-checklists?${params.toString()}`);
+  }
+
+  // Link a selected unlinked session to this field visit.
+  async function handleLinkExisting(session: ChecklistSession) {
+    if (!visit?.field_visit_id) return;
+    setLinkingId(session.id);
+    try {
+      await linkSessionToVisit(session.id, String(visit.field_visit_id));
+      toast.success('Training checklist linked to this visit');
+      setShowAttachTraining(false);
+      await loadVisit();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to link checklist');
+    } finally {
+      setLinkingId(null);
+    }
+  }
+
+  // Unlink a session from this field visit (from the linked list).
+  async function handleUnlinkSession(session: ChecklistSession) {
+    if (!confirm('Unlink this training checklist from the field visit?')) return;
+    try {
+      await unlinkSession(session.id);
+      toast.success('Training checklist unlinked');
+      await loadVisit();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to unlink checklist');
+    }
   }
 
   // ── loading / not-found states ──────────────────────────────────────────────
@@ -431,6 +527,15 @@ export default function FieldVisitDetail() {
         </div>
       </div>
     );
+  }
+
+  // TC1: readable checklist title — never surface a raw template id. If the
+  // stored template_name is missing or equals the template id, fall back to a
+  // generic label.
+  function checklistTitle(s: ChecklistSession): string {
+    const name = (s.template_name || '').trim();
+    if (!name || (s.template_id != null && name === s.template_id)) return 'Training Checklist';
+    return name;
   }
 
   // ── format helpers ──────────────────────────────────────────────────────────
@@ -496,7 +601,21 @@ export default function FieldVisitDetail() {
                     ) : (
                       <FileDown className="w-4 h-4" />
                     )}
-                    {combinedPdfLoading ? 'Generating…' : 'Download Combined PDF'}
+                    {combinedPdfLoading ? 'Generating…' : 'Download PDF'}
+                  </Button>
+
+                  {/* Start / continue the hardware inspection (mirrors the
+                      Hardware Inspection card action, also surfaced here in the
+                      header next to the other header actions). */}
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate(`/field-visits/${visit.field_visit_id}/hardware-inspection`)}
+                    className="gap-1.5"
+                  >
+                    <Wrench className="w-4 h-4" />
+                    {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0
+                      ? 'View Hardware Inspection'
+                      : 'Start Hardware Inspection'}
                   </Button>
 
                   {/* Primary action: log an incident pre-linked to this visit. */}
@@ -1031,7 +1150,7 @@ export default function FieldVisitDetail() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-medium text-gray-900 dark:text-gray-100 group-hover:text-blue-600 text-sm">
-                                  {s.template_name || 'Training Checklist'}
+                                  {checklistTitle(s)}
                                 </span>
                                 {s.status && (
                                   <Badge variant="outline" className="text-xs">
@@ -1055,18 +1174,31 @@ export default function FieldVisitDetail() {
                             <ExternalLink className="w-4 h-4 text-gray-300 group-hover:text-blue-500 flex-shrink-0 mt-0.5" />
                           </div>
                         </button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="mt-1 flex-shrink-0 gap-1.5"
-                          disabled={reportSessionId === s.id}
-                          onClick={() => handleDownloadTrainingReport(s)}
-                          title="Download combined field visit + training report"
-                        >
-                          <FileDown className="w-3.5 h-3.5" />
-                          {reportSessionId === s.id ? 'Generating…' : 'Report'}
-                        </Button>
+                        <div className="flex flex-col gap-1 mt-1 flex-shrink-0">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            disabled={reportSessionId === s.id}
+                            onClick={() => handleDownloadTrainingReport(s)}
+                            title="Download combined field visit + training report"
+                          >
+                            <FileDown className="w-3.5 h-3.5" />
+                            {reportSessionId === s.id ? 'Generating…' : 'Report'}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1.5 text-gray-500 hover:text-amber-700"
+                            onClick={() => handleUnlinkSession(s)}
+                            title="Unlink this checklist from the field visit"
+                          >
+                            <Unlink className="w-3.5 h-3.5" />
+                            Unlink
+                          </Button>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -1115,21 +1247,122 @@ export default function FieldVisitDetail() {
                     No hardware inspection recorded for this visit.
                   </p>
                 )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => navigate(`/field-visits/${visit.field_visit_id}/hardware-inspection`)}
-                >
-                  <Wrench className="w-4 h-4" />
-                  {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0 ? 'View / edit inspection' : 'Start hardware inspection'}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => navigate(`/field-visits/${visit.field_visit_id}/hardware-inspection`)}
+                  >
+                    <Wrench className="w-4 h-4" />
+                    {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0 ? 'View / edit inspection' : 'Start hardware inspection'}
+                  </Button>
+                  {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0 && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={handleDownloadHardwareReport}
+                        disabled={hwReportLoading}
+                      >
+                        <FileDown className="w-4 h-4" />
+                        {hwReportLoading ? 'Generating…' : 'Report'}
+                      </Button>
+                      {user?.role === 'admin' && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5 text-red-600 hover:text-red-700"
+                          onClick={handleDeleteHardwareInspection}
+                          disabled={hwDeleting}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          {hwDeleting ? 'Deleting…' : 'Delete'}
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
         </div>
       </div>
+
+      {/* ── Attach Training Checklist picker (L1) ───────────────────────────── */}
+      {showAttachTraining && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setShowAttachTraining(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-lg p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                Attach Training Checklist
+              </h2>
+              <button onClick={() => setShowAttachTraining(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <Button onClick={handleStartNewTraining} className="w-full gap-1.5 mb-4">
+              <Plus className="w-4 h-4" />
+              Start a new training checklist
+            </Button>
+
+            <div className="flex items-center gap-3 mb-3">
+              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+              <span className="text-xs uppercase tracking-wide text-gray-400">or link an existing one</span>
+              <div className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+            </div>
+
+            {attachLoading ? (
+              <p className="text-sm text-gray-500 py-6 text-center">Loading unlinked checklists…</p>
+            ) : unlinkedSessions.length === 0 ? (
+              <p className="text-sm text-gray-400 italic py-6 text-center">
+                No unlinked training checklists available.
+              </p>
+            ) : (
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800 max-h-72 overflow-y-auto">
+                {unlinkedSessions.map((s) => (
+                  <li key={s.id} className="flex items-center justify-between gap-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {checklistTitle(s)}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {[
+                          s.customer || null,
+                          s.trainer_name ? `SQM: ${s.trainer_name}` : null,
+                          s.training_date ? new Date(s.training_date + 'T12:00:00').toLocaleDateString() : null,
+                        ].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 flex-shrink-0"
+                      disabled={linkingId === s.id}
+                      onClick={() => handleLinkExisting(s)}
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      {linkingId === s.id ? 'Linking…' : 'Link'}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

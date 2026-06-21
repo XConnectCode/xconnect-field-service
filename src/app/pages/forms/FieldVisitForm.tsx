@@ -60,9 +60,23 @@ interface Props {
   onSaved: () => void;
   visit?: any;
   currentUser?: any;
+  /**
+   * E2 "Copy / Start New": seed a brand-new visit from an existing one. Unlike
+   * `visit`, this never switches the form to edit mode — the record is created
+   * fresh (new auto Visit ID, fresh Open). Only the durable location/customer
+   * context is carried; dates, times, duration, reps, summary, status,
+   * signatures and linked checklists/inspections are intentionally NOT seeded.
+   */
+  prefill?: {
+    customer?: string | null;            // customers.row_id
+    customer_district?: string | null;   // districts.row_id
+    operating_company?: string | null;
+    pad_name?: string | null;
+    lat_long?: string | null;
+  } | null;
 }
 
-export default function FieldVisitForm({ open, onClose, onSaved, visit, currentUser }: Props) {
+export default function FieldVisitForm({ open, onClose, onSaved, visit, currentUser, prefill }: Props) {
   const editing = !!visit;
 
   const [customers,     setCustomers]     = useState<any[]>([]);
@@ -122,11 +136,11 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     return () => { cancelled = true; };
   }, [open, editing]);
 
-  // Pre-fill lat/lng when editing
+  // Pre-fill lat/lng when editing, or from a Copy/Start New prefill on create.
   useEffect(() => {
     if (visit) setLatLngValue(visit.lat_long || '');
-    else setLatLngValue('');
-  }, [visit, open]);
+    else setLatLngValue(prefill?.lat_long || '');
+  }, [visit, open, prefill]);
 
   // Seed arrival / departure (datetime-local wants YYYY-MM-DDTHH:MM).
   useEffect(() => {
@@ -161,8 +175,8 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
 
   useEffect(() => {
     if (visit) setCustId(visit.customer || '');
-    else setCustId('');
-  }, [visit, open]);
+    else setCustId(prefill?.customer || '');
+  }, [visit, open, prefill]);
 
   // Seed the Panels Seen multi-select. Prefer the new panels_seen array; for
   // legacy visits saved before this field existed, fall back to the 3 old
@@ -378,7 +392,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           </F>
 
           <F label="District" required>
-            <select name="customer_district" defaultValue={visit?.customer_district || ''}
+            <select name="customer_district" defaultValue={visit?.customer_district || prefill?.customer_district || ''}
               disabled={!custId} className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm" required>
               <option value="">— Select district —</option>
               {districts.map(d => <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>)}
@@ -386,7 +400,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           </F>
 
           <F label="Operating Company">
-            <select name="operating_company" defaultValue={visit?.operating_company || ''}
+            <select name="operating_company" defaultValue={visit?.operating_company || prefill?.operating_company || ''}
               className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
               <option value="">— Select —</option>
               {epCompanies.map(o => <option key={o} value={o}>{o}</option>)}
@@ -414,7 +428,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           <Section title="Location" />
 
           <F label="Pad Name">
-            <Input name="pad_name" defaultValue={visit?.pad_name || ''} placeholder="e.g. Antelope Canyon 14H" />
+            <Input name="pad_name" defaultValue={visit?.pad_name || prefill?.pad_name || ''} placeholder="e.g. Antelope Canyon 14H" />
           </F>
 
           <F label="Lat / Long">
