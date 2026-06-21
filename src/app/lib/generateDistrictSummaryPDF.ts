@@ -28,12 +28,22 @@ export interface DistrictSummaryChecklist {
   trainer_name?: string | null;
 }
 
+export interface DistrictSummaryInspectionComponent {
+  component_category?: string | null;   // e.g. "Firing Head"
+  component_name?: string | null;       // specific part
+  status?: string | null;               // pass | monitor | replace_soon | remove
+  quantity?: number;
+  note?: string | null;                 // reason / detail
+  issues?: string[];                    // human labels of flagged chk_* checks
+}
+
 export interface DistrictSummaryInspection {
   inspector?: string | null;
   inspection_date?: string | null;
   overall_status?: string | null;
   componentCount?: number;
   totalParts?: number;
+  components?: DistrictSummaryInspectionComponent[];
 }
 
 export interface DistrictSummaryData {
@@ -60,6 +70,31 @@ const HW_STATUS_LABEL: Record<string, string> = {
   monitor: 'Monitor',
   replace_soon: 'Replace soon',
   remove: 'Remove from service',
+};
+
+type RGB = [number, number, number];
+
+// Status -> text color, consistent with the app's status semantics.
+const HW_STATUS_COLOR: Record<string, RGB> = {
+  pass: [...XC_GREEN] as RGB,
+  monitor: [200, 130, 0],
+  replace_soon: [200, 90, 30],
+  remove: [185, 40, 40],
+};
+
+// Short customer-facing action hint per urgent status.
+const HW_STATUS_HINT: Record<string, string> = {
+  replace_soon: 'order replacements ASAP',
+  remove: 'remove from service immediately',
+  monitor: 'monitor / re-inspect',
+};
+
+// Severity ranking for sorting (most severe first).
+const HW_STATUS_SEVERITY: Record<string, number> = {
+  remove: 0,
+  replace_soon: 1,
+  monitor: 2,
+  pass: 3,
 };
 
 const CHECKLIST_STATUS_LABEL: Record<string, string> = {
@@ -97,19 +132,21 @@ export async function generateDistrictSummaryPDF(
     if (!visible.length) return;
     let col = 0;
     visible.forEach((item) => {
-      if (col === 0) checkPage(10);
+      if (col === 0) checkPage(11);
       const x = MARGIN + (col === 0 ? 0 : colW);
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...XC_DARK);
+      // Label: normal weight, size 9.
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
       doc.text(`${item.label}:`, x, y);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
       const labelW = doc.getTextWidth(`${item.label}: `);
-      const maxW = colW - labelW - 4;
+      // Value: bold + larger, clearly separated from the label.
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...XC_DARK);
+      const maxW = colW - labelW - 6;
       const txt = doc.splitTextToSize(item.value || '—', maxW)[0];
-      doc.text(txt, x + labelW + 1, y);
+      doc.text(txt, x + labelW + 4, y);
       col++;
-      if (col === 2) { col = 0; y += 8; }
+      if (col === 2) { col = 0; y += 10; }
     });
-    if (col !== 0) y += 8;
+    if (col !== 0) y += 10;
     y += 4;
   };
 
@@ -222,27 +259,145 @@ export async function generateDistrictSummaryPDF(
   // ══════════════════════════════════════════════════════════════════════════════
   checkPage(24);
   y = drawSectionHeading(doc, 'Hardware Inspections', y);
+
+  // ── Overall status breakdown (colored + non-pass bold) ──
   doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
   doc.text('Overall status breakdown', MARGIN, y); y += 6;
-  breakdownList(data.inspectionStatusCounts, HW_STATUS_LABEL);
+  {
+    const keys = Object.keys(data.inspectionStatusCounts).filter(
+      (k) => data.inspectionStatusCounts[k] > 0,
+    );
+    if (!keys.length) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
+      doc.text('None in this period.', MARGIN + 2, y);
+      y += 7;
+    } else {
+      keys.sort((a, b) => (HW_STATUS_SEVERITY[a] ?? 9) - (HW_STATUS_SEVERITY[b] ?? 9));
+      keys.forEach((k) => {
+        checkPage(7);
+        const color = HW_STATUS_COLOR[k] || ([50, 50, 50] as RGB);
+        doc.setFont('helvetica', k === 'pass' ? 'normal' : 'bold');
+        doc.setFontSize(9); doc.setTextColor(...color);
+        doc.text(`• ${HW_STATUS_LABEL[k] || k}: ${data.inspectionStatusCounts[k]}`, MARGIN + 2, y);
+        y += 6;
+      });
+      y += 2;
+    }
+  }
+
+  // ── Needs attention: rollup by component category + status ──
+  {
+    const groups = new Map<string, {
+      category: string; status: string; qty: number;
+      notes: Set<string>; issues: Set<string>;
+    }>();
+    for (const insp of data.inspections) {
+      for (const c of insp.components || []) {
+        const category = (c.component_category || c.component_name || 'Unspecified').trim() || 'Unspecified';
+        const status = c.status || 'pass';
+        const key = `${category}||${status}`;
+        let g = groups.get(key);
+        if (!g) { g = { category, status, qty: 0, notes: new Set(), issues: new Set() }; groups.set(key, g); }
+        g.qty += c.quantity && c.quantity > 0 ? c.quantity : 1;
+        if (c.note && c.note.trim()) g.notes.add(c.note.trim());
+        for (const iss of c.issues || []) if (iss) g.issues.add(iss);
+      }
+    }
+
+    const rows = Array.from(groups.values());
+    checkPage(10);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
+    doc.text('Needs attention', MARGIN, y); y += 6;
+
+    const nonPass = rows.filter((r) => r.status !== 'pass');
+    if (!rows.length) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
+      doc.text('No component detail available for this period.', MARGIN + 2, y);
+      y += 7;
+    } else if (!nonPass.length) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...XC_GREEN);
+      doc.text('All inspected components passed.', MARGIN + 2, y);
+      y += 7;
+    } else {
+      nonPass.sort((a, b) => {
+        const sa = HW_STATUS_SEVERITY[a.status] ?? 9;
+        const sb = HW_STATUS_SEVERITY[b.status] ?? 9;
+        if (sa !== sb) return sa - sb;
+        return b.qty - a.qty;
+      });
+      nonPass.forEach((r) => {
+        checkPage(8);
+        const color = HW_STATUS_COLOR[r.status] || ([50, 50, 50] as RGB);
+        const statusLabel = HW_STATUS_LABEL[r.status] || r.status;
+        const hint = HW_STATUS_HINT[r.status];
+        const head = `• ${r.qty} × ${r.category} — ${statusLabel}${hint ? ` — ${hint}` : ''}`;
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...color);
+        const headLines = doc.splitTextToSize(head, CONT_W - 4);
+        headLines.forEach((line: string, i: number) => {
+          if (i > 0) checkPage(6);
+          doc.text(line, MARGIN + 2, y);
+          y += 5.5;
+        });
+        // Reason line from distinct notes + issues.
+        const reasonParts = [
+          ...Array.from(r.notes),
+          r.issues.size ? `Flags: ${Array.from(r.issues).join(', ')}` : '',
+        ].filter(Boolean);
+        if (reasonParts.length) {
+          let reason = `Reason: ${reasonParts.join('; ')}`;
+          if (reason.length > 220) reason = reason.slice(0, 217) + '…';
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(90, 90, 90);
+          const rLines = doc.splitTextToSize(reason, CONT_W - 14);
+          rLines.forEach((line: string) => {
+            checkPage(6);
+            doc.text(line, MARGIN + 8, y);
+            y += 5;
+          });
+        }
+        y += 1.5;
+      });
+
+      // Single summary line for the components that passed.
+      const passQty = rows.filter((r) => r.status === 'pass').reduce((s, r) => s + r.qty, 0);
+      if (passQty > 0) {
+        checkPage(7);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...XC_GREEN);
+        doc.text(`• All other components: Pass (${passQty})`, MARGIN + 2, y);
+        y += 6;
+      }
+      y += 2;
+    }
+  }
+
+  // ── Per-inspection one-liner list (status token colored) ──
   if (data.inspections.length) {
     data.inspections.forEach((insp) => {
       checkPage(9);
+      const status = insp.overall_status || '';
+      const color = HW_STATUS_COLOR[status] || ([50, 50, 50] as RGB);
+      const statusLabel = status ? (HW_STATUS_LABEL[status] || status) : '';
+      // Prefix (date) — normal gray.
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(50, 50, 50);
-      const txt = [
-        fmtDate(insp.inspection_date),
-        insp.overall_status ? (HW_STATUS_LABEL[insp.overall_status] || insp.overall_status) : null,
+      let x = MARGIN + 2;
+      const prefix = `• ${fmtDate(insp.inspection_date)}  ·  `;
+      doc.text(prefix, x, y);
+      x += doc.getTextWidth(prefix);
+      // Status token — colored, bold if non-pass.
+      if (statusLabel) {
+        doc.setFont('helvetica', status && status !== 'pass' ? 'bold' : 'normal');
+        doc.setTextColor(...color);
+        doc.text(statusLabel, x, y);
+        x += doc.getTextWidth(statusLabel);
+      }
+      // Remainder — normal gray.
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(50, 50, 50);
+      const rest = [
         insp.inspector ? `Inspector: ${insp.inspector}` : null,
         `${insp.componentCount || 0} component${(insp.componentCount || 0) === 1 ? '' : 's'}`,
         `${insp.totalParts || 0} parts`,
       ].filter(Boolean).join('  ·  ');
-      const lines = doc.splitTextToSize(`• ${txt}`, CONT_W - 4);
-      lines.forEach((line: string, i: number) => {
-        if (i > 0) checkPage(6);
-        doc.text(line, MARGIN + 2, y);
-        y += 5;
-      });
-      y += 1;
+      doc.text(`  ·  ${rest}`, x, y);
+      y += 6;
     });
   }
 

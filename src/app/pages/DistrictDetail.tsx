@@ -5,6 +5,7 @@ import { detailApi, hardwareInspectionApi } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { listSessions, type ChecklistSession } from '../lib/trainingChecklists';
 import { generateDistrictSummaryPDF, type DistrictSummaryData } from '../lib/generateDistrictSummaryPDF';
+import { CHECK_LABELS } from '../lib/generateHardwareInspectionPDF';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -153,12 +154,21 @@ export default function DistrictDetail() {
       const parts = items.reduce(
         (sum: number, it: any) => sum + (Number(it.quantity) > 0 ? Number(it.quantity) : 1), 0);
       totalComponentsInspected += parts;
+      const components = items.map((it: any) => ({
+        component_category: it.component_category,
+        component_name: it.component_name,
+        status: it.status,
+        quantity: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
+        note: it.note,
+        issues: CHECK_LABELS.filter((c) => !!it[c.key]).map((c) => c.label),
+      }));
       return {
         inspector: i.inspector,
         inspection_date: i.inspection_date,
         overall_status: i.overall_status,
         componentCount: items.length,
         totalParts: parts,
+        components,
       };
     });
 
