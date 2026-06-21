@@ -1,9 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
 import { supabase } from './supabase';
-
-const API_BASE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
 // When VITE_ENABLE_DEFAULT_ADMIN === 'true', the app auto-logs in a
 // "default-admin" user on first load if no session exists. This is intended
@@ -26,7 +23,6 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   accessToken: string | null;
@@ -142,64 +138,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signIn = async (email: string, password: string) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/signin`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Supabase Edge gateway requires a JWT before the request reaches
-          // the function. Without this, the gateway returns 401
-          // UNAUTHORIZED_NO_AUTH_HEADER and the app shows "Failed to sign in".
-          // NOTE: only Authorization is sent (no apikey) because the edge
-          // function's CORS allowHeaders is [Content-Type, Authorization];
-          // adding apikey would fail the browser preflight ("Failed to fetch").
-          'Authorization': `Bearer ${publicAnonKey}`,
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to sign in');
-      }
-
-      const data = await response.json();
-
-      const user: User = {
-        id: data.user.id,
-        email: data.user.email,
-        name: data.user.user_metadata?.name || email.split('@')[0],
-        role: data.user.user_metadata?.role || 'sqm',
-      };
-
-      // Establish a REAL Supabase session on the shared client so that
-      // direct storage/database calls (e.g. uploading incident report PDFs)
-      // run as the `authenticated` role and satisfy RLS policies. Without
-      // this, the client keeps using the anon key and storage INSERTs fail
-      // with "new row violates row-level security policy".
-      if (data.access_token && data.refresh_token) {
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-        });
-        if (sessionError) {
-          console.warn('Failed to set Supabase session:', sessionError.message);
-        }
-      }
-
-      setUser(user);
-      setAccessToken(data.access_token);
-
-      localStorage.setItem('access_token', data.access_token);
-      localStorage.setItem('user', JSON.stringify(user));
-      localStorage.removeItem(SIGNED_OUT_FLAG);
-    } catch (error: any) {
-      console.error('Sign in error:', error);
-      throw error;
-    }
-  };
-
   const signInWithGoogle = async () => {
     // Redirect back to /login so the auth context's onAuthStateChange listener
     // picks up the session and routes the user onward.
@@ -236,7 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signInWithGoogle, signOut, accessToken }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut, accessToken }}>
       {children}
     </AuthContext.Provider>
   );
