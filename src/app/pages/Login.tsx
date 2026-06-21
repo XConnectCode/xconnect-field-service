@@ -1,41 +1,20 @@
 import { useState } from 'react';
-import { Navigate, useNavigate } from 'react-router';
+import { Navigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
 import { useTheme } from '../lib/theme-context';
 import { XCONNECT_LOGO_B64, XCONNECT_LOGO_UI_DARK_B64 } from '../lib/brandAssets';
 import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { signIn, signInWithGoogle, user } = useAuth();
+  const { signInWithGoogle, user } = useAuth();
   const { isDark } = useTheme();
-  const navigate = useNavigate();
 
   if (user) {
     return <Navigate to="/" replace />;
   }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      await signIn(email, password);
-      toast.success('Signed in successfully');
-      navigate('/');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to sign in');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleGoogle = async () => {
     setGoogleLoading(true);
@@ -74,58 +53,11 @@ export default function Login() {
             variant="outline"
             className="w-full"
             onClick={handleGoogle}
-            disabled={googleLoading || loading}
+            disabled={googleLoading}
           >
             <GoogleLogo className="mr-2 h-4 w-4" aria-hidden="true" />
             {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
           </Button>
-
-          <div className="my-6 flex items-center gap-3">
-            <div className="h-px flex-1 bg-gray-200" />
-            <span className="text-xs uppercase tracking-wider text-gray-500">
-              or sign in with email
-            </span>
-            <div className="h-px flex-1 bg-gray-200" />
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading || googleLoading}>
-              {loading ? 'Signing in...' : 'Sign In'}
-            </Button>
-          </form>
-
-          <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-            <p className="text-sm text-blue-900 font-medium mb-2">First time here?</p>
-            <p className="text-xs text-blue-700 mb-3">Create your administrator account to get started</p>
-            <a
-              href="/setup"
-              className="text-sm text-blue-600 hover:underline font-medium"
-            >
-              Go to Initial Setup →
-            </a>
-          </div>
         </CardContent>
       </Card>
     </div>
