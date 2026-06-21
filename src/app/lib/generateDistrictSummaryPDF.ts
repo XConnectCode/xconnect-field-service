@@ -82,13 +82,6 @@ const HW_STATUS_COLOR: Record<string, RGB> = {
   remove: [185, 40, 40],
 };
 
-// Short customer-facing action hint per urgent status.
-const HW_STATUS_HINT: Record<string, string> = {
-  replace_soon: 'order replacements ASAP',
-  remove: 'remove from service immediately',
-  monitor: 'monitor / re-inspect',
-};
-
 // Severity ranking for sorting (most severe first).
 const HW_STATUS_SEVERITY: Record<string, number> = {
   remove: 0,
@@ -260,144 +253,100 @@ export async function generateDistrictSummaryPDF(
   checkPage(24);
   y = drawSectionHeading(doc, 'Hardware Inspections', y);
 
-  // ── Overall status breakdown (colored + non-pass bold) ──
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
-  doc.text('Overall status breakdown', MARGIN, y); y += 6;
-  {
-    const keys = Object.keys(data.inspectionStatusCounts).filter(
-      (k) => data.inspectionStatusCounts[k] > 0,
-    );
-    if (!keys.length) {
-      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
-      doc.text('None in this period.', MARGIN + 2, y);
-      y += 7;
-    } else {
-      keys.sort((a, b) => (HW_STATUS_SEVERITY[a] ?? 9) - (HW_STATUS_SEVERITY[b] ?? 9));
-      keys.forEach((k) => {
-        checkPage(7);
-        const color = HW_STATUS_COLOR[k] || ([50, 50, 50] as RGB);
-        doc.setFont('helvetica', k === 'pass' ? 'normal' : 'bold');
-        doc.setFontSize(9); doc.setTextColor(...color);
-        doc.text(`• ${HW_STATUS_LABEL[k] || k}: ${data.inspectionStatusCounts[k]}`, MARGIN + 2, y);
-        y += 6;
-      });
-      y += 2;
-    }
-  }
-
-  // ── Needs attention: rollup by component category + status ──
-  {
-    const groups = new Map<string, {
-      category: string; status: string; qty: number;
-      notes: Set<string>; issues: Set<string>;
-    }>();
-    for (const insp of data.inspections) {
-      for (const c of insp.components || []) {
-        const category = (c.component_category || c.component_name || 'Unspecified').trim() || 'Unspecified';
-        const status = c.status || 'pass';
-        const key = `${category}||${status}`;
-        let g = groups.get(key);
-        if (!g) { g = { category, status, qty: 0, notes: new Set(), issues: new Set() }; groups.set(key, g); }
-        g.qty += c.quantity && c.quantity > 0 ? c.quantity : 1;
-        if (c.note && c.note.trim()) g.notes.add(c.note.trim());
-        for (const iss of c.issues || []) if (iss) g.issues.add(iss);
-      }
-    }
-
-    const rows = Array.from(groups.values());
-    checkPage(10);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
-    doc.text('Needs attention', MARGIN, y); y += 6;
-
-    const nonPass = rows.filter((r) => r.status !== 'pass');
-    if (!rows.length) {
-      doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
-      doc.text('No component detail available for this period.', MARGIN + 2, y);
-      y += 7;
-    } else if (!nonPass.length) {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...XC_GREEN);
-      doc.text('All inspected components passed.', MARGIN + 2, y);
-      y += 7;
-    } else {
-      nonPass.sort((a, b) => {
-        const sa = HW_STATUS_SEVERITY[a.status] ?? 9;
-        const sb = HW_STATUS_SEVERITY[b.status] ?? 9;
-        if (sa !== sb) return sa - sb;
-        return b.qty - a.qty;
-      });
-      nonPass.forEach((r) => {
+  if (!data.inspections.length) {
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
+    doc.text('No hardware inspections in this period.', MARGIN, y);
+    y += 10;
+  } else {
+    data.inspections.forEach((insp, idx) => {
+      // Thin divider between consecutive inspections.
+      if (idx > 0) {
         checkPage(8);
-        const color = HW_STATUS_COLOR[r.status] || ([50, 50, 50] as RGB);
-        const statusLabel = HW_STATUS_LABEL[r.status] || r.status;
-        const hint = HW_STATUS_HINT[r.status];
-        const head = `• ${r.qty} × ${r.category} — ${statusLabel}${hint ? ` — ${hint}` : ''}`;
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...color);
-        const headLines = doc.splitTextToSize(head, CONT_W - 4);
-        headLines.forEach((line: string, i: number) => {
-          if (i > 0) checkPage(6);
-          doc.text(line, MARGIN + 2, y);
-          y += 5.5;
-        });
-        // Reason line from distinct notes + issues.
-        const reasonParts = [
-          ...Array.from(r.notes),
-          r.issues.size ? `Flags: ${Array.from(r.issues).join(', ')}` : '',
-        ].filter(Boolean);
-        if (reasonParts.length) {
-          let reason = `Reason: ${reasonParts.join('; ')}`;
-          if (reason.length > 220) reason = reason.slice(0, 217) + '…';
-          doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(90, 90, 90);
-          const rLines = doc.splitTextToSize(reason, CONT_W - 14);
-          rLines.forEach((line: string) => {
-            checkPage(6);
-            doc.text(line, MARGIN + 8, y);
-            y += 5;
-          });
-        }
-        y += 1.5;
-      });
-
-      // Single summary line for the components that passed.
-      const passQty = rows.filter((r) => r.status === 'pass').reduce((s, r) => s + r.qty, 0);
-      if (passQty > 0) {
-        checkPage(7);
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...XC_GREEN);
-        doc.text(`• All other components: Pass (${passQty})`, MARGIN + 2, y);
-        y += 6;
+        doc.setDrawColor(...XC_BORDER); doc.setLineWidth(0.2);
+        doc.line(MARGIN, y, MARGIN + CONT_W, y);
+        y += 5;
       }
-      y += 2;
-    }
-  }
 
-  // ── Per-inspection one-liner list (status token colored) ──
-  if (data.inspections.length) {
-    data.inspections.forEach((insp) => {
-      checkPage(9);
+      // ── Inspection header: date + overall status (colored, bold if non-pass) ──
+      checkPage(12);
       const status = insp.overall_status || '';
+      const isNonPass = !!status && status !== 'pass';
       const color = HW_STATUS_COLOR[status] || ([50, 50, 50] as RGB);
       const statusLabel = status ? (HW_STATUS_LABEL[status] || status) : '';
-      // Prefix (date) — normal gray.
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(50, 50, 50);
-      let x = MARGIN + 2;
-      const prefix = `• ${fmtDate(insp.inspection_date)}  ·  `;
-      doc.text(prefix, x, y);
-      x += doc.getTextWidth(prefix);
-      // Status token — colored, bold if non-pass.
+
+      let x = MARGIN;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...XC_DARK);
+      const datePrefix = `${fmtDate(insp.inspection_date)}`;
+      doc.text(datePrefix, x, y);
+      x += doc.getTextWidth(datePrefix);
       if (statusLabel) {
-        doc.setFont('helvetica', status && status !== 'pass' ? 'bold' : 'normal');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...XC_DARK);
+        const sep = ' — ';
+        doc.text(sep, x, y);
+        x += doc.getTextWidth(sep);
+        doc.setFont('helvetica', isNonPass ? 'bold' : 'normal');
         doc.setTextColor(...color);
         doc.text(statusLabel, x, y);
-        x += doc.getTextWidth(statusLabel);
       }
-      // Remainder — normal gray.
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(50, 50, 50);
-      const rest = [
-        insp.inspector ? `Inspector: ${insp.inspector}` : null,
-        `${insp.componentCount || 0} component${(insp.componentCount || 0) === 1 ? '' : 's'}`,
-        `${insp.totalParts || 0} parts`,
-      ].filter(Boolean).join('  ·  ');
-      doc.text(`  ·  ${rest}`, x, y);
       y += 6;
+
+      // ── Sub-line: inspector · parts ──
+      const subParts = [
+        insp.inspector ? `Inspector: ${insp.inspector}` : null,
+        `${insp.totalParts || 0} part${(insp.totalParts || 0) === 1 ? '' : 's'}`,
+      ].filter(Boolean).join('  ·  ');
+      if (subParts) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
+        const subLines = doc.splitTextToSize(subParts, CONT_W - 4);
+        subLines.forEach((line: string, i: number) => {
+          if (i > 0) checkPage(6);
+          doc.text(line, MARGIN + 2, y);
+          y += 5;
+        });
+      }
+      y += 1;
+
+      // ── Indented per-part list (most-severe first, ties by larger qty) ──
+      const comps = (insp.components || []).slice();
+      if (comps.length) {
+        comps.sort((a, b) => {
+          const sa = HW_STATUS_SEVERITY[a.status || 'pass'] ?? 9;
+          const sb = HW_STATUS_SEVERITY[b.status || 'pass'] ?? 9;
+          if (sa !== sb) return sa - sb;
+          const qa = a.quantity && a.quantity > 0 ? a.quantity : 1;
+          const qb = b.quantity && b.quantity > 0 ? b.quantity : 1;
+          return qb - qa;
+        });
+        comps.forEach((c) => {
+          checkPage(7);
+          const cStatus = c.status || 'pass';
+          const cNonPass = cStatus !== 'pass';
+          const cColor = HW_STATUS_COLOR[cStatus] || ([50, 50, 50] as RGB);
+          const cStatusLabel = HW_STATUS_LABEL[cStatus] || cStatus;
+          const qty = c.quantity && c.quantity > 0 ? c.quantity : 1;
+          const label =
+            (c.component_category || '').trim() ||
+            (c.component_name || '').trim() ||
+            'Unspecified part';
+
+          let cx = MARGIN + 6;
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(50, 50, 50);
+          const prefix = `• ${qty} × ${label} — `;
+          doc.text(prefix, cx, y);
+          cx += doc.getTextWidth(prefix);
+          doc.setFont('helvetica', cNonPass ? 'bold' : 'normal');
+          doc.setTextColor(...cColor);
+          doc.text(cStatusLabel, cx, y);
+          y += 5.5;
+        });
+      } else {
+        // Fall back to a muted parts count when no component detail is present.
+        checkPage(7);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GRAY_TEXT);
+        doc.text(`• ${insp.totalParts || 0} part${(insp.totalParts || 0) === 1 ? '' : 's'}`, MARGIN + 6, y);
+        y += 5.5;
+      }
+      y += 3;
     });
   }
 
