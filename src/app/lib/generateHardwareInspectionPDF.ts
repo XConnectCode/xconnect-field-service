@@ -38,7 +38,7 @@ const STATUS_LABEL: Record<string, string> = {
   remove: 'Remove from service',
 };
 
-const CHECK_LABELS: { key: string; label: string }[] = [
+export const CHECK_LABELS: { key: string; label: string }[] = [
   { key: 'chk_threads', label: 'Threads' },
   { key: 'chk_pitting', label: 'Pitting' },
   { key: 'chk_corrosion', label: 'Corrosion' },
@@ -182,9 +182,9 @@ export async function generateHardwareInspectionPDF(
       doc.text(`${item.label}:`, x, y);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
       const labelW = doc.getTextWidth(`${item.label}: `);
-      const maxW = colW - labelW - 4;
+      const maxW = colW - labelW - 6;
       const txt = doc.splitTextToSize(item.value || '—', maxW)[0];
-      doc.text(txt, x + labelW + 1, y);
+      doc.text(txt, x + labelW + 4, y);
       col++;
       if (col === 2) { col = 0; y += 8; }
     });

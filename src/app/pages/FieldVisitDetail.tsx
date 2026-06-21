@@ -577,7 +577,7 @@ export default function FieldVisitDetail() {
             </div>
 
             {/* Right: badge + actions */}
-            <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
               {visit.visit_purpose && (
                 <Badge variant="secondary">{visit.visit_purpose}</Badge>
               )}
