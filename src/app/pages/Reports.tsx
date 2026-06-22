@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Combobox } from '../components/ui/combobox';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { FileText, Download, BarChart3, Building2, ArrowUpRight } from 'lucide-react';
@@ -323,21 +324,28 @@ export default function Reports() {
                 </div>
                 <div>
                   <Label className="text-xs uppercase text-gray-400 font-bold mb-2 block">Customer</Label>
-                  <Select value={selectedCustomer} onValueChange={v => { setSelectedCustomer(v); setSelectedDistrict(''); persist(v, '', timeFilter); setGenerated(false); }}>
-                    <SelectTrigger><SelectValue placeholder="All Accounts" /></SelectTrigger>
-                    <SelectContent>
-                      {customers.map(c => <SelectItem key={c.row_id} value={c.row_id}>{c.customer}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <Combobox
+                    value={selectedCustomer}
+                    onValueChange={v => { setSelectedCustomer(v); setSelectedDistrict(''); persist(v, '', timeFilter); setGenerated(false); }}
+                    options={customers.map(c => ({ value: c.row_id, label: c.customer }))}
+                    placeholder="All Accounts"
+                    searchPlaceholder="Search customers…"
+                    emptyText="No customers found."
+                    allowClear
+                  />
                 </div>
                 <div>
                   <Label className="text-xs uppercase text-gray-400 font-bold mb-2 block">District</Label>
-                  <Select value={selectedDistrict} onValueChange={v => { setSelectedDistrict(v); persist(selectedCustomer, v, timeFilter); setGenerated(false); }} disabled={!selectedCustomer}>
-                    <SelectTrigger><SelectValue placeholder="All Districts" /></SelectTrigger>
-                    <SelectContent>
-                      {districts.map(d => <SelectItem key={d.row_id} value={d.row_id}>{d.customer_district}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <Combobox
+                    value={selectedDistrict}
+                    onValueChange={v => { setSelectedDistrict(v); persist(selectedCustomer, v, timeFilter); setGenerated(false); }}
+                    disabled={!selectedCustomer}
+                    options={districts.map(d => ({ value: d.row_id, label: d.customer_district }))}
+                    placeholder="All Districts"
+                    searchPlaceholder="Search districts…"
+                    emptyText="No districts found."
+                    allowClear
+                  />
                 </div>
                 <div className="pt-4 space-y-3">
                   <Button className="w-full bg-gray-900 hover:bg-gray-800 dark:bg-blue-600 dark:hover:bg-blue-500" onClick={handleGenerateReport} disabled={generating}>

@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Combobox } from '../components/ui/combobox';
 import { Textarea } from '../components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { SortableHead, useSort } from '../components/SortableTable';
@@ -20,6 +21,7 @@ export default function FieldVisits() {
   const [visits, setVisits] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState('');
+  const [selectedDistrict, setSelectedDistrict] = useState('');
   const [districts, setDistricts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -85,6 +87,8 @@ export default function FieldVisits() {
       
       toast.success('Field visit logged successfully');
       setDialogOpen(false);
+      setSelectedCustomer('');
+      setSelectedDistrict('');
       loadData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to log visit');
@@ -142,37 +146,28 @@ export default function FieldVisits() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="customerId">Customer</Label>
-                    <Select 
-                      name="customerId" 
-                      required 
-                      onValueChange={setSelectedCustomer}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select customer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {customers.map((customer) => (
-                          <SelectItem key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <input type="hidden" name="customerId" value={selectedCustomer} />
+                    <Combobox
+                      value={selectedCustomer}
+                      onValueChange={(v) => { setSelectedCustomer(v); setSelectedDistrict(''); }}
+                      options={customers.map((customer) => ({ value: customer.id, label: customer.name }))}
+                      placeholder="Select customer"
+                      searchPlaceholder="Search customers…"
+                      emptyText="No customers found."
+                    />
                   </div>
                   <div>
                     <Label htmlFor="districtId">District</Label>
-                    <Select name="districtId" required disabled={!selectedCustomer}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select district" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {districts.map((district) => (
-                          <SelectItem key={district.id} value={district.id}>
-                            {district.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <input type="hidden" name="districtId" value={selectedDistrict} />
+                    <Combobox
+                      value={selectedDistrict}
+                      onValueChange={setSelectedDistrict}
+                      disabled={!selectedCustomer}
+                      options={districts.map((district) => ({ value: district.id, label: district.name }))}
+                      placeholder="Select district"
+                      searchPlaceholder="Search districts…"
+                      emptyText="No districts found."
+                    />
                   </div>
                 </div>
 

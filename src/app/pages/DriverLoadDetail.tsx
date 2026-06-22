@@ -15,6 +15,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Switch } from '../components/ui/switch';
 import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Combobox } from '../components/ui/combobox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { ArrowLeft, Plus, Save, Trash2, Truck, AlertTriangle, CheckCircle2, FileText, Camera, Hash } from 'lucide-react';
@@ -728,16 +729,18 @@ export default function DriverLoadDetail() {
             <CardTitle className="text-lg">2. Load / Cargo</CardTitle>
             <div className="flex items-center gap-2">
               {passedPallets.length > 0 && (
-                <Select value="" onValueChange={addPalletItem}>
-                  <SelectTrigger className="w-56"><SelectValue placeholder="Add QC-passed pallet" /></SelectTrigger>
-                  <SelectContent>
-                    {passedPallets.map((p) => (
-                      <SelectItem key={p.row_id} value={p.row_id}>
-                        {p.build_no || p.row_id.slice(0, 8)} {p.customer ? `· ${p.customer}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value=""
+                  onValueChange={addPalletItem}
+                  className="w-56"
+                  options={passedPallets.map((p) => ({
+                    value: p.row_id,
+                    label: `${p.build_no || p.row_id.slice(0, 8)} ${p.customer ? `· ${p.customer}` : ''}`.trim(),
+                  }))}
+                  placeholder="Add QC-passed pallet"
+                  searchPlaceholder="Search pallets…"
+                  emptyText="No pallets found."
+                />
               )}
               <Button variant="outline" size="sm" onClick={addItem}><Plus className="w-4 h-4 mr-1" /> Add row</Button>
             </div>
