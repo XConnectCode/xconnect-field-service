@@ -268,6 +268,7 @@ export default function IncidentForm({
   const [qcPalletId, setQcPalletId] = useState('');
   const [failedComponent, setFailedComponent] = useState('');
   const [vendor, setVendor] = useState('');
+  const [operatingCompany, setOperatingCompany] = useState('');
 
   // Director Review (admin-only). Controlled so the admin can set/clear the
   // review sign-off inline; SQM sees a read-only badge. The actual reviewer
@@ -480,6 +481,7 @@ export default function IncidentForm({
       setQcPalletId(incident.qc_pallet_id || '');
       setFailedComponent(incident.failed_component || '');
       setVendor(incident.vendor || '');
+      setOperatingCompany(incident.operating_company || '');
     } else if (prefill) {
       setCustId(prefill.customer || '');
       setDistId(prefill.customer_district || '');
@@ -489,6 +491,7 @@ export default function IncidentForm({
       setQcPalletId(prefill.qc_pallet_id || '');
       setFailedComponent('');
       setVendor('');
+      setOperatingCompany(prefill.operating_company || '');
     } else {
       setCustId('');
       setDistId('');
@@ -498,6 +501,7 @@ export default function IncidentForm({
       setQcPalletId('');
       setFailedComponent('');
       setVendor('');
+      setOperatingCompany('');
     }
   }, [incident, prefill, open]);
 
@@ -827,18 +831,16 @@ export default function IncidentForm({
             </F>
 
             <F label="Operating Company">
-              <Sel
-                key={`op-${incident?.row_id}-${epCompanies.length}`}
-                name="operating_company"
-                defaultValue={incident?.operating_company || ''}
-              >
-                <option value="">— Select —</option>
-                {epCompanies.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </Sel>
+              <input type="hidden" name="operating_company" value={operatingCompany} />
+              <Combobox
+                value={operatingCompany}
+                onValueChange={setOperatingCompany}
+                options={epCompanies.map((o) => ({ value: o, label: o }))}
+                placeholder="— Select —"
+                searchPlaceholder="Search operating companies…"
+                emptyText="No operating companies found."
+                allowClear
+              />
             </F>
           </SectionCard>
 

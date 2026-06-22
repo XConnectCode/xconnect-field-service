@@ -87,6 +87,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   const [allPanels,     setAllPanels]     = useState<any[]>([]);
   const [custId,        setCustId]        = useState('');
   const [distId,        setDistId]        = useState('');
+  const [opCompany,     setOpCompany]     = useState('');
   const [saving,        setSaving]        = useState(false);
   const [nextVisitId,   setNextVisitId]   = useState<string>('');
   const [locating,      setLocating]      = useState(false);
@@ -179,9 +180,11 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     if (visit) {
       setCustId(visit.customer || '');
       setDistId(visit.customer_district || '');
+      setOpCompany(visit.operating_company || '');
     } else {
       setCustId(prefill?.customer || '');
       setDistId(prefill?.customer_district || '');
+      setOpCompany(prefill?.operating_company || '');
     }
   }, [visit, open, prefill]);
 
@@ -415,11 +418,16 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           </F>
 
           <F label="Operating Company">
-            <select name="operating_company" defaultValue={visit?.operating_company || prefill?.operating_company || ''}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-              <option value="">— Select —</option>
-              {epCompanies.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
+            <input type="hidden" name="operating_company" value={opCompany} />
+            <Combobox
+              value={opCompany}
+              onValueChange={setOpCompany}
+              options={epCompanies.map(o => ({ value: o, label: o }))}
+              placeholder="— Select —"
+              searchPlaceholder="Search operating companies…"
+              emptyText="No operating companies found."
+              allowClear
+            />
           </F>
 
           {/* ── Personnel ── */}

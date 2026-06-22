@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { Combobox } from '../components/ui/combobox';
 import { Textarea } from '../components/ui/textarea';
 import {
   ArrowLeft,
@@ -881,16 +882,15 @@ export default function FieldVisitDetail() {
                   value={visit.operating_company}
                   editing={editing}
                 >
-                  <select
+                  <Combobox
                     value={form.operating_company ?? ''}
-                    onChange={(e) => setField('operating_company', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">— Select —</option>
-                    {epCompanies.map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
-                  </select>
+                    onValueChange={(v) => setField('operating_company', v)}
+                    options={epCompanies.map((o) => ({ value: o, label: o }))}
+                    placeholder="— Select —"
+                    searchPlaceholder="Search operating companies…"
+                    emptyText="No operating companies found."
+                    allowClear
+                  />
                 </Field>
 
                 <Field
