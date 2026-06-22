@@ -26,6 +26,7 @@ import { getSerial } from '../../lib/serialUtils';
 import { projectId } from '../../../../utils/supabase/info';
 import { getAuthHeaders } from '../../lib/authHeaders';
 import { ButtonGroup } from '../../components/ui/button-group';
+import { Combobox } from '../../components/ui/combobox';
 import { computeVisitDuration } from '../../lib/visitDuration';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
@@ -85,6 +86,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   const [epCompanies,   setEpCompanies]   = useState<string[]>([]);
   const [allPanels,     setAllPanels]     = useState<any[]>([]);
   const [custId,        setCustId]        = useState('');
+  const [distId,        setDistId]        = useState('');
   const [saving,        setSaving]        = useState(false);
   const [nextVisitId,   setNextVisitId]   = useState<string>('');
   const [locating,      setLocating]      = useState(false);
@@ -174,8 +176,13 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   }, [custId]);
 
   useEffect(() => {
-    if (visit) setCustId(visit.customer || '');
-    else setCustId(prefill?.customer || '');
+    if (visit) {
+      setCustId(visit.customer || '');
+      setDistId(visit.customer_district || '');
+    } else {
+      setCustId(prefill?.customer || '');
+      setDistId(prefill?.customer_district || '');
+    }
   }, [visit, open, prefill]);
 
   // Seed the Panels Seen multi-select. Prefer the new panels_seen array; for
@@ -384,19 +391,27 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           <Section title="Customer" />
 
           <F label="Customer" required>
-            <select value={custId} onChange={e => setCustId(e.target.value)}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm" required>
-              <option value="">— Select customer —</option>
-              {customers.map(c => <option key={c.row_id} value={c.row_id}>{c.customer}</option>)}
-            </select>
+            <Combobox
+              value={custId}
+              onValueChange={(v) => { setCustId(v); setDistId(''); }}
+              options={customers.map(c => ({ value: c.row_id, label: c.customer }))}
+              placeholder="— Select customer —"
+              searchPlaceholder="Search customers…"
+              emptyText="No customers found."
+            />
           </F>
 
           <F label="District" required>
-            <select name="customer_district" defaultValue={visit?.customer_district || prefill?.customer_district || ''}
-              disabled={!custId} className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm" required>
-              <option value="">— Select district —</option>
-              {districts.map(d => <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>)}
-            </select>
+            <input type="hidden" name="customer_district" value={distId} />
+            <Combobox
+              value={distId}
+              onValueChange={setDistId}
+              disabled={!custId}
+              options={districts.map(d => ({ value: d.row_id, label: d.customer_district }))}
+              placeholder="— Select district —"
+              searchPlaceholder="Search districts…"
+              emptyText="No districts found."
+            />
           </F>
 
           <F label="Operating Company">

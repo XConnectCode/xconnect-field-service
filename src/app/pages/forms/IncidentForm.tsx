@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import { Info, Sparkles } from 'lucide-react';
 import IncidentAIAssistant, { type IncidentSnapshot } from '../../components/IncidentAIAssistant';
 import { ButtonGroup, type ButtonGroupOption } from '../../components/ui/button-group';
+import { Combobox } from '../../components/ui/combobox';
 import type { AssistantField } from '../../lib/aiAssistantCore';
 import {
   resolveFailedComponentLabel,
@@ -260,6 +261,13 @@ export default function IncidentForm({
   //  - Failed Component is required for certain failure types (see below)
   const [vendorCaused, setVendorCaused] = useState('');
   const [failureType, setFailureType] = useState(''); // stores the lists row_id
+  // Controlled mirrors for the large searchable dropdowns (Combobox renders a
+  // button, not a form element, so a hidden input below carries each value into
+  // the form's FormData submit).
+  const [fieldVisitId, setFieldVisitId] = useState('');
+  const [qcPalletId, setQcPalletId] = useState('');
+  const [failedComponent, setFailedComponent] = useState('');
+  const [vendor, setVendor] = useState('');
 
   // Director Review (admin-only). Controlled so the admin can set/clear the
   // review sign-off inline; SQM sees a read-only badge. The actual reviewer
@@ -468,16 +476,28 @@ export default function IncidentForm({
       setDistId(incident.customer_district || '');
       setVendorCaused(incident.vendor_caused || '');
       setFailureType(incident.failure_type || '');
+      setFieldVisitId(incident.field_visit_id || '');
+      setQcPalletId(incident.qc_pallet_id || '');
+      setFailedComponent(incident.failed_component || '');
+      setVendor(incident.vendor || '');
     } else if (prefill) {
       setCustId(prefill.customer || '');
       setDistId(prefill.customer_district || '');
       setVendorCaused('');
       setFailureType('');
+      setFieldVisitId(prefill.field_visit_id || '');
+      setQcPalletId(prefill.qc_pallet_id || '');
+      setFailedComponent('');
+      setVendor('');
     } else {
       setCustId('');
       setDistId('');
       setVendorCaused('');
       setFailureType('');
+      setFieldVisitId('');
+      setQcPalletId('');
+      setFailedComponent('');
+      setVendor('');
     }
   }, [incident, prefill, open]);
 
@@ -774,38 +794,36 @@ export default function IncidentForm({
           {/* 2. Customer / Location */}
           <SectionCard title="Customer & Location">
             <F label="Customer" required>
-              <select
+              <Combobox
                 value={custId}
-                onChange={(e) => {
-                  setCustId(e.target.value);
+                onValueChange={(v) => {
+                  setCustId(v);
                   setDistId('');
                 }}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                required
-              >
-                <option value="">— Select customer —</option>
-                {customers.map((c: any) => (
-                  <option key={c.row_id} value={c.row_id}>
-                    {c.customer}
-                  </option>
-                ))}
-              </select>
+                options={customers.map((c: any) => ({
+                  value: c.row_id,
+                  label: c.customer,
+                }))}
+                placeholder="— Select customer —"
+                searchPlaceholder="Search customers…"
+                emptyText="No customers found."
+              />
             </F>
 
             <F label="District">
-              <select
+              <Combobox
                 value={distId}
-                onChange={(e) => setDistId(e.target.value)}
+                onValueChange={setDistId}
                 disabled={!custId}
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-              >
-                <option value="">— All districts —</option>
-                {districts.map((d: any) => (
-                  <option key={d.row_id} value={d.row_id}>
-                    {d.customer_district}
-                  </option>
-                ))}
-              </select>
+                options={districts.map((d: any) => ({
+                  value: d.row_id,
+                  label: d.customer_district,
+                }))}
+                placeholder="— All districts —"
+                searchPlaceholder="Search districts…"
+                emptyText="No districts found."
+                allowClear
+              />
             </F>
 
             <F label="Operating Company">
@@ -895,61 +913,63 @@ export default function IncidentForm({
             </F>
 
             <F label="Field Visit">
-              <Sel
-                key={`fv-${incident?.row_id || prefill?.field_visit_id || 'new'}-${fieldVisits.length}`}
-                name="field_visit_id"
-                defaultValue={incident?.field_visit_id || prefill?.field_visit_id || ''}
-              >
-                <option value="">— None / Not linked —</option>
-                {/* Fallback: if editing an incident (or pre-linking from a Field Visit)
-                    whose visit isn't in the latest-50 list, still show it so the
-                    link isn't silently dropped on save. */}
-                {(() => {
+              <input type="hidden" name="field_visit_id" value={fieldVisitId} />
+              <Combobox
+                value={fieldVisitId}
+                onValueChange={setFieldVisitId}
+                options={(() => {
+                  const list = fieldVisits.map((v: any) => ({
+                    value: v.field_visit_id,
+                    label: `${v.field_visit_id} — ${v.pad_name || 'No pad'} (${v.arrival_date?.slice(0, 10) || 'No date'})`,
+                  }));
+                  // Fallback: if editing an incident (or pre-linking from a Field
+                  // Visit) whose visit isn't in the latest-50 list, still show it
+                  // so the link isn't silently dropped on save.
                   const linkedId = incident?.field_visit_id || prefill?.field_visit_id;
-                  return linkedId &&
-                    !fieldVisits.some((v: any) => v.field_visit_id === linkedId) ? (
-                      <option value={linkedId}>
-                        {linkedId} (linked visit)
-                      </option>
-                    ) : null;
+                  if (
+                    linkedId &&
+                    !fieldVisits.some((v: any) => v.field_visit_id === linkedId)
+                  ) {
+                    list.unshift({ value: linkedId, label: `${linkedId} (linked visit)` });
+                  }
+                  return list;
                 })()}
-                {fieldVisits.map((v: any) => (
-                  <option key={v.row_id} value={v.field_visit_id}>
-                    {v.field_visit_id} — {v.pad_name || 'No pad'} (
-                    {v.arrival_date?.slice(0, 10) || 'No date'})
-                  </option>
-                ))}
-              </Sel>
+                placeholder="— None / Not linked —"
+                searchPlaceholder="Search visits…"
+                emptyText="No visits found."
+                allowClear
+              />
             </F>
 
             {/* Link to the QC pallet / build slip the failed gun came from.
                 Stores the pallet row_id; build_no is denormalized on save. */}
             <F label="QC Pallet / Build Slip">
-              <Sel
-                key={`qcp-${incident?.row_id || prefill?.qc_pallet_id || 'new'}-${qcPallets.length}`}
-                name="qc_pallet_id"
-                defaultValue={incident?.qc_pallet_id || prefill?.qc_pallet_id || ''}
-              >
-                <option value="">— None / Not linked —</option>
-                {/* Fallback: if the linked build isn't in the recent-100 list,
-                    still show it so the link isn't dropped on save. */}
-                {(() => {
+              <input type="hidden" name="qc_pallet_id" value={qcPalletId} />
+              <Combobox
+                value={qcPalletId}
+                onValueChange={setQcPalletId}
+                options={(() => {
+                  const list = qcPallets.map((p: any) => ({
+                    value: p.row_id,
+                    label: `${p.build_no || '(no build #)'} — ${p.customer || 'No customer'}${p.sales_order ? ` · SO ${p.sales_order}` : ''}`,
+                  }));
+                  // Fallback: if the linked build isn't in the recent-100 list,
+                  // still show it so the link isn't dropped on save.
                   const linkedId = incident?.qc_pallet_id || prefill?.qc_pallet_id;
                   const linkedNo = incident?.qc_build_no || prefill?.qc_build_no;
-                  return linkedId &&
-                    !qcPallets.some((p: any) => p.row_id === linkedId) ? (
-                      <option value={linkedId}>
-                        {linkedNo || linkedId} (linked build)
-                      </option>
-                    ) : null;
+                  if (linkedId && !qcPallets.some((p: any) => p.row_id === linkedId)) {
+                    list.unshift({
+                      value: linkedId,
+                      label: `${linkedNo || linkedId} (linked build)`,
+                    });
+                  }
+                  return list;
                 })()}
-                {qcPallets.map((p: any) => (
-                  <option key={p.row_id} value={p.row_id}>
-                    {p.build_no || '(no build #)'} — {p.customer || 'No customer'}
-                    {p.sales_order ? ` · SO ${p.sales_order}` : ''}
-                  </option>
-                ))}
-              </Sel>
+                placeholder="— None / Not linked —"
+                searchPlaceholder="Search builds…"
+                emptyText="No builds found."
+                allowClear
+              />
             </F>
           </SectionCard>
 
@@ -1014,43 +1034,50 @@ export default function IncidentForm({
                   need to surface `lists` rows here.
                   Required when Failure Type is one of the manufacturing/design
                   defect types (see FAILURE_TYPES_REQUIRING_COMPONENT). */}
-              <Sel
-                key={`fc-${incident?.row_id}-${components.length}`}
-                name="failed_component"
-                defaultValue={incident?.failed_component || ''}
-                required={componentRequired}
-              >
-                <option value="">— Select —</option>
-                {components.map((c: any) => (
-                  <option key={c.row_id} value={c.row_id}>
-                    {c.failed_component}
-                  </option>
-                ))}
-                {/* Last-resort: if the saved value isn't in the components
-                    list (orphan id), keep it as a hidden current value so
-                    unrelated edits don't clobber the field. */}
-                {incident?.failed_component &&
-                  !components.some((c: any) => c.row_id === incident.failed_component) && (
-                    <option value={incident.failed_component}>
-                      {incident.failed_component} (unknown)
-                    </option>
-                  )}
-              </Sel>
+              <input type="hidden" name="failed_component" value={failedComponent} />
+              <Combobox
+                value={failedComponent}
+                onValueChange={setFailedComponent}
+                options={(() => {
+                  const list = components.map((c: any) => ({
+                    value: c.row_id,
+                    label: c.failed_component,
+                  }));
+                  // Last-resort: if the saved value isn't in the components list
+                  // (orphan id), keep it as a current value so unrelated edits
+                  // don't clobber the field.
+                  if (
+                    incident?.failed_component &&
+                    !components.some((c: any) => c.row_id === incident.failed_component)
+                  ) {
+                    list.push({
+                      value: incident.failed_component,
+                      label: `${incident.failed_component} (unknown)`,
+                    });
+                  }
+                  return list;
+                })()}
+                placeholder="— Select —"
+                searchPlaceholder="Search components…"
+                emptyText="No components found."
+                allowClear
+              />
             </F>
 
             <F label="Failure Type">
-              <Sel
-                name="failure_type"
+              <input type="hidden" name="failure_type" value={failureType} />
+              <Combobox
                 value={failureType}
-                onChange={setFailureType}
-              >
-                <option value="">— Select —</option>
-                {uniqueFailureTypes.map((l: any) => (
-                  <option key={l.row_id} value={l.row_id}>
-                    {l.failure_type}
-                  </option>
-                ))}
-              </Sel>
+                onValueChange={setFailureType}
+                options={uniqueFailureTypes.map((l: any) => ({
+                  value: l.row_id,
+                  label: l.failure_type,
+                }))}
+                placeholder="— Select —"
+                searchPlaceholder="Search failure types…"
+                emptyText="No failure types found."
+                allowClear
+              />
             </F>
 
             {/* Vendor Caused drives whether Vendor is required/selectable. */}
@@ -1070,22 +1097,20 @@ export default function IncidentForm({
             </F>
 
             <F label="Vendor" required={vendorActive}>
-              <Sel
-                key={`vnd-${incident?.row_id}-${vendors.length}-${vendorActive}`}
-                name="vendor"
-                defaultValue={vendorActive ? (incident?.vendor || '') : ''}
+              <input type="hidden" name="vendor" value={vendorActive ? vendor : ''} />
+              <Combobox
+                value={vendorActive ? vendor : ''}
+                onValueChange={setVendor}
                 disabled={!vendorActive}
-                required={vendorActive}
-              >
-                <option value="">
-                  {vendorActive ? '— Select —' : '— Only when Vendor Caused = Yes —'}
-                </option>
-                {vendors.map((v: any) => (
-                  <option key={v.row_id} value={v.row_id}>
-                    {v.vendor}
-                  </option>
-                ))}
-              </Sel>
+                options={vendors.map((v: any) => ({
+                  value: v.row_id,
+                  label: v.vendor,
+                }))}
+                placeholder={vendorActive ? '— Select —' : '— Only when Vendor Caused = Yes —'}
+                searchPlaceholder="Search vendors…"
+                emptyText="No vendors found."
+                allowClear
+              />
             </F>
           </SectionCard>
 

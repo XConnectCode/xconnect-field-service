@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { XC_PANEL_BASES } from '../../lib/xcLocations';
 import { ButtonGroup } from '../../components/ui/button-group';
+import { Combobox } from '../../components/ui/combobox';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -98,6 +99,7 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
   const [districts,   setDistricts]   = useState<any[]>([]);
   const [epCompanies, setEpCompanies] = useState<string[]>([]);
   const [custId,      setCustId]      = useState('');
+  const [distId,      setDistId]      = useState('');
   const [saving,      setSaving]      = useState(false);
   const [panelType,   setPanelType]   = useState('');
   const [panelStatus, setPanelStatus] = useState('At Facility');
@@ -120,8 +122,8 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
   }, [custId]);
 
   useEffect(() => {
-    if (panel) setCustId(panel.customer || '');
-    else setCustId('');
+    if (panel) { setCustId(panel.customer || ''); setDistId(panel.customer_district || ''); }
+    else { setCustId(''); setDistId(''); }
   }, [panel, open]);
 
   useEffect(() => {
@@ -330,21 +332,29 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
               <Section title="Customer Assignment" />
 
               <F label="Customer" required={assignRequired(panelStatus)}>
-                <select value={custId} onChange={e => setCustId(e.target.value)}
-                  required={assignRequired(panelStatus)}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-                  <option value="">— Not assigned —</option>
-                  {customers.map(c => <option key={c.row_id} value={c.row_id}>{c.customer}</option>)}
-                </select>
+                <Combobox
+                  value={custId}
+                  onValueChange={(v) => { setCustId(v); setDistId(''); }}
+                  options={customers.map(c => ({ value: c.row_id, label: c.customer }))}
+                  placeholder="— Not assigned —"
+                  searchPlaceholder="Search customers…"
+                  emptyText="No customers found."
+                  allowClear
+                />
               </F>
 
               <F label="District" required={assignRequired(panelStatus)}>
-                <select name="customer_district" defaultValue={panel?.customer_district || ''}
-                  disabled={!custId} required={assignRequired(panelStatus)}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-                  <option value="">— Not assigned —</option>
-                  {districts.map(d => <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>)}
-                </select>
+                <input type="hidden" name="customer_district" value={distId} />
+                <Combobox
+                  value={distId}
+                  onValueChange={setDistId}
+                  disabled={!custId}
+                  options={districts.map(d => ({ value: d.row_id, label: d.customer_district }))}
+                  placeholder="— Not assigned —"
+                  searchPlaceholder="Search districts…"
+                  emptyText="No districts found."
+                  allowClear
+                />
               </F>
 
               <F label="Operating Company" required={assignRequired(panelStatus)}>

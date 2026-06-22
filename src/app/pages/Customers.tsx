@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Combobox } from '../components/ui/combobox';
 import { Plus, Building2, MapPin, UserPlus, Phone, Mail, Droplet, Layers, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -22,6 +23,7 @@ export default function Customers() {
   const [loading, setLoading] = useState(true);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [districtDialogOpen, setDistrictDialogOpen] = useState(false);
+  const [districtCustomerId, setDistrictCustomerId] = useState('');
   const [userDialogOpen, setUserDialogOpen] = useState(false);
 
   useEffect(() => {
@@ -104,6 +106,7 @@ export default function Customers() {
       
       toast.success('District added successfully');
       setDistrictDialogOpen(false);
+      setDistrictCustomerId('');
       loadData();
     } catch (error: any) {
       toast.error(error.message || 'Failed to add district');
@@ -232,18 +235,15 @@ export default function Customers() {
                   <form onSubmit={handleAddDistrict} className="space-y-4">
                     <div>
                       <Label htmlFor="customerId">Customer</Label>
-                      <Select name="customerId" required>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select customer" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {customers.map((customer) => (
-                            <SelectItem key={customer.row_id} value={customer.row_id}>
-                              {customer.customer}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <input type="hidden" name="customerId" value={districtCustomerId} />
+                      <Combobox
+                        value={districtCustomerId}
+                        onValueChange={setDistrictCustomerId}
+                        options={customers.map((customer) => ({ value: customer.row_id, label: customer.customer }))}
+                        placeholder="Select customer"
+                        searchPlaceholder="Search customers…"
+                        emptyText="No customers found."
+                      />
                     </div>
                     <div>
                       <Label htmlFor="name">District Name</Label>
