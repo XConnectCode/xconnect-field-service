@@ -100,6 +100,7 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
   const [epCompanies, setEpCompanies] = useState<string[]>([]);
   const [custId,      setCustId]      = useState('');
   const [distId,      setDistId]      = useState('');
+  const [opCompany,   setOpCompany]   = useState('');
   const [saving,      setSaving]      = useState(false);
   const [panelType,   setPanelType]   = useState('');
   const [panelStatus, setPanelStatus] = useState('At Facility');
@@ -122,8 +123,8 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
   }, [custId]);
 
   useEffect(() => {
-    if (panel) { setCustId(panel.customer || ''); setDistId(panel.customer_district || ''); }
-    else { setCustId(''); setDistId(''); }
+    if (panel) { setCustId(panel.customer || ''); setDistId(panel.customer_district || ''); setOpCompany(panel.operating_company || ''); }
+    else { setCustId(''); setDistId(''); setOpCompany(''); }
   }, [panel, open]);
 
   useEffect(() => {
@@ -358,12 +359,16 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
               </F>
 
               <F label="Operating Company" required={assignRequired(panelStatus)}>
-                <select name="operating_company" defaultValue={panel?.operating_company || ''}
-                  required={assignRequired(panelStatus)}
-                  className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm">
-                  <option value="">— Select —</option>
-                  {epCompanies.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <input type="hidden" name="operating_company" value={opCompany} />
+                <Combobox
+                  value={opCompany}
+                  onValueChange={setOpCompany}
+                  options={epCompanies.map(o => ({ value: o, label: o }))}
+                  placeholder="— Select —"
+                  searchPlaceholder="Search operating companies…"
+                  emptyText="No operating companies found."
+                  allowClear
+                />
               </F>
             </>
           )}
