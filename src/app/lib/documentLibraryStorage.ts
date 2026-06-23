@@ -147,7 +147,17 @@ export async function listDocuments(): Promise<DocumentRow[]> {
   return (data || []) as DocumentRow[];
 }
 
-/** Mint a short-lived signed URL for in-app preview / download. */
+/**
+ * Mint a short-lived signed URL for in-app preview / download.
+ *
+ * The stored `file_path` is passed to createSignedUrl VERBATIM — never
+ * re-derived from category/title, case-folded, or pre-encoded. Storage keys
+ * are case-sensitive and the JS client encodes the request URL itself, so any
+ * local mutation here would produce a key that no longer matches the object
+ * ("Object not found"). Folder casing differs per project (prod `how-to-s/…`
+ * vs staging `How-To's/…`) and each row already matches its own bucket, so the
+ * only safe key is the one we stored.
+ */
 export async function getDocumentUrl(doc: Pick<DocumentRow, 'file_path'>): Promise<string> {
   const { data, error } = await supabase
     .storage
@@ -165,11 +175,17 @@ export async function getDocumentUrl(doc: Pick<DocumentRow, 'file_path'>): Promi
  * single object for ~10 years.
  */
 export async function getDocumentShareUrl(doc: Pick<DocumentRow, 'file_path' | 'file_name'>): Promise<string> {
+  // Key stays verbatim (see getDocumentUrl). The `download` filename, however,
+  // must be URL-safe: the storage client puts it through URLSearchParams AND a
+  // second encodeURI pass, so a raw name with spaces/apostrophes (e.g.
+  // "How To's Guide.pdf") comes back double-encoded ("How+To%2527s+Guide.pdf").
+  // Sanitize it to plain ASCII so the customer gets a clean filename.
+  const downloadName = doc.file_name ? sanitizeName(doc.file_name) : true;
   const { data, error } = await supabase
     .storage
     .from(DOCUMENT_LIBRARY_BUCKET)
     .createSignedUrl(doc.file_path, SHARE_URL_TTL_SECONDS, {
-      download: doc.file_name || true,
+      download: downloadName,
     });
   if (error || !data?.signedUrl) {
     throw new Error(`Could not create share link: ${error?.message || 'unknown error'}`);
