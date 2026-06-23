@@ -32,7 +32,7 @@ import {
 import { Calendar } from '../components/ui/calendar';
 import { Combobox } from '../components/ui/combobox';
 import {
-  CalendarClock, Plus, Edit, Trash, GraduationCap, Cpu, ArrowUpDown,
+  CalendarClock, Plus, Edit, Trash, GraduationCap, Cpu, ArrowUpDown, Link2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -40,7 +40,7 @@ import {
   listScheduledTrainings, createScheduledTraining, updateScheduledTraining, deleteScheduledTraining,
   listPanelInstallNeeds, createPanelInstallNeed, updatePanelInstallNeed, deletePanelInstallNeed,
   listSqms, listCustomers, listDistrictsForCustomer, listDistrictsByIds, listEpCompanies, listProductLines,
-  PANEL_TYPES, TRAINING_STATUSES, PANEL_NEED_STATUSES,
+  PANEL_TYPES, TRAINING_STATUSES, PANEL_NEED_STATUSES, SCHEDULER_CATEGORIES,
 } from '../lib/scheduler';
 
 // ── Date helpers (timezone-safe, naive wall-clock) ────────────────────────────
@@ -81,14 +81,39 @@ function StatusBadge({ status }: { status: string | null }) {
   return <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium capitalize ${cls}`}>{s}</span>;
 }
 
+function CategoryBadge({ category }: { category: string | null }) {
+  if (!category) return null;
+  return (
+    <span className="inline-block rounded-md px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300">
+      {category}
+    </span>
+  );
+}
+
+function LinkIndicator({ label }: { label: string | null }) {
+  if (!label) return null;
+  return (
+    <span
+      title={`Linked to ${label}`}
+      className="inline-flex items-center text-indigo-500 dark:text-indigo-400 align-middle"
+      aria-label={`Linked to ${label}`}
+    >
+      <Link2 className="w-3.5 h-3.5" />
+    </span>
+  );
+}
+
 const selectCls =
   'w-full h-9 rounded-md border border-input bg-input-background px-3 text-sm dark:bg-input/30 ' +
   'text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none';
 
 // ── Training create/edit dialog ───────────────────────────────────────────────
 function TrainingFormDialog({
-  open, onClose, onSaved, record, currentUser,
-}: { open: boolean; onClose: () => void; onSaved: () => void; record: any; currentUser: any }) {
+  open, onClose, onSaved, record, currentUser, panelNeeds, custLabel,
+}: {
+  open: boolean; onClose: () => void; onSaved: () => void; record: any; currentUser: any;
+  panelNeeds: any[]; custLabel: (id: string | null) => string;
+}) {
   const editing = !!record;
   const [sqms, setSqms] = useState<{ name: string; email: string | null }[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -103,6 +128,8 @@ function TrainingFormDialog({
   const [productLine, setProductLine] = useState('');
   const [plannedDate, setPlannedDate] = useState('');
   const [status, setStatus] = useState('planned');
+  const [category, setCategory] = useState('');
+  const [linkPanelId, setLinkPanelId] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -121,6 +148,8 @@ function TrainingFormDialog({
     setProductLine(record?.product_line || '');
     setPlannedDate(record?.planned_date ? String(record.planned_date).slice(0, 10) : '');
     setStatus(record?.status || 'planned');
+    setCategory(record?.category || '');
+    setLinkPanelId(record?.linked_panel_need_id || '');
     setNotes(record?.notes || '');
   }, [open, record]);
 
@@ -133,6 +162,8 @@ function TrainingFormDialog({
     if (!plannedDate) { toast.error('Planned date is required.'); return; }
     if (!sqmName.trim() && !custId) { toast.error('Enter an SQM or select a customer.'); return; }
     const sqmEmail = sqms.find((s) => s.name === sqmName)?.email ?? null;
+    const newPanelId = linkPanelId || null;
+    const oldPanelId = record?.linked_panel_need_id || null;
     const payload: any = {
       sqm_name: sqmName.trim() || null,
       sqm_email: sqmEmail,
@@ -142,14 +173,26 @@ function TrainingFormDialog({
       product_line: productLine || null,
       planned_date: plannedDate,
       status,
+      category: category || null,
+      linked_panel_need_id: newPanelId,
       notes: notes.trim() || null,
     };
     setSaving(true);
     try {
-      if (editing) {
-        await updateScheduledTraining(record.id, payload);
-      } else {
-        await createScheduledTraining({ ...payload, created_by: currentUser?.name || currentUser?.email || null });
+      const saved = editing
+        ? await updateScheduledTraining(record.id, payload)
+        : await createScheduledTraining({ ...payload, created_by: currentUser?.name || currentUser?.email || null });
+      const trainingId = saved?.id || record?.id;
+      // Keep the reciprocal link on the panel need in sync (best-effort).
+      try {
+        if (oldPanelId && oldPanelId !== newPanelId) {
+          await updatePanelInstallNeed(oldPanelId, { linked_training_id: null });
+        }
+        if (newPanelId && trainingId) {
+          await updatePanelInstallNeed(newPanelId, { linked_training_id: trainingId });
+        }
+      } catch {
+        toast.error('Training saved, but failed to sync the linked panel need.');
       }
       toast.success(`Training ${editing ? 'updated' : 'scheduled'} successfully`);
       onSaved();
@@ -160,6 +203,16 @@ function TrainingFormDialog({
       setSaving(false);
     }
   };
+
+  const panelLinkOptions = useMemo(() => {
+    const opts = panelNeeds
+      .filter((p) => (p.status || 'open') !== 'cancelled' || p.id === linkPanelId)
+      .map((p) => ({
+        value: p.id,
+        label: `${p.panel_type || 'Panel'} — ${custLabel(p.customer)}${p.needed_by_date ? ` (needed ${String(p.needed_by_date).slice(0, 10)})` : ''}`,
+      }));
+    return opts;
+  }, [panelNeeds, linkPanelId, custLabel]);
 
   const sqmOptions = useMemo(() => {
     const names = sqms.map((s) => s.name);
@@ -252,6 +305,30 @@ function TrainingFormDialog({
             </select>
           </Field>
 
+          <Field label="Category">
+            <Combobox
+              value={category}
+              onValueChange={setCategory}
+              options={SCHEDULER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              placeholder="— Select —"
+              searchPlaceholder="Search categories…"
+              emptyText="No categories found."
+              allowClear
+            />
+          </Field>
+
+          <Field label="Link to Panel Need">
+            <Combobox
+              value={linkPanelId}
+              onValueChange={setLinkPanelId}
+              options={panelLinkOptions}
+              placeholder="— Select —"
+              searchPlaceholder="Search panel needs…"
+              emptyText="No panel needs found."
+              allowClear
+            />
+          </Field>
+
           <div className="md:col-span-2">
             <Field label="Notes">
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Optional notes" />
@@ -270,8 +347,11 @@ function TrainingFormDialog({
 
 // ── Panel need create/edit dialog ─────────────────────────────────────────────
 function PanelNeedFormDialog({
-  open, onClose, onSaved, record, currentUser,
-}: { open: boolean; onClose: () => void; onSaved: () => void; record: any; currentUser: any }) {
+  open, onClose, onSaved, record, currentUser, trainings, custLabel,
+}: {
+  open: boolean; onClose: () => void; onSaved: () => void; record: any; currentUser: any;
+  trainings: any[]; custLabel: (id: string | null) => string;
+}) {
   const editing = !!record;
   const [customers, setCustomers] = useState<any[]>([]);
   const [districts, setDistricts] = useState<any[]>([]);
@@ -284,6 +364,8 @@ function PanelNeedFormDialog({
   const [qty, setQty] = useState('1');
   const [neededBy, setNeededBy] = useState('');
   const [status, setStatus] = useState('open');
+  const [category, setCategory] = useState('');
+  const [linkTrainingId, setLinkTrainingId] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -301,6 +383,8 @@ function PanelNeedFormDialog({
     setQty(record?.qty_needed != null ? String(record.qty_needed) : '1');
     setNeededBy(record?.needed_by_date ? String(record.needed_by_date).slice(0, 10) : '');
     setStatus(record?.status || 'open');
+    setCategory(record?.category || '');
+    setLinkTrainingId(record?.linked_training_id || '');
     setNotes(record?.notes || '');
   }, [open, record]);
 
@@ -314,6 +398,8 @@ function PanelNeedFormDialog({
     if (!neededBy) { toast.error('Needed-by date is required.'); return; }
     if (!custId) { toast.error('Customer is required.'); return; }
     const qtyNum = parseInt(qty, 10);
+    const newTrainingId = linkTrainingId || null;
+    const oldTrainingId = record?.linked_training_id || null;
     const payload: any = {
       customer: custId,
       customer_district: distId || null,
@@ -322,14 +408,26 @@ function PanelNeedFormDialog({
       qty_needed: isNaN(qtyNum) || qtyNum < 1 ? 1 : qtyNum,
       needed_by_date: neededBy,
       status,
+      category: category || null,
+      linked_training_id: newTrainingId,
       notes: notes.trim() || null,
     };
     setSaving(true);
     try {
-      if (editing) {
-        await updatePanelInstallNeed(record.id, payload);
-      } else {
-        await createPanelInstallNeed({ ...payload, created_by: currentUser?.name || currentUser?.email || null });
+      const saved = editing
+        ? await updatePanelInstallNeed(record.id, payload)
+        : await createPanelInstallNeed({ ...payload, created_by: currentUser?.name || currentUser?.email || null });
+      const panelId = saved?.id || record?.id;
+      // Keep the reciprocal link on the training visit in sync (best-effort).
+      try {
+        if (oldTrainingId && oldTrainingId !== newTrainingId) {
+          await updateScheduledTraining(oldTrainingId, { linked_panel_need_id: null });
+        }
+        if (newTrainingId && panelId) {
+          await updateScheduledTraining(newTrainingId, { linked_panel_need_id: panelId });
+        }
+      } catch {
+        toast.error('Panel need saved, but failed to sync the linked training.');
       }
       toast.success(`Panel need ${editing ? 'updated' : 'added'} successfully`);
       onSaved();
@@ -340,6 +438,15 @@ function PanelNeedFormDialog({
       setSaving(false);
     }
   };
+
+  const trainingLinkOptions = useMemo(() => {
+    return trainings
+      .filter((t) => (t.status || 'planned') !== 'cancelled' || t.id === linkTrainingId)
+      .map((t) => ({
+        value: t.id,
+        label: `${t.sqm_name || 'Training'} — ${custLabel(t.customer)}${t.planned_date ? ` (${String(t.planned_date).slice(0, 10)})` : ''}`,
+      }));
+  }, [trainings, linkTrainingId, custLabel]);
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -409,6 +516,30 @@ function PanelNeedFormDialog({
             <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)}>
               {PANEL_NEED_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
+          </Field>
+
+          <Field label="Category">
+            <Combobox
+              value={category}
+              onValueChange={setCategory}
+              options={SCHEDULER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              placeholder="— Select —"
+              searchPlaceholder="Search categories…"
+              emptyText="No categories found."
+              allowClear
+            />
+          </Field>
+
+          <Field label="Link to Training">
+            <Combobox
+              value={linkTrainingId}
+              onValueChange={setLinkTrainingId}
+              options={trainingLinkOptions}
+              placeholder="— Select —"
+              searchPlaceholder="Search trainings…"
+              emptyText="No trainings found."
+              allowClear
+            />
           </Field>
 
           <div className="md:col-span-2">
@@ -485,6 +616,30 @@ export default function Scheduler() {
     const c = custLabel(cid);
     const d = distLabel(did);
     return d ? `${c} · ${d}` : c;
+  };
+
+  // Lookups so a linked record can be named from either side.
+  const panelById = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const p of panelNeeds) m[p.id] = p;
+    return m;
+  }, [panelNeeds]);
+  const trainingById = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const t of trainings) m[t.id] = t;
+    return m;
+  }, [trainings]);
+
+  // Counterpart label for a training's linked panel need / a panel's linked training.
+  const linkedPanelLabel = (t: any): string | null => {
+    const p = t?.linked_panel_need_id ? panelById[t.linked_panel_need_id] : null;
+    if (!p) return null;
+    return `${p.panel_type || 'Panel'} — ${custLabel(p.customer)}`;
+  };
+  const linkedTrainingLabel = (p: any): string | null => {
+    const t = p?.linked_training_id ? trainingById[p.linked_training_id] : null;
+    if (!t) return null;
+    return `${t.sqm_name || 'Training'} — ${custLabel(t.customer)}`;
   };
 
   // Map of day-key → events for calendar dots + side panel.
@@ -667,10 +822,14 @@ export default function Scheduler() {
                       {selectedTrainings.map((t) => (
                         <div key={t.id} className="flex items-start justify-between gap-2 rounded-md border border-border bg-card p-3">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium text-foreground truncate">{custDistLabel(t.customer, t.customer_district)}</div>
+                            <div className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                              <span className="truncate">{custDistLabel(t.customer, t.customer_district)}</span>
+                              <LinkIndicator label={linkedPanelLabel(t)} />
+                            </div>
                             <div className="text-xs text-muted-foreground">
                               {t.sqm_name || 'Unassigned SQM'}{t.product_line ? ` · ${t.product_line}` : ''}
                             </div>
+                            {t.category && <div className="mt-1"><CategoryBadge category={t.category} /></div>}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <StatusBadge status={t.status} />
@@ -691,8 +850,12 @@ export default function Scheduler() {
                       {selectedPanels.map((p) => (
                         <div key={p.id} className="flex items-start justify-between gap-2 rounded-md border border-border bg-card p-3">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium text-foreground truncate">{custDistLabel(p.customer, p.customer_district)}</div>
+                            <div className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                              <span className="truncate">{custDistLabel(p.customer, p.customer_district)}</span>
+                              <LinkIndicator label={linkedTrainingLabel(p)} />
+                            </div>
                             <div className="text-xs text-muted-foreground">{p.panel_type} × {p.qty_needed ?? 1}</div>
+                            {p.category && <div className="mt-1"><CategoryBadge category={p.category} /></div>}
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <StatusBadge status={p.status} />
@@ -736,20 +899,27 @@ export default function Scheduler() {
                         <TableHead>SQM</TableHead>
                         <TableHead>Customer / District</TableHead>
                         <TableHead>Product Line</TableHead>
+                        <TableHead>Category</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredTrainings.length === 0 && (
-                        <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No scheduled trainings.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No scheduled trainings.</TableCell></TableRow>
                       )}
                       {filteredTrainings.map((t) => (
                         <TableRow key={t.id}>
                           <TableCell className="whitespace-nowrap">{prettyDate(t.planned_date)}</TableCell>
                           <TableCell>{t.sqm_name || '—'}</TableCell>
-                          <TableCell>{custDistLabel(t.customer, t.customer_district)}</TableCell>
+                          <TableCell>
+                            <span className="inline-flex items-center gap-1.5">
+                              {custDistLabel(t.customer, t.customer_district)}
+                              <LinkIndicator label={linkedPanelLabel(t)} />
+                            </span>
+                          </TableCell>
                           <TableCell>{t.product_line || '—'}</TableCell>
+                          <TableCell>{t.category ? <CategoryBadge category={t.category} /> : '—'}</TableCell>
                           <TableCell>
                             <select className="h-8 rounded-md border border-input bg-input-background px-2 text-xs dark:bg-input/30 text-foreground"
                               value={t.status || 'planned'} onChange={(e) => quickStatusTraining(t, e.target.value)}>
@@ -793,20 +963,27 @@ export default function Scheduler() {
                         <TableHead>Customer / District</TableHead>
                         <TableHead>Panel Type</TableHead>
                         <TableHead>Qty</TableHead>
+                        <TableHead>Category</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredPanels.length === 0 && (
-                        <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No panel needs.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No panel needs.</TableCell></TableRow>
                       )}
                       {filteredPanels.map((p) => (
                         <TableRow key={p.id}>
                           <TableCell className="whitespace-nowrap">{prettyDate(p.needed_by_date)}</TableCell>
-                          <TableCell>{custDistLabel(p.customer, p.customer_district)}</TableCell>
+                          <TableCell>
+                            <span className="inline-flex items-center gap-1.5">
+                              {custDistLabel(p.customer, p.customer_district)}
+                              <LinkIndicator label={linkedTrainingLabel(p)} />
+                            </span>
+                          </TableCell>
                           <TableCell>{p.panel_type || '—'}</TableCell>
                           <TableCell>{p.qty_needed ?? 1}</TableCell>
+                          <TableCell>{p.category ? <CategoryBadge category={p.category} /> : '—'}</TableCell>
                           <TableCell>
                             <select className="h-8 rounded-md border border-input bg-input-background px-2 text-xs dark:bg-input/30 text-foreground"
                               value={p.status || 'open'} onChange={(e) => quickStatusPanel(p, e.target.value)}>
@@ -837,6 +1014,8 @@ export default function Scheduler() {
         onSaved={loadData}
         record={editingTraining}
         currentUser={user}
+        panelNeeds={panelNeeds}
+        custLabel={custLabel}
       />
       <PanelNeedFormDialog
         open={panelDialog}
@@ -844,6 +1023,8 @@ export default function Scheduler() {
         onSaved={loadData}
         record={editingPanel}
         currentUser={user}
+        trainings={trainings}
+        custLabel={custLabel}
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
