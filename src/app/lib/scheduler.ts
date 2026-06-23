@@ -14,6 +14,7 @@
  * FK strings (same as fieldvisits) and are resolved to display names in the UI.
  */
 import { supabase } from './supabase';
+import { schedulerApi } from './api';
 import { toast } from 'sonner';
 
 // Fixed panel-type list for scheduled_visit_panels.panel_type.
@@ -413,7 +414,6 @@ export async function markPanelsShipped(
   opts: { tracking_number?: string | null; tracking_url?: string | null } = {},
 ): Promise<void> {
   try {
-    const now = new Date().toISOString();
     const tracking = opts.tracking_number?.trim() || visit.tracking_number?.trim() || null;
     const trackingUrl = opts.tracking_url?.trim() || visit.tracking_url?.trim() || null;
 
@@ -433,38 +433,26 @@ export async function markPanelsShipped(
       }
     }
 
-    const panels = visit.panels || [];
-    for (const p of panels) {
-      if (p.panel_row_id) {
-        const panelUpdate: Record<string, any> = {
-          panel_status: 'In Transit',
-          tracking_info: p.tracking_number?.trim() || tracking,
-          customer: cust,
-          customer_district: dist,
-          operating_company: opCo,
-        };
-        const { error: panErr } = await supabase
-          .from('panels').update(panelUpdate).eq('row_id', p.panel_row_id);
-        if (panErr) throw panErr;
-      }
-      if (p.id) {
-        const { error: cpErr } = await supabase
-          .from('scheduled_visit_panels')
-          .update({ shipped_at: now, updated_at: now })
-          .eq('id', p.id);
-        if (cpErr) throw cpErr;
-      }
-    }
+    // The actual inventory writes (panels UPDATE, scheduled_visit_panels +
+    // scheduled_visits stamps, and the job roll-up) run server-side under the
+    // service-role edge route — `panels` RLS has no anon write grant. We only
+    // resolve/serialize the values here and hand them to the route.
+    const panels = (visit.panels || []).map((p) => ({
+      scheduled_visit_panel_id: p.id || null,
+      panel_row_id: p.panel_row_id || null,
+      panel_tracking_number: p.tracking_number?.trim() || null,
+    }));
 
-    const payload: Partial<ScheduledVisit> = {
-      status: 'shipped', shipped_at: now, updated_at: now,
-    };
-    if (tracking !== undefined) payload.tracking_number = tracking;
-    if (trackingUrl !== undefined) payload.tracking_url = trackingUrl;
-    const { error } = await supabase.from('scheduled_visits').update(payload).eq('id', visit.id);
-    if (error) throw error;
-
-    if (visit.job_id) await rollUpJobStatus(visit.job_id);
+    await schedulerApi.markPanelsShipped({
+      visit_id: visit.id,
+      job_id: visit.job_id || null,
+      customer: cust,
+      customer_district: dist,
+      operating_company: opCo,
+      tracking_number: tracking,
+      tracking_url: trackingUrl,
+      panels,
+    });
   } catch (err: any) {
     toast.error(err?.message || 'Failed to mark panels shipped');
     throw err;
@@ -515,10 +503,12 @@ export async function startFieldVisitForActivity(visit: ScheduledVisit): Promise
       ? activityMeta(visit.activity_type).label
       : (visit.categories || []).join(', ') || null;
 
-    const { data, error } = await supabase
-      .from('fieldvisits')
-      .insert({
-        field_visit_id: fvId,
+    // The fieldvisits INSERT + scheduled_visits link run server-side under the
+    // service-role edge route — `fieldvisits` RLS has no anon write grant.
+    const res = await schedulerApi.startFieldVisit({
+      visit_id: visit.id,
+      field_visit_id: fvId,
+      fieldvisit: {
         arrival_date: visit.planned_date || null,
         visit_purpose: purpose,
         field_or_facility: 'Field',
@@ -527,18 +517,10 @@ export async function startFieldVisitForActivity(visit: ScheduledVisit): Promise
         operating_company: visit.operating_company || null,
         xc_rep: visit.sqm_name || null,
         panels_seen: panelsSeen,
-      })
-      .select('row_id, field_visit_id')
-      .single();
-    if (error) throw error;
+      },
+    });
 
-    const { error: linkErr } = await supabase
-      .from('scheduled_visits')
-      .update({ field_visit_id: fvId, updated_at: new Date().toISOString() })
-      .eq('id', visit.id);
-    if (linkErr) throw linkErr;
-
-    return { field_visit_id: data.field_visit_id, row_id: data.row_id };
+    return { field_visit_id: res.field_visit_id, row_id: res.row_id };
   } catch (err: any) {
     toast.error(err?.message || 'Failed to start field visit');
     throw err;

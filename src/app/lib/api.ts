@@ -116,6 +116,14 @@ export const panelApi = {
     apiRequest(`/panels/${id}/mark-seen`, { method: 'POST', body: JSON.stringify(body || {}) }, token),
 };
 
+// Scheduler APIs (service-role inventory writes only)
+export const schedulerApi = {
+  markPanelsShipped: (payload: any, token?: string) =>
+    apiRequest('/mark-panels-shipped', { method: 'POST', body: JSON.stringify(payload) }, token),
+  startFieldVisit: (payload: any, token?: string) =>
+    apiRequest('/start-field-visit', { method: 'POST', body: JSON.stringify(payload) }, token),
+};
+
 // Sales APIs
 export const salesApi = {
   getAll: (token?: string) => apiRequest('/sales', {}, token),
