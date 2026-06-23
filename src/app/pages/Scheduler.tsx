@@ -17,7 +17,7 @@
  * local parts so a stored date never shifts a day across timezones.
  */
 import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
@@ -31,22 +31,19 @@ import {
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '../components/ui/table';
 import { Calendar } from '../components/ui/calendar';
 import { Combobox } from '../components/ui/combobox';
-import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import {
-  CalendarClock, Plus, Edit, Trash, Truck, MapPin, Cpu, ArrowUpDown, X,
-  ExternalLink, PackageCheck, Briefcase, MapPinned, ScanLine,
+  CalendarClock, Plus, Edit, Trash, Truck, MapPin, Cpu, X,
+  ExternalLink, PackageCheck, Briefcase, MapPinned, ScanLine, Inbox, FolderPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import {
   listScheduledVisits, createScheduledVisit, updateScheduledVisit, deleteScheduledVisit,
-  markVisitShipped, markPanelsShipped,
+  markVisitShipped, markShipmentShipped,
   listScheduledJobs, createScheduledJob, updateScheduledJob, deleteScheduledJob,
+  assignActivityToJob, createJobFromActivity,
   listAvailablePanels, startFieldVisitForActivity, rollUpJobStatus,
   listSqms, listCustomers, listDistrictsForCustomer, listDistrictsByIds, listEpCompanies, listProductLines,
   PANEL_TYPES, VISIT_STATUSES, SCHEDULER_CATEGORIES, FULFILLMENT_TYPES,
@@ -133,28 +130,68 @@ function ShippedBadge() {
 const isShipped = (v: { status?: string | null; shipped_at?: string | null }) =>
   v.status === 'shipped' || !!v.shipped_at;
 
-// Quick action: mark a ship-only visit shipped, optionally capturing tracking
-// in a small popover. Skipping the fields just stamps status=shipped + shipped_at.
+// Mark-shipped flow. The shipment activity is scheduled by panel TYPE + qty (a
+// need); the actual serials are chosen HERE, at ship time, from real inventory
+// (At-Facility first). Tracking is captured visit-level with optional per-panel
+// overrides, then handed to the mark-panels-shipped edge route. A ship-only
+// visit with no panel needs just stamps the visit shipped.
 function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; onDone: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(false);
+
+  const needs = visit.panels || [];
+  const hasPanelNeeds = needs.length > 0;
+  // Default the type filter / qty target to the scheduled need.
+  const needType = needs.find((p) => p.panel_type)?.panel_type || '';
+  const targetQty = needs.reduce((n, p) => n + (p.qty_needed ?? 1), 0) || 1;
+
+  const [typeFilter, setTypeFilter] = useState(needType || 'all');
+  const [avail, setAvail] = useState<AvailablePanel[]>([]);
+  const [loadingPanels, setLoadingPanels] = useState(false);
+  const [selected, setSelected] = useState<Record<string, string>>({}); // row_id → per-panel tracking
   const [num, setNum] = useState(visit.tracking_number || '');
   const [url, setUrl] = useState(visit.tracking_url || '');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) { setNum(visit.tracking_number || ''); setUrl(visit.tracking_url || ''); }
-  }, [open, visit.tracking_number, visit.tracking_url]);
+    if (!open) return;
+    setNum(visit.tracking_number || '');
+    setUrl(visit.tracking_url || '');
+    setSelected({});
+    setTypeFilter(needType || 'all');
+  }, [open, visit.tracking_number, visit.tracking_url, needType]);
 
-  const hasRealPanels = (visit.panels || []).some((p) => p.panel_row_id);
+  useEffect(() => {
+    if (!open || !hasPanelNeeds) return;
+    setLoadingPanels(true);
+    listAvailablePanels(typeFilter && typeFilter !== 'all' ? typeFilter : undefined)
+      .then(setAvail)
+      .finally(() => setLoadingPanels(false));
+  }, [open, typeFilter, hasPanelNeeds]);
+
+  const selectedIds = Object.keys(selected);
+  const toggle = (rowId: string) => setSelected((prev) => {
+    const next = { ...prev };
+    if (rowId in next) delete next[rowId]; else next[rowId] = '';
+    return next;
+  });
+  const setPanelTracking = (rowId: string, v: string) => setSelected((prev) => ({ ...prev, [rowId]: v }));
+
   const submit = async () => {
     setBusy(true);
     try {
-      // Activities with real inventory panels stamp the live panels 'In Transit';
-      // simple ship-only/standalone visits just flag the visit shipped.
-      if (visit.activity_type === 'shipment' || hasRealPanels) {
-        await markPanelsShipped(visit, { tracking_number: num, tracking_url: url });
-      } else {
+      if (!hasPanelNeeds) {
         await markVisitShipped(visit.id, { tracking_number: num, tracking_url: url });
+      } else {
+        if (selectedIds.length === 0) { toast.error('Select at least one panel serial to ship.'); setBusy(false); return; }
+        const selections = selectedIds.map((rowId) => {
+          const p = avail.find((a) => a.row_id === rowId);
+          return {
+            panel_row_id: rowId,
+            panel_type: p?.panel_type || needType || null,
+            tracking_number: selected[rowId] || null,
+          };
+        });
+        await markShipmentShipped(visit, selections, { tracking_number: num, tracking_url: url });
       }
       toast.success('Marked shipped');
       setOpen(false);
@@ -167,27 +204,80 @@ function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; 
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button type="button" variant="outline" size="sm" className={compact ? 'h-7 px-2 text-xs' : ''}>
-          <Truck className={compact ? 'w-3 h-3 mr-1' : 'w-3.5 h-3.5 mr-1'} /> Mark shipped
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-3">
-        <div>
-          <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Tracking #</Label>
-          <Input value={num} onChange={(e) => setNum(e.target.value)} placeholder="Optional" />
-        </div>
-        <div>
-          <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Tracking link</Label>
-          <Input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
-          <Button type="button" size="sm" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Confirm'}</Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <>
+      <Button type="button" variant="outline" size="sm" className={compact ? 'h-7 px-2 text-xs' : ''} onClick={() => setOpen(true)}>
+        <Truck className={compact ? 'w-3 h-3 mr-1' : 'w-3.5 h-3.5 mr-1'} /> Mark shipped
+      </Button>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) setOpen(false); }}>
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Truck className="w-5 h-5 text-amber-500" /> Mark shipped</DialogTitle>
+          </DialogHeader>
+
+          {hasPanelNeeds ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                Pick the actual panel serial(s) to ship. Need: <span className="font-medium text-foreground">{needType || 'any type'} × {targetQty}</span>.
+                Selected {selectedIds.length}/{targetQty}.
+              </p>
+              <div className="mt-1">
+                <Label className="text-[11px] text-muted-foreground mb-1 block">Filter by panel type</Label>
+                <select className={selectCls} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+                  <option value="all">All panel types</option>
+                  {PANEL_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div className="mt-2 rounded-md border border-border max-h-56 overflow-y-auto divide-y divide-border">
+                {loadingPanels && <div className="p-3 text-xs text-muted-foreground">Loading panels…</div>}
+                {!loadingPanels && avail.length === 0 && (
+                  <div className="p-3 text-xs text-muted-foreground">No panels found for this type.</div>
+                )}
+                {!loadingPanels && avail.map((p) => {
+                  const checked = p.row_id in selected;
+                  return (
+                    <div key={p.row_id} className="p-2">
+                      <label className="flex items-center gap-2 cursor-pointer min-w-0">
+                        <input type="checkbox" checked={checked} onChange={() => toggle(p.row_id)} className="shrink-0" />
+                        <Cpu className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        <span className="text-sm font-medium truncate">{p.serial_number || p.row_id}</span>
+                        <span className="text-xs text-muted-foreground truncate">· {p.panel_type || '—'}</span>
+                        <span className="text-[10px] rounded px-1 py-0.5 bg-muted text-muted-foreground shrink-0 ml-auto">{p.panel_status || 'unknown'}</span>
+                      </label>
+                      {checked && (
+                        <Input
+                          value={selected[p.row_id]}
+                          onChange={(e) => setPanelTracking(p.row_id, e.target.value)}
+                          placeholder="Per-panel tracking # (optional)"
+                          className="mt-1.5 h-8 text-xs"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">No panel needs on this activity — this will simply flag it shipped.</p>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 mt-2">
+            <div className="min-w-0">
+              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Tracking # (default)</Label>
+              <Input value={num} onChange={(e) => setNum(e.target.value)} placeholder="Optional" />
+            </div>
+            <div className="min-w-0">
+              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Tracking link</Label>
+              <Input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
+            <Button type="button" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Confirm shipment'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -905,11 +995,113 @@ function JobFormDialog({
   );
 }
 
+// ── Add-to-job dialog (for unassigned activities) ─────────────────────────────
+// Assign an unassigned activity to an existing job, or spin up a new job from
+// the activity's customer context.
+function AddToJobDialog({
+  open, onClose, onDone, visit, jobs, jobLabel, currentUser,
+}: {
+  open: boolean; onClose: () => void; onDone: () => void;
+  visit: ScheduledVisit | null; jobs: ScheduledJob[];
+  jobLabel: (j: ScheduledJob) => string; currentUser: any;
+}) {
+  const [mode, setMode] = useState<'existing' | 'new'>('existing');
+  const [jobId, setJobId] = useState('');
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setMode(jobs.length ? 'existing' : 'new');
+    setJobId('');
+    setTitle('');
+  }, [open, jobs.length]);
+
+  const submit = async () => {
+    if (!visit) return;
+    setBusy(true);
+    try {
+      if (mode === 'existing') {
+        if (!jobId) { toast.error('Select a job.'); setBusy(false); return; }
+        await assignActivityToJob(visit, jobId);
+        toast.success('Activity added to job');
+      } else {
+        await createJobFromActivity(visit, {
+          title: title.trim() || null,
+          createdBy: currentUser?.name || currentUser?.email || null,
+        });
+        toast.success('Job created from activity');
+      }
+      onDone();
+      onClose();
+    } catch {
+      // toast raised in data layer
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-500" /> Add to job</DialogTitle>
+        </DialogHeader>
+
+        <div className="inline-flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg mt-2">
+          <button type="button" onClick={() => setMode('existing')} disabled={!jobs.length}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+              mode === 'existing' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'} ${!jobs.length ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            Existing job
+          </button>
+          <button type="button" onClick={() => setMode('new')}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+              mode === 'new' ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+            New job from activity
+          </button>
+        </div>
+
+        {mode === 'existing' ? (
+          <div className="mt-4">
+            <Field label="Job" required>
+              <Combobox
+                value={jobId}
+                onValueChange={setJobId}
+                options={jobs.map((j) => ({ value: j.id, label: jobLabel(j) }))}
+                placeholder="— Select job —"
+                searchPlaceholder="Search jobs…"
+                emptyText="No jobs found."
+                allowClear
+              />
+            </Field>
+          </div>
+        ) : (
+          <div className="mt-4">
+            <Field label="New job title">
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Pad 7 commissioning" />
+            </Field>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              The job inherits this activity's customer, district, operating company and product line.
+            </p>
+          </div>
+        )}
+
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={submit} disabled={busy}>{busy ? 'Saving…' : (mode === 'existing' ? 'Add to job' : 'Create job')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
-type SortDir = 'asc' | 'desc';
 
 export default function Scheduler() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [view, setView] = useState<'calendar' | 'list'>('calendar');
   const [visits, setVisits] = useState<ScheduledVisit[]>([]);
@@ -930,11 +1122,9 @@ export default function Scheduler() {
   const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
   const [deleteJobTarget, setDeleteJobTarget] = useState<ScheduledJob | null>(null);
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
+  const [addToJobTarget, setAddToJobTarget] = useState<ScheduledVisit | null>(null);
 
   const [statusFilter, setStatusFilter] = useState('all');
-  const [visitSort, setVisitSort] = useState<SortDir>('asc');
-  const [panelTypeFilter, setPanelTypeFilter] = useState('all');
-  const [panelSort, setPanelSort] = useState<SortDir>('asc');
 
   const loadData = async () => {
     setLoading(true);
@@ -1003,10 +1193,29 @@ export default function Scheduler() {
     try {
       const res = await startFieldVisitForActivity(v);
       toast.success(`Field visit #${res.field_visit_id} started`);
-      loadData();
+      navigate(`/field-visits/${res.field_visit_id}`);
     } catch {
       // toast raised in data layer
     }
+  };
+
+  const openFieldVisit = (v: ScheduledVisit) => {
+    if (v.field_visit_id) navigate(`/field-visits/${v.field_visit_id}`);
+  };
+
+  // Primary on-site action: start a new linked field visit, or open the existing
+  // one. Rendered only for install/training activities.
+  const FieldVisitButton = ({ v }: { v: ScheduledVisit }) => {
+    if (v.activity_type !== 'install' && v.activity_type !== 'training') return null;
+    return v.field_visit_id ? (
+      <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => openFieldVisit(v)}>
+        <MapPinned className="w-3 h-3 mr-1" /> Open Field Visit #{v.field_visit_id}
+      </Button>
+    ) : (
+      <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => startFieldVisit(v)}>
+        <MapPinned className="w-3 h-3 mr-1" /> Start Field Visit
+      </Button>
+    );
   };
 
   const confirmDeleteJob = async () => {
@@ -1105,30 +1314,15 @@ export default function Scheduler() {
     }
   };
 
-  const filteredVisits = useMemo(() => {
-    // Standalone visits only (job activities render in the Jobs section).
+  // Unassigned activities = visits with no job_id. Not hidden — shown in a
+  // dedicated band at the bottom of the list view, each with an "Add to job…".
+  const unassigned = useMemo(() => {
     let rows = visits.filter((r) => !r.job_id);
     if (statusFilter !== 'all') rows = rows.filter((r) => (r.status || 'planned') === statusFilter);
-    return [...rows].sort((a, b) => {
-      const cmp = String(visitCalendarDate(a) || '').localeCompare(String(visitCalendarDate(b) || ''));
-      return visitSort === 'asc' ? cmp : -cmp;
-    });
+    return [...rows].sort((a, b) =>
+      String(visitCalendarDate(a) || '').localeCompare(String(visitCalendarDate(b) || '')));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visits, statusFilter, visitSort]);
-
-  // Flat panel-demand view: one row per panel across all visits.
-  const flatPanels = useMemo(() => {
-    const rows: { visit: ScheduledVisit; panel: VisitPanel }[] = [];
-    for (const v of visits) {
-      for (const p of v.panels || []) rows.push({ visit: v, panel: p });
-    }
-    let filtered = rows;
-    if (panelTypeFilter !== 'all') filtered = filtered.filter((r) => r.panel.panel_type === panelTypeFilter);
-    return filtered.sort((a, b) => {
-      const cmp = String(a.panel.needed_by_date || '').localeCompare(String(b.panel.needed_by_date || ''));
-      return panelSort === 'asc' ? cmp : -cmp;
-    });
-  }, [visits, panelTypeFilter, panelSort]);
+  }, [visits, statusFilter]);
 
   return (
     <div className="p-4 md:p-8">
@@ -1257,15 +1451,11 @@ export default function Scheduler() {
                             </ul>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center flex-wrap gap-2 shrink-0 justify-end">
                           {(v.fulfillment_type === 'ship_only' || v.activity_type === 'shipment') && !isShipped(v) && (
                             <MarkShippedButton visit={v} onDone={loadData} compact />
                           )}
-                          {(v.activity_type === 'install' || v.activity_type === 'training') && !v.field_visit_id && (
-                            <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => startFieldVisit(v)}>
-                              <MapPinned className="w-3 h-3 mr-1" /> Start visit
-                            </Button>
-                          )}
+                          <FieldVisitButton v={v} />
                           <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4" /></button>
                         </div>
                       </div>
@@ -1352,15 +1542,11 @@ export default function Scheduler() {
                                   </div>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex items-center flex-wrap gap-2 shrink-0 justify-end">
                                 {v.activity_type === 'shipment' && !isShipped(v) && (
                                   <MarkShippedButton visit={v} onDone={loadData} compact />
                                 )}
-                                {(v.activity_type === 'install' || v.activity_type === 'training') && !v.field_visit_id && (
-                                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => startFieldVisit(v)}>
-                                    <MapPinned className="w-3 h-3 mr-1" /> Start visit
-                                  </Button>
-                                )}
+                                <FieldVisitButton v={v} />
                                 <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4" /></button>
                                 <button onClick={() => setDeleteTarget(v)} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4" /></button>
                               </div>
@@ -1374,11 +1560,12 @@ export default function Scheduler() {
               </div>
             </div>
 
-            {/* Visits */}
+            {/* Unassigned activities (job_id IS NULL) — not hidden, given an
+                "Add to job…" action plus the same per-activity actions. */}
             <div>
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                  <CalendarClock className="w-5 h-5 text-blue-500" /> Standalone Visits
+                  <Inbox className="w-5 h-5 text-slate-500" /> Unassigned activities
                 </h2>
                 <select className="h-9 rounded-md border border-input bg-input-background px-3 text-sm dark:bg-input/30 text-foreground"
                   value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -1387,129 +1574,61 @@ export default function Scheduler() {
                 </select>
               </div>
               <Card>
-                <CardContent className="p-0 overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>
-                          <button className="flex items-center gap-1" onClick={() => setVisitSort((d) => d === 'asc' ? 'desc' : 'asc')}>
-                            Date <ArrowUpDown className="w-3 h-3" />
-                          </button>
-                        </TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>SQM</TableHead>
-                        <TableHead>Customer / District</TableHead>
-                        <TableHead>Op Company</TableHead>
-                        <TableHead>Categories</TableHead>
-                        <TableHead>Panels</TableHead>
-                        <TableHead>Tracking</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredVisits.length === 0 && (
-                        <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No scheduled visits.</TableCell></TableRow>
-                      )}
-                      {filteredVisits.map((v) => (
-                        <TableRow key={v.id}>
-                          <TableCell className="whitespace-nowrap">{prettyDate(visitCalendarDate(v))}</TableCell>
-                          <TableCell><FulfillmentBadge type={v.fulfillment_type} /></TableCell>
-                          <TableCell>{v.sqm_name || '—'}</TableCell>
-                          <TableCell>{custDistLabel(v.customer, v.customer_district)}</TableCell>
-                          <TableCell>{v.operating_company || '—'}</TableCell>
-                          <TableCell>{v.categories?.length ? <CategoryChips categories={v.categories} /> : '—'}</TableCell>
-                          <TableCell>
-                            {(v.panels || []).length > 0
-                              ? <span className="inline-block rounded-md px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{(v.panels || []).length} panel{(v.panels || []).length === 1 ? '' : 's'}</span>
-                              : '—'}
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <TrackingCell number={v.tracking_number} url={v.tracking_url} />
-                              {isShipped(v) && <ShippedBadge />}
+                <CardContent className="p-0">
+                  {unassigned.length === 0 && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      No unassigned activities. Use “Schedule Visit” to add one, or “New Job” to start a job.
+                    </div>
+                  )}
+                  <div className="divide-y divide-border">
+                    {unassigned.map((v) => (
+                      <div key={v.id} className={`flex items-start justify-between gap-3 p-3 border-l-4 ${activityMeta(v.activity_type).band}`}>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center flex-wrap gap-2 mb-1">
+                            {v.activity_type ? <ActivityBadge type={v.activity_type} /> : <FulfillmentBadge type={v.fulfillment_type} />}
+                            <StatusBadge status={v.status} />
+                            {isShipped(v) && <ShippedBadge />}
+                            <span className="text-xs text-muted-foreground">{prettyDate(visitCalendarDate(v))}</span>
+                          </div>
+                          <div className="text-sm font-medium text-foreground truncate" title={custDistLabel(v.customer, v.customer_district)}>
+                            {custDistLabel(v.customer, v.customer_district)}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate" title={v.operating_company || ''}>
+                            {v.sqm_name ? `${v.sqm_name} · ` : (v.fulfillment_type === 'ship_only' ? 'Ship-only · ' : '')}
+                            {(v.panels || []).length} panel{(v.panels || []).length === 1 ? '' : 's'}
+                            {v.operating_company ? ` · ${v.operating_company}` : ''}
+                            {v.product_line ? ` · ${v.product_line}` : ''}
+                          </div>
+                          {v.categories?.length > 0 && <div className="mt-1"><CategoryChips categories={v.categories} /></div>}
+                          {(v.tracking_number || v.tracking_url) && (
+                            <div className="text-xs mt-0.5"><TrackingCell number={v.tracking_number} url={v.tracking_url} /></div>
+                          )}
+                          {v.field_visit_id && (
+                            <div className="mt-0.5 text-xs">
+                              <Link to={`/field-visits/${v.field_visit_id}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
+                                <MapPinned className="w-3 h-3" /> Field visit #{v.field_visit_id}
+                              </Link>
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            <select className="h-8 rounded-md border border-input bg-input-background px-2 text-xs dark:bg-input/30 text-foreground"
-                              value={v.status || 'planned'} onChange={(e) => quickStatus(v, e.target.value)}>
-                              {VISIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                          </TableCell>
-                          <TableCell className="text-right whitespace-nowrap">
-                            <div className="inline-flex items-center gap-2">
-                              {v.fulfillment_type === 'ship_only' && !isShipped(v) && (
-                                <MarkShippedButton visit={v} onDone={loadData} compact />
-                              )}
-                              <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4 inline" /></button>
-                              <button onClick={() => setDeleteTarget(v)} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4 inline" /></button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* All Panel Needs (flat) */}
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                  <Cpu className="w-5 h-5 text-amber-500" /> All Panel Needs
-                </h2>
-                <select className="h-9 rounded-md border border-input bg-input-background px-3 text-sm dark:bg-input/30 text-foreground"
-                  value={panelTypeFilter} onChange={(e) => setPanelTypeFilter(e.target.value)}>
-                  <option value="all">All panel types</option>
-                  {PANEL_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-              <Card>
-                <CardContent className="p-0 overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>
-                          <button className="flex items-center gap-1" onClick={() => setPanelSort((d) => d === 'asc' ? 'desc' : 'asc')}>
-                            Needed By <ArrowUpDown className="w-3 h-3" />
-                          </button>
-                        </TableHead>
-                        <TableHead>Panel Type</TableHead>
-                        <TableHead>Qty</TableHead>
-                        <TableHead>Customer</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Tracking</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {flatPanels.length === 0 && (
-                        <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No panel needs.</TableCell></TableRow>
-                      )}
-                      {flatPanels.map(({ visit, panel }, i) => {
-                        const tNum = panel.tracking_number || visit.tracking_number;
-                        const tUrl = panel.tracking_url || visit.tracking_url;
-                        const shipped = !!panel.shipped_at || isShipped(visit);
-                        return (
-                          <TableRow key={`${visit.id}-${i}`}>
-                            <TableCell className="whitespace-nowrap">{prettyDate(panel.needed_by_date)}</TableCell>
-                            <TableCell>{panel.panel_type || '—'}</TableCell>
-                            <TableCell>{panel.qty_needed ?? 1}</TableCell>
-                            <TableCell>{custLabel(visit.customer)}</TableCell>
-                            <TableCell><FulfillmentBadge type={visit.fulfillment_type} /></TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              <div className="flex items-center gap-2">
-                                <TrackingCell number={tNum} url={tUrl} />
-                                {shipped && <ShippedBadge />}
-                              </div>
-                            </TableCell>
-                            <TableCell><StatusBadge status={visit.status} /></TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+                          )}
+                        </div>
+                        <div className="flex items-center flex-wrap gap-2 shrink-0 justify-end max-w-[60%]">
+                          <select className="h-7 rounded-md border border-input bg-input-background px-2 text-xs dark:bg-input/30 text-foreground"
+                            value={v.status || 'planned'} onChange={(e) => quickStatus(v, e.target.value)}>
+                            {VISIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => setAddToJobTarget(v)}>
+                            <FolderPlus className="w-3 h-3 mr-1" /> Add to job…
+                          </Button>
+                          {(v.fulfillment_type === 'ship_only' || v.activity_type === 'shipment') && !isShipped(v) && (
+                            <MarkShippedButton visit={v} onDone={loadData} compact />
+                          )}
+                          <FieldVisitButton v={v} />
+                          <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4" /></button>
+                          <button onClick={() => setDeleteTarget(v)} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -1535,6 +1654,17 @@ export default function Scheduler() {
         onClose={() => { setJobDialogOpen(false); setEditingJob(null); }}
         onSaved={loadData}
         record={editingJob}
+        currentUser={user}
+      />
+
+      {/* Add unassigned activity to a job */}
+      <AddToJobDialog
+        open={!!addToJobTarget}
+        onClose={() => setAddToJobTarget(null)}
+        onDone={loadData}
+        visit={addToJobTarget}
+        jobs={jobs}
+        jobLabel={jobBandLabel}
         currentUser={user}
       />
 
