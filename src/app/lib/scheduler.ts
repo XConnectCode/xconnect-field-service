@@ -30,8 +30,54 @@ export const PANEL_TYPES = [
 export const TRAINING_STATUSES = ['planned', 'completed', 'cancelled'];
 export const PANEL_NEED_STATUSES = ['open', 'fulfilled', 'cancelled'];
 
+// Shared category list — applies to BOTH training visits and panel needs, since
+// a single category (e.g. 'Software Training') can describe either record type.
+export const SCHEDULER_CATEGORIES = [
+  'Software Training',
+  'Hardware/Equipment Training',
+  'Panel Install',
+  'Maintenance',
+  'Other',
+];
+
+// ── Record shapes ─────────────────────────────────────────────────────────────
+export interface ScheduledTraining {
+  id: string;
+  sqm_name: string | null;
+  sqm_email: string | null;
+  customer: string | null;
+  customer_district: string | null;
+  operating_company: string | null;
+  product_line: string | null;
+  planned_date: string | null;
+  status: string | null;
+  notes: string | null;
+  category: string | null;
+  linked_panel_need_id: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface PanelInstallNeed {
+  id: string;
+  customer: string | null;
+  customer_district: string | null;
+  operating_company: string | null;
+  panel_type: string | null;
+  qty_needed: number | null;
+  needed_by_date: string | null;
+  status: string | null;
+  notes: string | null;
+  category: string | null;
+  linked_training_id: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 // ── Scheduled training visits ─────────────────────────────────────────────────
-export async function listScheduledTrainings(): Promise<any[]> {
+export async function listScheduledTrainings(): Promise<ScheduledTraining[]> {
   const { data, error } = await supabase
     .from('scheduled_training_visits')
     .select('*')
@@ -68,7 +114,7 @@ export async function deleteScheduledTraining(id: string): Promise<void> {
 }
 
 // ── Panel install needs ───────────────────────────────────────────────────────
-export async function listPanelInstallNeeds(): Promise<any[]> {
+export async function listPanelInstallNeeds(): Promise<PanelInstallNeed[]> {
   const { data, error } = await supabase
     .from('panel_install_needs')
     .select('*')
