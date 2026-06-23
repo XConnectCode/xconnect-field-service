@@ -373,6 +373,56 @@ export async function deleteScheduledJob(id: string): Promise<void> {
   }
 }
 
+/**
+ * Attach an existing unassigned activity to a job: stamp job_id, the next
+ * sequence number, and an inferred activity_type when the activity has none
+ * (ship-only → shipment, otherwise a generic visit). Then roll up job status.
+ */
+export async function assignActivityToJob(visit: ScheduledVisit, jobId: string): Promise<void> {
+  try {
+    const { data: existing, error: cErr } = await supabase
+      .from('scheduled_visits').select('id').eq('job_id', jobId);
+    if (cErr) throw cErr;
+    const seq = (existing?.length || 0) + 1;
+    const activityType = visit.activity_type
+      || (visit.fulfillment_type === 'ship_only' ? 'shipment' : 'visit');
+    const { error } = await supabase
+      .from('scheduled_visits')
+      .update({ job_id: jobId, sequence: seq, activity_type: activityType, updated_at: new Date().toISOString() })
+      .eq('id', visit.id);
+    if (error) throw error;
+    await rollUpJobStatus(jobId).catch(() => null);
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to add activity to job');
+    throw err;
+  }
+}
+
+/**
+ * Create a job from an unassigned activity's customer context, then attach the
+ * activity to it. Returns the new job.
+ */
+export async function createJobFromActivity(
+  visit: ScheduledVisit,
+  opts: { title?: string | null; createdBy?: string | null } = {},
+): Promise<ScheduledJob> {
+  try {
+    const job = await createScheduledJob({
+      title: opts.title?.trim() || visit.product_line || 'Job',
+      customer: visit.customer || null,
+      customer_district: visit.customer_district || null,
+      operating_company: visit.operating_company || null,
+      product_line: visit.product_line || null,
+      created_by: opts.createdBy || null,
+    });
+    await assignActivityToJob(visit, job.id);
+    return job;
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to create job from activity');
+    throw err;
+  }
+}
+
 // ── Real inventory panels (serial picker) ─────────────────────────────────────
 export interface AvailablePanel {
   row_id: string;
@@ -453,6 +503,49 @@ export async function markPanelsShipped(
       tracking_url: trackingUrl,
       panels,
     });
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to mark panels shipped');
+    throw err;
+  }
+}
+
+/**
+ * Ship a shipment activity scheduled by panel TYPE + qty (a need): the actual
+ * serials are chosen at ship time. Replaces the activity's child panel rows with
+ * one row per chosen serial (direct client — scheduler-owned table), then hands
+ * the real-panel writes to the `mark-panels-shipped` edge route via
+ * markPanelsShipped. Each selection may carry a per-panel tracking override.
+ */
+export async function markShipmentShipped(
+  visit: ScheduledVisit,
+  selections: { panel_row_id: string; panel_type: string | null; needed_by_date?: string | null; tracking_number?: string | null }[],
+  opts: { tracking_number?: string | null; tracking_url?: string | null } = {},
+): Promise<void> {
+  try {
+    const { error: delErr } = await supabase
+      .from('scheduled_visit_panels').delete().eq('visit_id', visit.id);
+    if (delErr) throw delErr;
+
+    const rows = selections.map((s) => ({
+      visit_id: visit.id,
+      panel_type: s.panel_type || 'Panel',
+      qty_needed: 1,
+      needed_by_date: s.needed_by_date || null,
+      tracking_number: s.tracking_number?.trim() || null,
+      tracking_url: null,
+      shipped_at: null,
+      panel_row_id: s.panel_row_id,
+    }));
+
+    let inserted: VisitPanel[] = [];
+    if (rows.length) {
+      const { data, error: insErr } = await supabase
+        .from('scheduled_visit_panels').insert(rows).select('*');
+      if (insErr) throw insErr;
+      inserted = (data || []) as VisitPanel[];
+    }
+
+    await markPanelsShipped({ ...visit, panels: inserted }, opts);
   } catch (err: any) {
     toast.error(err?.message || 'Failed to mark panels shipped');
     throw err;
