@@ -38,6 +38,7 @@ import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitRepo
 import { generateCombinedFieldVisitPDF } from '../lib/generateCombinedFieldVisitPDF';
 import { generateHardwareInspectionPDF } from '../lib/generateHardwareInspectionPDF';
 import { displayVisitDuration, toInputValue, formatVisitTimestamp } from '../lib/visitDuration';
+import PanelsSeenPicker from '../components/PanelsSeenPicker';
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const VISIT_PURPOSE_OPTS = [
@@ -55,11 +56,6 @@ const FIELD_OR_FACILITY_OPTS = ['Field', 'Facility'];
 
 const COMPLETE_STATUS = 'Complete';
 const isComplete = (v: any) => (v.visit_status || '').toLowerCase() === 'complete';
-
-// Panel types whose serials populate the equipment selects (FieldVisitForm parity).
-const DIGITAL_SHOOTING_PANEL = 'Digital Shooting Panel';
-const COMMUNICATION_PANEL = 'Communication Panel';
-const SURFACE_TESTER = 'Surface Tester';
 
 // ── Field helper ──────────────────────────────────────────────────────────────
 interface FieldProps {
@@ -123,6 +119,10 @@ export default function FieldVisitDetail() {
   const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [form, setForm] = useState<any>({});
+  // Unified multi-select of panel serials seen on this visit (replaces the 3
+  // legacy single dropdowns). Backed by the panels_seen JSON array; the 3 legacy
+  // columns are derived from it on save so existing readers/PDFs keep working.
+  const [panelsSeen, setPanelsSeen] = useState<string[]>([]);
 
   // Reference data (same sources as FieldVisitForm) for FK / enum selects.
   const [customers,   setCustomers]   = useState<any[]>([]);
@@ -161,9 +161,6 @@ export default function FieldVisitDetail() {
     supabase.from('districts').select('row_id,customer_district').eq('customer', custId).order('customer_district')
       .then(({ data }) => setDistricts(data || []));
   }, [editing, form.customer, visit?.customer]);
-
-  // Panel options filtered by type (FieldVisitForm.panelsByType parity).
-  const panelsByType = (type: string) => allPanels.filter((p) => p.panel_type === type);
 
   const loadVisit = async () => {
     if (!id || !accessToken) {
@@ -231,11 +228,19 @@ export default function FieldVisitDetail() {
       operating_company: visit.operating_company ?? '',
       pad_name: visit.pad_name ?? '',
       lat_long: visit.lat_long ?? '',
-      communication_panel: visit.communication_panel ?? '',
-      digital_shooting_panel: visit.digital_shooting_panel ?? '',
-      surface_tester: visit.surface_tester ?? '',
       visit_summary: visit.visit_summary ?? '',
     });
+    // Seed the unified picker: prefer panels_seen, fall back to the 3 legacy
+    // columns for visits saved before the unified field existed.
+    const arr: string[] = Array.isArray(visit.panels_seen) ? visit.panels_seen.filter(Boolean) : [];
+    if (arr.length > 0) {
+      setPanelsSeen(Array.from(new Set(arr.map((s: any) => String(s)))));
+    } else {
+      const legacy = [visit.digital_shooting_panel, visit.communication_panel, visit.surface_tester]
+        .map((s: any) => (s == null ? '' : String(s).trim()))
+        .filter((s: string) => s !== '');
+      setPanelsSeen(Array.from(new Set(legacy)));
+    }
     setEditing(true);
   }
 
@@ -248,6 +253,7 @@ export default function FieldVisitDetail() {
   function cancelEdit() {
     setEditing(false);
     setForm({});
+    setPanelsSeen([]);
   }
 
   function setField(name: string, value: string) {
@@ -285,7 +291,19 @@ export default function FieldVisitDetail() {
     }
     setSaving(true);
     try {
+      // Unified panels-seen list; derive the 3 legacy single-value columns (first
+      // selected of each type) so older reads / PDFs still work. Sending
+      // panels_seen also triggers the server's stampPanelsSeen (verified='Y' +
+      // last-seen) on each listed panel.
+      const seenList = Array.from(new Set(panelsSeen.map(s => String(s).trim()).filter(Boolean)));
+      const typeOf = (serial: string) => {
+        const p = allPanels.find(pp => getSerial(pp) === serial);
+        return p?.panel_type || '';
+      };
+      const firstOfType = (type: string) => seenList.find(s => typeOf(s) === type) || null;
       const payload = {
+        // field_visit_id lets the server stamp last_seen_visit_id correctly.
+        field_visit_id: visit?.field_visit_id,
         visit_purpose: form.visit_purpose || null,
         field_or_facility: form.field_or_facility || null,
         // Persist the datetime-local strings verbatim (naive wall-clock), matching
@@ -301,9 +319,10 @@ export default function FieldVisitDetail() {
         operating_company: form.operating_company || null,
         pad_name: form.pad_name || null,
         lat_long: form.lat_long || null,
-        communication_panel: form.communication_panel || null,
-        digital_shooting_panel: form.digital_shooting_panel || null,
-        surface_tester: form.surface_tester || null,
+        panels_seen: seenList,
+        communication_panel: firstOfType('Communication Panel'),
+        digital_shooting_panel: firstOfType('Digital Shooting Panel'),
+        surface_tester: firstOfType('Surface Tester'),
         visit_summary: form.visit_summary || null,
         // Always stamp the saving user + today's date on edit (form parity).
         updated_by: user?.name || user?.email || null,
@@ -313,6 +332,7 @@ export default function FieldVisitDetail() {
       toast.success('Field visit updated successfully');
       setEditing(false);
       setForm({});
+      setPanelsSeen([]);
       await loadVisit();
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to save field visit');
@@ -920,65 +940,45 @@ export default function FieldVisitDetail() {
               </CardContent>
             </Card>
 
-            {/* Section: Equipment */}
+            {/* Section: Panels Seen — unified multi-select (edit) / chip list (read). */}
             <Card className="rounded-xl">
               <CardHeader>
-                <CardTitle className="text-base">Equipment</CardTitle>
+                <CardTitle className="text-base">Panels Seen</CardTitle>
               </CardHeader>
-              <CardContent className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-                {/* Communication Panel — serials filtered by panel_type (form parity). */}
-                <Field
-                  label="Communication Panel"
-                  value={visit.communication_panel}
-                  editing={editing}
-                >
-                  <select
-                    value={form.communication_panel ?? ''}
-                    onChange={(e) => setField('communication_panel', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">— None —</option>
-                    {panelsByType(COMMUNICATION_PANEL).map((p) => (
-                      <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
-                    ))}
-                  </select>
-                </Field>
-
-                {/* Digital Shooting Panel — serials filtered by panel_type (form parity). */}
-                <Field
-                  label="Digital Shooting Panel"
-                  value={visit.digital_shooting_panel}
-                  editing={editing}
-                >
-                  <select
-                    value={form.digital_shooting_panel ?? ''}
-                    onChange={(e) => setField('digital_shooting_panel', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">— None —</option>
-                    {panelsByType(DIGITAL_SHOOTING_PANEL).map((p) => (
-                      <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
-                    ))}
-                  </select>
-                </Field>
-
-                {/* Surface Tester — serials filtered by panel_type (form parity). */}
-                <Field
-                  label="Surface Tester"
-                  value={visit.surface_tester}
-                  editing={editing}
-                >
-                  <select
-                    value={form.surface_tester ?? ''}
-                    onChange={(e) => setField('surface_tester', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">— None —</option>
-                    {panelsByType(SURFACE_TESTER).map((p) => (
-                      <option key={getSerial(p)} value={getSerial(p)}>{getSerial(p)}</option>
-                    ))}
-                  </select>
-                </Field>
+              <CardContent>
+                {editing ? (
+                  <PanelsSeenPicker panels={allPanels} value={panelsSeen} onChange={setPanelsSeen} />
+                ) : (
+                  (() => {
+                    const seen: string[] = Array.isArray(visit.panels_seen) && visit.panels_seen.length > 0
+                      ? visit.panels_seen.filter(Boolean).map((s: any) => String(s))
+                      : [visit.digital_shooting_panel, visit.communication_panel, visit.surface_tester]
+                          .map((s: any) => (s == null ? '' : String(s).trim()))
+                          .filter((s: string) => s !== '');
+                    const uniq = Array.from(new Set(seen));
+                    const typeBySerial = new Map<string, string>(
+                      allPanels.map((p) => [getSerial(p), p.panel_type || ''])
+                    );
+                    if (uniq.length === 0) {
+                      return <p className="text-sm text-gray-500 dark:text-gray-400">— No panels recorded —</p>;
+                    }
+                    return (
+                      <div className="flex flex-wrap gap-1.5">
+                        {uniq.map((serial) => {
+                          const t = typeBySerial.get(serial);
+                          return (
+                            <span
+                              key={serial}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-blue-600 text-white"
+                            >
+                              {serial}{t ? <span className="opacity-70">· {t}</span> : null}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
+                )}
               </CardContent>
             </Card>
 

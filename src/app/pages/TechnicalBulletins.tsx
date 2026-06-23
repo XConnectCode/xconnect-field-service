@@ -287,7 +287,7 @@ export default function TechnicalBulletins() {
                     className={`cursor-pointer ${
                       severityFilter === severity
                         ? getSeverityColor(severity) + ' border-2'
-                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                        : 'bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                     }`}
                     onClick={() => setSeverityFilter(severity)}
                   >

@@ -300,7 +300,7 @@ export default function Reports() {
 
   return (
     <div className="p-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[1600px] mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 tracking-tight">Performance Analytics</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">Operational KPIs and production reliability metrics</p>

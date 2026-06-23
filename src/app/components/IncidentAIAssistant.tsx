@@ -277,24 +277,24 @@ export default function IncidentAIAssistant({
       // click falls through to the Dialog overlay and dismisses the modal.
       // Forcing pointer-events:auto here re-enables interaction with the panel.
       style={{ pointerEvents: 'auto' }}
-      className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-2xl"
+      className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-md flex-col border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-slate-900 shadow-2xl"
     >
-      <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3 shrink-0">
+      <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3 shrink-0">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-indigo-600" />
-          <h2 className="text-sm font-semibold text-gray-900">AI Assistant</h2>
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">AI Assistant</h2>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded p-1 text-gray-500 hover:bg-gray-100"
+          className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
           aria-label="Close AI assistant"
         >
           <X className="h-4 w-4" />
         </button>
       </header>
 
-      <div className="flex border-b border-gray-200 shrink-0">
+      <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
         <button
           type="button"
           onClick={() => setMode('rewrite')}
@@ -323,14 +323,14 @@ export default function IncidentAIAssistant({
         {mode === 'rewrite' && (
           <>
             <div>
-              <Label className="text-xs font-semibold text-gray-600 mb-1 block">Field</Label>
+              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Field</Label>
               <select
                 value={field}
                 onChange={(e) => {
                   const v = e.target.value;
                   if (isAssistantFieldName(v)) onFieldChange(v);
                 }}
-                className="w-full border border-gray-300 rounded-md p-2 text-sm"
+                className="w-full border border-gray-300 dark:border-gray-700 dark:bg-slate-800 dark:text-gray-100 rounded-md p-2 text-sm"
               >
                 {ASSISTANT_FIELDS.map((f) => (
                   <option key={f} value={f}>{FIELD_LABELS[f]}</option>
@@ -339,10 +339,10 @@ export default function IncidentAIAssistant({
             </div>
 
             <div>
-              <Label className="text-xs font-semibold text-gray-600 mb-1 block">Current text</Label>
-              <div className="rounded-md border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700 max-h-40 overflow-y-auto whitespace-pre-wrap">
+              <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Current text</Label>
+              <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-2 text-xs text-gray-700 dark:text-gray-300 max-h-40 overflow-y-auto whitespace-pre-wrap">
                 {getFieldText(field).trim() || (
-                  <span className="text-gray-400">(empty — type notes in the form first)</span>
+                  <span className="text-gray-400 dark:text-gray-500">(empty — type notes in the form first)</span>
                 )}
               </div>
             </div>
@@ -392,7 +392,7 @@ export default function IncidentAIAssistant({
                   value={suggestion}
                   onChange={(e) => setSuggestion(e.target.value)}
                   rows={8}
-                  className="bg-white text-sm"
+                  className="bg-white dark:bg-slate-800 text-sm"
                 />
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" size="sm" onClick={accept} className="gap-1">
@@ -415,8 +415,8 @@ export default function IncidentAIAssistant({
 
         {mode === 'review' && (
           <>
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 space-y-1">
-              <p className="font-semibold text-gray-800">Full-report review</p>
+            <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-3 text-xs text-gray-700 dark:text-gray-300 space-y-1">
+              <p className="font-semibold text-gray-800 dark:text-gray-200">Full-report review</p>
               <p>
                 Checks for status contradictions, vague preventive actions, missing
                 measurements, symptom→cause gaps, typos, and placeholders.
@@ -443,7 +443,7 @@ export default function IncidentAIAssistant({
             )}
 
             {sortedFindings && sortedFindings.length === 0 && (
-              <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+              <div className="rounded-md border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/40 p-3 text-sm text-green-800 dark:text-green-300">
                 No issues found. The report looks ready.
               </div>
             )}
@@ -457,10 +457,10 @@ export default function IncidentAIAssistant({
                       key={`${f.field}-${i}`}
                       className={`rounded-md border p-3 text-xs space-y-1 ${
                         f.severity === 'high'
-                          ? 'border-red-200 bg-red-50'
+                          ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40'
                           : f.severity === 'medium'
-                          ? 'border-amber-200 bg-amber-50'
-                          : 'border-gray-200 bg-gray-50'
+                          ? 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40'
+                          : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -474,12 +474,12 @@ export default function IncidentAIAssistant({
                             {FIELD_LABELS[f.field as AssistantField] || f.field}
                           </button>
                         ) : (
-                          <span className="text-[11px] font-mono text-gray-600">{f.field}</span>
+                          <span className="text-[11px] font-mono text-gray-600 dark:text-gray-400">{f.field}</span>
                         )}
                       </div>
-                      <p className="text-gray-900 font-medium">{f.issue}</p>
+                      <p className="text-gray-900 dark:text-gray-100 font-medium">{f.issue}</p>
                       {f.suggestion && (
-                        <p className="text-gray-700">
+                        <p className="text-gray-700 dark:text-gray-300">
                           <span className="font-semibold">Suggestion: </span>
                           {f.suggestion}
                         </p>
@@ -493,7 +493,7 @@ export default function IncidentAIAssistant({
         )}
       </div>
 
-      <footer className="border-t border-gray-200 px-4 py-2 shrink-0 text-[11px] text-gray-500">
+      <footer className="border-t border-gray-200 dark:border-gray-700 px-4 py-2 shrink-0 text-[11px] text-gray-500 dark:text-gray-400">
         AI suggestions are advisory. Always verify before sending to a customer.
       </footer>
     </div>
