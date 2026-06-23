@@ -578,6 +578,171 @@ apiRoutes.delete("/fieldvisits/:id", requireAdmin, async (c) => {
   }
 });
 
+// ============ SCHEDULER (service-role inventory writes) ============
+// These two routes relocate the only scheduler writes that touch RLS-guarded
+// inventory tables (panels UPDATE, fieldvisits INSERT) off the anon client and
+// onto this SERVICE_ROLE router. All other scheduler CRUD (scheduled_jobs /
+// scheduled_visits / scheduled_visit_panels) stays on the direct anon client.
+
+// Server-side mirror of the client rollUpJobStatus: flips activities whose
+// linked field visit is completed, then derives the job's status from its
+// (non-cancelled) activities. Cancelled jobs are left untouched.
+const rollUpJobStatusServer = async (jobId: string): Promise<string | null> => {
+  const { data: acts } = await supabase
+    .from('scheduled_visits')
+    .select('id, status, field_visit_id')
+    .eq('job_id', jobId);
+  const activities = (acts || []) as any[];
+
+  const linkedIds = activities.map((a) => a.field_visit_id).filter(Boolean);
+  const completedFvSet = new Set<string>();
+  if (linkedIds.length) {
+    const { data: fvs } = await supabase
+      .from('fieldvisits').select('field_visit_id, completed_at').in('field_visit_id', linkedIds);
+    for (const fv of (fvs || []) as any[]) {
+      if (fv.completed_at) completedFvSet.add(String(fv.field_visit_id));
+    }
+  }
+  for (const a of activities) {
+    if (a.field_visit_id && completedFvSet.has(String(a.field_visit_id)) && a.status !== 'completed') {
+      await supabase
+        .from('scheduled_visits')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('id', a.id);
+      a.status = 'completed';
+    }
+  }
+
+  const { data: jobRow } = await supabase
+    .from('scheduled_jobs').select('status').eq('id', jobId).maybeSingle();
+  if (jobRow?.status === 'cancelled') return 'cancelled';
+
+  const live = activities.filter((a) => a.status !== 'cancelled');
+  let next = 'open';
+  if (live.length && live.every((a) => a.status === 'completed')) {
+    next = 'completed';
+  } else if (live.some((a) => a.status && a.status !== 'planned')) {
+    next = 'in_progress';
+  }
+  await supabase
+    .from('scheduled_jobs')
+    .update({ status: next, updated_at: new Date().toISOString() })
+    .eq('id', jobId);
+  return next;
+};
+
+// Mark a shipment activity shipped: stamp live panels 'In Transit' with tracking
+// + customer context, stamp the child scheduled_visit_panels, flip the visit to
+// 'shipped', then roll up the parent job. customer/district/operating_company
+// and tracking are pre-resolved by the caller and sent in the body.
+apiRoutes.post("/mark-panels-shipped", async (c) => {
+  try {
+    const body = await c.req.json();
+    const now = new Date().toISOString();
+    const tracking = body.tracking_number ?? null;
+    const trackingUrl = body.tracking_url ?? null;
+    const panels = Array.isArray(body.panels) ? body.panels : [];
+
+    for (const p of panels) {
+      if (p.panel_row_id) {
+        const { error: panErr } = await supabase
+          .from('panels')
+          .update({
+            panel_status: 'In Transit',
+            tracking_info: p.panel_tracking_number ?? tracking,
+            customer: body.customer ?? null,
+            customer_district: body.customer_district ?? null,
+            operating_company: body.operating_company ?? null,
+          })
+          .eq('row_id', p.panel_row_id);
+        if (panErr) {
+          console.error('Error updating panel on ship:', panErr);
+          return c.json({ error: panErr.message }, 500);
+        }
+      }
+      if (p.scheduled_visit_panel_id) {
+        const { error: cpErr } = await supabase
+          .from('scheduled_visit_panels')
+          .update({ shipped_at: now, updated_at: now })
+          .eq('id', p.scheduled_visit_panel_id);
+        if (cpErr) {
+          console.error('Error stamping scheduled_visit_panel on ship:', cpErr);
+          return c.json({ error: cpErr.message }, 500);
+        }
+      }
+    }
+
+    const { data: visit, error } = await supabase
+      .from('scheduled_visits')
+      .update({
+        status: 'shipped',
+        shipped_at: now,
+        updated_at: now,
+        tracking_number: tracking,
+        tracking_url: trackingUrl,
+      })
+      .eq('id', body.visit_id)
+      .select('*')
+      .single();
+    if (error) {
+      console.error('Error marking visit shipped:', error);
+      return c.json({ error: error.message }, 500);
+    }
+
+    let jobStatus: string | null = null;
+    if (body.job_id) jobStatus = await rollUpJobStatusServer(body.job_id);
+
+    return c.json({ ok: true, visit, job_status: jobStatus });
+  } catch (error) {
+    console.error('Error in mark-panels-shipped endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Start a field visit for an install/training activity: insert the prefilled
+// fieldvisits row and link it back to the scheduled_visit. field_visit_id and
+// the prefilled columns are assembled by the caller and sent in the body.
+apiRoutes.post("/start-field-visit", async (c) => {
+  try {
+    const body = await c.req.json();
+    const fv = body.fieldvisit || {};
+
+    const { data, error } = await supabase
+      .from('fieldvisits')
+      .insert({
+        field_visit_id: body.field_visit_id,
+        arrival_date: fv.arrival_date ?? null,
+        visit_purpose: fv.visit_purpose ?? null,
+        field_or_facility: fv.field_or_facility ?? null,
+        customer: fv.customer ?? null,
+        customer_district: fv.customer_district ?? null,
+        operating_company: fv.operating_company ?? null,
+        xc_rep: fv.xc_rep ?? null,
+        panels_seen: fv.panels_seen ?? [],
+      })
+      .select('row_id, field_visit_id')
+      .single();
+    if (error) {
+      console.error('Error creating field visit (scheduler):', error);
+      return c.json({ error: error.message }, 500);
+    }
+
+    const { error: linkErr } = await supabase
+      .from('scheduled_visits')
+      .update({ field_visit_id: data.field_visit_id, updated_at: new Date().toISOString() })
+      .eq('id', body.visit_id);
+    if (linkErr) {
+      console.error('Error linking scheduled_visit to field visit:', linkErr);
+      return c.json({ error: linkErr.message }, 500);
+    }
+
+    return c.json({ field_visit_id: data.field_visit_id, row_id: data.row_id });
+  } catch (error) {
+    console.error('Error in start-field-visit endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // ============ INCIDENTS ============
 
 apiRoutes.get("/incidents", async (c) => {

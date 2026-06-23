@@ -14,6 +14,7 @@
  * FK strings (same as fieldvisits) and are resolved to display names in the UI.
  */
 import { supabase } from './supabase';
+import { schedulerApi } from './api';
 import { toast } from 'sonner';
 
 // Fixed panel-type list for scheduled_visit_panels.panel_type.
@@ -46,6 +47,30 @@ export const FULFILLMENT_TYPES = [
   { value: 'ship_only', label: 'Ship-only (panels only)' },
 ];
 
+// Activity types for a job's child activities (scheduled_visits.activity_type).
+// Each carries a label plus tailwind tone tokens for badges/calendar bands.
+export const ACTIVITY_TYPES = [
+  { value: 'shipment', label: 'Shipment', tone: 'amber',
+    badge: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+    dot: 'bg-amber-500', band: 'border-amber-300 dark:border-amber-700' },
+  { value: 'install', label: 'Install', tone: 'blue',
+    badge: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+    dot: 'bg-blue-500', band: 'border-blue-300 dark:border-blue-700' },
+  { value: 'training', label: 'Training', tone: 'green',
+    badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+    dot: 'bg-emerald-500', band: 'border-emerald-300 dark:border-emerald-700' },
+  { value: 'visit', label: 'Visit', tone: 'slate',
+    badge: 'bg-slate-100 text-slate-800 dark:bg-slate-800/60 dark:text-slate-300',
+    dot: 'bg-slate-500', band: 'border-slate-300 dark:border-slate-600' },
+];
+
+export function activityMeta(type: string | null | undefined) {
+  return ACTIVITY_TYPES.find((a) => a.value === type) || ACTIVITY_TYPES[3];
+}
+
+// Job lifecycle statuses (scheduled_jobs.status).
+export const JOB_STATUSES = ['open', 'in_progress', 'completed', 'cancelled'];
+
 // ── Record shapes ─────────────────────────────────────────────────────────────
 export interface VisitPanel {
   id?: string;
@@ -57,6 +82,7 @@ export interface VisitPanel {
   tracking_number?: string | null;
   tracking_url?: string | null;
   shipped_at?: string | null;
+  panel_row_id?: string | null; // refs panels.row_id when a real serial is chosen
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -77,10 +103,30 @@ export interface ScheduledVisit {
   tracking_number?: string | null;
   tracking_url?: string | null;
   shipped_at?: string | null;
+  job_id?: string | null;
+  sequence?: number | null;
+  activity_type?: string | null; // 'shipment' | 'install' | 'training' | 'visit'
+  field_visit_id?: string | null;
   created_by?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   panels?: VisitPanel[];
+}
+
+export interface ScheduledJob {
+  id: string;
+  title: string | null;
+  customer: string | null;
+  customer_district: string | null;
+  operating_company: string | null;
+  pad_name: string | null;
+  product_line: string | null;
+  status: string | null; // 'open' | 'in_progress' | 'completed' | 'cancelled'
+  notes: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  activities?: ScheduledVisit[];
 }
 
 // ── Scheduled visits (with child panels) ──────────────────────────────────────
@@ -121,6 +167,7 @@ function panelInsertRows(visitId: string, panels: VisitPanel[]) {
       tracking_number: p.tracking_number?.trim() || null,
       tracking_url: p.tracking_url?.trim() || null,
       shipped_at: p.shipped_at || null,
+      panel_row_id: p.panel_row_id || null,
     }));
 }
 
@@ -215,6 +262,316 @@ export async function markVisitShipped(
     toast.error(err?.message || 'Failed to mark shipped');
     throw err;
   }
+}
+
+// ── Scheduled jobs (umbrella) ─────────────────────────────────────────────────
+/**
+ * List jobs, each with its nested activities (scheduled_visits) and their
+ * panels. One round trip per table, then stitched client-side.
+ */
+export async function listScheduledJobs(): Promise<ScheduledJob[]> {
+  const { data: jobs, error } = await supabase
+    .from('scheduled_jobs')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const jobRows = (jobs || []) as ScheduledJob[];
+  if (!jobRows.length) return [];
+
+  const jobIds = jobRows.map((j) => j.id);
+  const { data: acts, error: aErr } = await supabase
+    .from('scheduled_visits')
+    .select('*')
+    .in('job_id', jobIds)
+    .order('sequence', { ascending: true });
+  if (aErr) throw aErr;
+  const activities = (acts || []) as ScheduledVisit[];
+
+  const actIds = activities.map((a) => a.id);
+  let panelsByVisit: Record<string, VisitPanel[]> = {};
+  if (actIds.length) {
+    const { data: panels, error: pErr } = await supabase
+      .from('scheduled_visit_panels')
+      .select('*')
+      .in('visit_id', actIds);
+    if (pErr) throw pErr;
+    for (const p of (panels || []) as VisitPanel[]) {
+      const vid = p.visit_id as string;
+      (panelsByVisit[vid] || (panelsByVisit[vid] = [])).push(p);
+    }
+  }
+
+  const byJob: Record<string, ScheduledVisit[]> = {};
+  for (const a of activities) {
+    const withPanels = { ...a, categories: a.categories || [], panels: panelsByVisit[a.id] || [] };
+    (byJob[a.job_id as string] || (byJob[a.job_id as string] = [])).push(withPanels);
+  }
+  return jobRows.map((j) => ({ ...j, activities: byJob[j.id] || [] }));
+}
+
+/** Fetch a single job's activities (with panels). */
+export async function listActivitiesForJob(jobId: string): Promise<ScheduledVisit[]> {
+  const { data: acts, error } = await supabase
+    .from('scheduled_visits')
+    .select('*')
+    .eq('job_id', jobId)
+    .order('sequence', { ascending: true });
+  if (error) throw error;
+  const activities = (acts || []) as ScheduledVisit[];
+  if (!activities.length) return [];
+  const ids = activities.map((a) => a.id);
+  const { data: panels, error: pErr } = await supabase
+    .from('scheduled_visit_panels').select('*').in('visit_id', ids);
+  if (pErr) throw pErr;
+  const byVisit: Record<string, VisitPanel[]> = {};
+  for (const p of (panels || []) as VisitPanel[]) {
+    const vid = p.visit_id as string;
+    (byVisit[vid] || (byVisit[vid] = [])).push(p);
+  }
+  return activities.map((a) => ({ ...a, categories: a.categories || [], panels: byVisit[a.id] || [] }));
+}
+
+export async function createScheduledJob(jobData: Partial<ScheduledJob>): Promise<ScheduledJob> {
+  try {
+    const { data, error } = await supabase
+      .from('scheduled_jobs')
+      .insert({ ...jobData, status: jobData.status || 'open' })
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data as ScheduledJob;
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to create job');
+    throw err;
+  }
+}
+
+export async function updateScheduledJob(id: string, jobData: Partial<ScheduledJob>): Promise<ScheduledJob> {
+  try {
+    const { data, error } = await supabase
+      .from('scheduled_jobs')
+      .update({ ...jobData, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data as ScheduledJob;
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to update job');
+    throw err;
+  }
+}
+
+/** Delete a job. Activities keep existing (job_id SET NULL via FK) as standalone. */
+export async function deleteScheduledJob(id: string): Promise<void> {
+  try {
+    const { error } = await supabase.from('scheduled_jobs').delete().eq('id', id);
+    if (error) throw error;
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to delete job');
+    throw err;
+  }
+}
+
+// ── Real inventory panels (serial picker) ─────────────────────────────────────
+export interface AvailablePanel {
+  row_id: string;
+  serial_number: string | null;
+  panel_type: string | null;
+  panel_status: string | null;
+  firmware?: string | null;
+  customer?: string | null;
+}
+
+/**
+ * Real panels for the serial picker. Sorted so 'At Facility' (ready to ship)
+ * surfaces first, then by serial. Optional panel_type filter narrows the list.
+ */
+export async function listAvailablePanels(panelType?: string): Promise<AvailablePanel[]> {
+  let q = supabase
+    .from('panels')
+    .select('row_id, serial_number, panel_type, panel_status, firmware, customer');
+  if (panelType) q = q.eq('panel_type', panelType);
+  const { data, error } = await q.order('serial_number', { ascending: true });
+  if (error) { console.error('listAvailablePanels error:', error); return []; }
+  const rows = (data || []) as AvailablePanel[];
+  const atFacility = (s: string | null) => (s || '').toLowerCase() === 'at facility';
+  return rows.sort((a, b) => {
+    const af = Number(atFacility(b.panel_status)) - Number(atFacility(a.panel_status));
+    if (af !== 0) return af;
+    return String(a.serial_number || '').localeCompare(String(b.serial_number || ''));
+  });
+}
+
+/**
+ * Mark a shipment activity shipped. For each child panel that references a real
+ * inventory panel (panel_row_id), the live panels row is updated to
+ * 'In Transit' with tracking + the job/visit customer context. The child panel
+ * gets shipped_at, and the activity flips to status='shipped'.
+ */
+export async function markPanelsShipped(
+  visit: ScheduledVisit,
+  opts: { tracking_number?: string | null; tracking_url?: string | null } = {},
+): Promise<void> {
+  try {
+    const tracking = opts.tracking_number?.trim() || visit.tracking_number?.trim() || null;
+    const trackingUrl = opts.tracking_url?.trim() || visit.tracking_url?.trim() || null;
+
+    // Resolve customer context (prefer the visit's own, fall back to its job).
+    let cust = visit.customer || null;
+    let dist = visit.customer_district || null;
+    let opCo = visit.operating_company || null;
+    if (visit.job_id && (!cust || !dist || !opCo)) {
+      const { data: job } = await supabase
+        .from('scheduled_jobs')
+        .select('customer, customer_district, operating_company')
+        .eq('id', visit.job_id).maybeSingle();
+      if (job) {
+        cust = cust || job.customer;
+        dist = dist || job.customer_district;
+        opCo = opCo || job.operating_company;
+      }
+    }
+
+    // The actual inventory writes (panels UPDATE, scheduled_visit_panels +
+    // scheduled_visits stamps, and the job roll-up) run server-side under the
+    // service-role edge route — `panels` RLS has no anon write grant. We only
+    // resolve/serialize the values here and hand them to the route.
+    const panels = (visit.panels || []).map((p) => ({
+      scheduled_visit_panel_id: p.id || null,
+      panel_row_id: p.panel_row_id || null,
+      panel_tracking_number: p.tracking_number?.trim() || null,
+    }));
+
+    await schedulerApi.markPanelsShipped({
+      visit_id: visit.id,
+      job_id: visit.job_id || null,
+      customer: cust,
+      customer_district: dist,
+      operating_company: opCo,
+      tracking_number: tracking,
+      tracking_url: trackingUrl,
+      panels,
+    });
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to mark panels shipped');
+    throw err;
+  }
+}
+
+// ── Field-visit linkage ───────────────────────────────────────────────────────
+/** Next sequential numeric field_visit_id, scanning all rows (text-sorted col). */
+async function nextFieldVisitId(): Promise<string> {
+  const PAGE = 1000;
+  let from = 0;
+  let maxId = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('fieldvisits').select('field_visit_id').range(from, from + PAGE - 1);
+    if (error || !data) break;
+    for (const row of data as any[]) {
+      const n = parseInt(row.field_visit_id, 10);
+      if (!isNaN(n) && n > maxId) maxId = n;
+    }
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return String(maxId + 1);
+}
+
+export interface StartedFieldVisit { field_visit_id: string; row_id: string; }
+
+/**
+ * Create a fieldvisits row prefilled from an install/training activity, link it
+ * both ways (scheduled_visits.field_visit_id ↔ fieldvisits.field_visit_id), and
+ * return the new IDs. panels_seen is seeded from the activity's panel serials.
+ */
+export async function startFieldVisitForActivity(visit: ScheduledVisit): Promise<StartedFieldVisit> {
+  try {
+    const fvId = await nextFieldVisitId();
+
+    // Seed panels_seen from the activity's real-panel serials (if any).
+    let panelsSeen: string[] = [];
+    const rowIds = (visit.panels || []).map((p) => p.panel_row_id).filter(Boolean) as string[];
+    if (rowIds.length) {
+      const { data: pr } = await supabase
+        .from('panels').select('serial_number').in('row_id', rowIds);
+      panelsSeen = (pr || []).map((r: any) => r.serial_number).filter(Boolean);
+    }
+
+    const purpose = visit.activity_type
+      ? activityMeta(visit.activity_type).label
+      : (visit.categories || []).join(', ') || null;
+
+    // The fieldvisits INSERT + scheduled_visits link run server-side under the
+    // service-role edge route — `fieldvisits` RLS has no anon write grant.
+    const res = await schedulerApi.startFieldVisit({
+      visit_id: visit.id,
+      field_visit_id: fvId,
+      fieldvisit: {
+        arrival_date: visit.planned_date || null,
+        visit_purpose: purpose,
+        field_or_facility: 'Field',
+        customer: visit.customer || null,
+        customer_district: visit.customer_district || null,
+        operating_company: visit.operating_company || null,
+        xc_rep: visit.sqm_name || null,
+        panels_seen: panelsSeen,
+      },
+    });
+
+    return { field_visit_id: res.field_visit_id, row_id: res.row_id };
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to start field visit');
+    throw err;
+  }
+}
+
+/**
+ * Roll up a job's status from its activities. An activity linked to a completed
+ * field visit is flipped to 'completed' first. Then: all activities completed →
+ * job 'completed'; any started (not planned) → 'in_progress'; else 'open'.
+ * Cancelled jobs are left untouched.
+ */
+export async function rollUpJobStatus(jobId: string): Promise<string | null> {
+  const activities = await listActivitiesForJob(jobId);
+
+  // Flip activities whose linked field visit is completed.
+  const linkedIds = activities.map((a) => a.field_visit_id).filter(Boolean) as string[];
+  let completedFvSet = new Set<string>();
+  if (linkedIds.length) {
+    const { data: fvs } = await supabase
+      .from('fieldvisits').select('field_visit_id, completed_at').in('field_visit_id', linkedIds);
+    for (const fv of (fvs || []) as any[]) {
+      if (fv.completed_at) completedFvSet.add(String(fv.field_visit_id));
+    }
+  }
+  for (const a of activities) {
+    if (a.field_visit_id && completedFvSet.has(String(a.field_visit_id)) && a.status !== 'completed') {
+      await supabase
+        .from('scheduled_visits')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('id', a.id);
+      a.status = 'completed';
+    }
+  }
+
+  const { data: jobRow } = await supabase
+    .from('scheduled_jobs').select('status').eq('id', jobId).maybeSingle();
+  if (jobRow?.status === 'cancelled') return 'cancelled';
+
+  const live = activities.filter((a) => a.status !== 'cancelled');
+  let next = 'open';
+  if (live.length && live.every((a) => a.status === 'completed')) {
+    next = 'completed';
+  } else if (live.some((a) => a.status && a.status !== 'planned')) {
+    next = 'in_progress';
+  }
+  await supabase
+    .from('scheduled_jobs')
+    .update({ status: next, updated_at: new Date().toISOString() })
+    .eq('id', jobId);
+  return next;
 }
 
 // ── Picker / reference data ───────────────────────────────────────────────────
