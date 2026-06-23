@@ -559,6 +559,18 @@ export default function FieldVisitDetail() {
     return name;
   }
 
+  // A session's `customer` field stores `customers.row_id` (a raw nanoid), not a
+  // display name. Resolve it to the readable customer name; if it can't be
+  // resolved and still looks like a raw id, omit it rather than leak the UID.
+  function sessionCustomerLabel(s: ChecklistSession): string | null {
+    const raw = (s.customer || '').trim();
+    if (!raw) return null;
+    const match = customers.find((c) => c.row_id === raw);
+    if (match?.customer) return match.customer;
+    if (/^[A-Za-z0-9_-]{20,}$/.test(raw)) return null;
+    return raw;
+  }
+
   // ── format helpers ──────────────────────────────────────────────────────────
   function fmtDate(val: string | null | undefined) {
     // Render the stored wall-clock verbatim (no time-zone conversion) so the
@@ -1165,7 +1177,7 @@ export default function FieldVisitDetail() {
                               </div>
                               <p className="text-xs text-gray-500 mt-0.5">
                                 {[
-                                  s.customer || null,
+                                  sessionCustomerLabel(s),
                                   s.trainer_name ? `SQM: ${s.trainer_name}` : null,
                                   s.training_date ? new Date(s.training_date + 'T12:00:00').toLocaleDateString() : null,
                                 ].filter(Boolean).join(' · ')}
@@ -1339,7 +1351,7 @@ export default function FieldVisitDetail() {
                       </p>
                       <p className="text-xs text-gray-500 truncate">
                         {[
-                          s.customer || null,
+                          sessionCustomerLabel(s),
                           s.trainer_name ? `SQM: ${s.trainer_name}` : null,
                           s.training_date ? new Date(s.training_date + 'T12:00:00').toLocaleDateString() : null,
                         ].filter(Boolean).join(' · ')}

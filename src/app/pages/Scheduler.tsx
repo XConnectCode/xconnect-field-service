@@ -1573,11 +1573,14 @@ export default function Scheduler() {
                 )}
                 {(detailJob.activities || []).map((v) => (
                   <div key={v.id} className={`rounded-md border border-border bg-card p-3 border-l-4 ${activityMeta(v.activity_type).band}`}>
-                    <div className="flex items-center flex-wrap gap-2 mb-1">
-                      <ActivityBadge type={v.activity_type} />
-                      <StatusBadge status={v.status} />
-                      {isShipped(v) && <ShippedBadge />}
-                      <span className="text-xs text-muted-foreground">{prettyDate(visitCalendarDate(v))}</span>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="flex items-center flex-wrap gap-2">
+                        <ActivityBadge type={v.activity_type} />
+                        <StatusBadge status={v.status} />
+                        {isShipped(v) && <ShippedBadge />}
+                        <span className="text-xs text-muted-foreground">{prettyDate(visitCalendarDate(v))}</span>
+                      </div>
+                      <button onClick={() => setDeleteTarget(v)} className="text-muted-foreground hover:text-red-500 shrink-0" aria-label="Delete activity"><Trash className="w-4 h-4" /></button>
                     </div>
                     {(v.tracking_number || v.tracking_url) && (
                       <div className="text-xs mb-1"><TrackingCell number={v.tracking_number} url={v.tracking_url} /></div>
