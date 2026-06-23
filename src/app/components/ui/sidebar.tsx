@@ -19,7 +19,7 @@ import {
   LayoutDashboard, Users, ClipboardList, AlertTriangle,
   Cpu, TrendingUp, FileBarChart,
   Sun, Moon, LogOut, Map, FileText, BarChart3,
-  ListChecks, FolderOpen, GraduationCap,
+  ListChecks, FolderOpen, GraduationCap, CalendarClock,
 } from 'lucide-react';
 
 type Role = 'admin' | 'sqm' | 'ops';
@@ -36,6 +36,7 @@ const NAV_GROUPS = [
   {
     label: 'Operations',
     items: [
+      { path: '/scheduler',       label: 'Scheduler',     icon: CalendarClock,   roles: ['admin', 'sqm'] as Role[] },
       { path: '/field-visits',    label: 'Field Visits',  icon: ClipboardList,   roles: ['admin', 'sqm'] as Role[] },
       { path: '/field-visit-map', label: 'Visit Map',     icon: Map,             roles: ['admin', 'sqm'] as Role[] },
       { path: '/incidents',       label: 'Incidents',     icon: AlertTriangle,   roles: ['admin', 'sqm'] as Role[] },
