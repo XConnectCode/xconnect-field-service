@@ -1,12 +1,17 @@
 /**
  * Scheduler.tsx
- * Upcoming SQM training visits + panel install needs.
+ * Unified scheduled visits + panel needs.
+ *
+ * A single record type (scheduled_visits) covers both:
+ *   • on_site  — an SQM visit on a planned_date (blue on the calendar).
+ *   • ship_only — panels shipped to a customer; plotted on the earliest panel
+ *     needed_by_date (amber on the calendar).
+ * Each visit owns zero-or-more child panels (scheduled_visit_panels).
  *
  * Two views:
  *   • Calendar (default) — month grid (react-day-picker via shadcn Calendar)
- *     with colored dots per day (blue = trainings, amber = panel needs).
- *     Clicking a day lists that day's items below.
- *   • List — Upcoming Trainings + Panel Needs as sortable tables with filters.
+ *     with colored dots per day (blue = on-site visit, amber = panel/ship need).
+ *   • List — Visits table + a flat "All Panel Needs" table (one row per panel).
  *
  * Dates are naive wall-clock `date` values; parse 'YYYY-MM-DD' with explicit
  * local parts so a stored date never shifts a day across timezones.
@@ -15,7 +20,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../lib/auth-context';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog';
@@ -32,15 +36,15 @@ import {
 import { Calendar } from '../components/ui/calendar';
 import { Combobox } from '../components/ui/combobox';
 import {
-  CalendarClock, Plus, Edit, Trash, GraduationCap, Cpu, ArrowUpDown, Link2,
+  CalendarClock, Plus, Edit, Trash, Truck, MapPin, Cpu, ArrowUpDown, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import {
-  listScheduledTrainings, createScheduledTraining, updateScheduledTraining, deleteScheduledTraining,
-  listPanelInstallNeeds, createPanelInstallNeed, updatePanelInstallNeed, deletePanelInstallNeed,
+  listScheduledVisits, createScheduledVisit, updateScheduledVisit, deleteScheduledVisit,
   listSqms, listCustomers, listDistrictsForCustomer, listDistrictsByIds, listEpCompanies, listProductLines,
-  PANEL_TYPES, TRAINING_STATUSES, PANEL_NEED_STATUSES, SCHEDULER_CATEGORIES,
+  PANEL_TYPES, VISIT_STATUSES, SCHEDULER_CATEGORIES, FULFILLMENT_TYPES,
+  ScheduledVisit, VisitPanel,
 } from '../lib/scheduler';
 
 // ── Date helpers (timezone-safe, naive wall-clock) ────────────────────────────
@@ -58,6 +62,15 @@ function prettyDate(s: string | null | undefined): string {
   return d ? format(d, 'EEE, MMM d, yyyy') : '—';
 }
 
+// Earliest panel needed_by_date for a visit (used to place ship_only on calendar).
+function earliestPanelDate(v: ScheduledVisit): string | null {
+  const dates = (v.panels || [])
+    .map((p) => (p.needed_by_date ? String(p.needed_by_date).slice(0, 10) : null))
+    .filter(Boolean) as string[];
+  if (!dates.length) return null;
+  return dates.sort((a, b) => a.localeCompare(b))[0];
+}
+
 // ── Shared form field wrapper ─────────────────────────────────────────────────
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
@@ -73,32 +86,38 @@ function Field({ label, required, children }: { label: string; required?: boolea
 function StatusBadge({ status }: { status: string | null }) {
   const s = (status || 'planned').toLowerCase();
   const cls =
-    s === 'completed' || s === 'fulfilled'
+    s === 'completed'
       ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
       : s === 'cancelled'
       ? 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+      : s === 'confirmed'
+      ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300'
       : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
   return <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium capitalize ${cls}`}>{s}</span>;
 }
 
-function CategoryBadge({ category }: { category: string | null }) {
-  if (!category) return null;
+function FulfillmentBadge({ type }: { type: string | null }) {
+  const shipOnly = type === 'ship_only';
+  const cls = shipOnly
+    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+    : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
   return (
-    <span className="inline-block rounded-md px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300">
-      {category}
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {shipOnly ? <Truck className="w-3 h-3" /> : <MapPin className="w-3 h-3" />}
+      {shipOnly ? 'Ship-only' : 'On-site'}
     </span>
   );
 }
 
-function LinkIndicator({ label }: { label: string | null }) {
-  if (!label) return null;
+function CategoryChips({ categories }: { categories: string[] | null }) {
+  if (!categories || !categories.length) return null;
   return (
-    <span
-      title={`Linked to ${label}`}
-      className="inline-flex items-center text-indigo-500 dark:text-indigo-400 align-middle"
-      aria-label={`Linked to ${label}`}
-    >
-      <Link2 className="w-3.5 h-3.5" />
+    <span className="inline-flex flex-wrap gap-1">
+      {categories.map((c) => (
+        <span key={c} className="inline-block rounded-md px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300">
+          {c}
+        </span>
+      ))}
     </span>
   );
 }
@@ -107,12 +126,13 @@ const selectCls =
   'w-full h-9 rounded-md border border-input bg-input-background px-3 text-sm dark:bg-input/30 ' +
   'text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none';
 
-// ── Training create/edit dialog ───────────────────────────────────────────────
-function TrainingFormDialog({
-  open, onClose, onSaved, record, currentUser, panelNeeds, custLabel,
+// ── Unified create/edit dialog ────────────────────────────────────────────────
+type PanelRow = { panel_type: string; qty: string; needed_by_date: string };
+
+function VisitFormDialog({
+  open, onClose, onSaved, record, currentUser,
 }: {
-  open: boolean; onClose: () => void; onSaved: () => void; record: any; currentUser: any;
-  panelNeeds: any[]; custLabel: (id: string | null) => string;
+  open: boolean; onClose: () => void; onSaved: () => void; record: ScheduledVisit | null; currentUser: any;
 }) {
   const editing = !!record;
   const [sqms, setSqms] = useState<{ name: string; email: string | null }[]>([]);
@@ -121,6 +141,8 @@ function TrainingFormDialog({
   const [epCompanies, setEpCompanies] = useState<string[]>([]);
   const [productLines, setProductLines] = useState<string[]>([]);
 
+  const [fulfillment, setFulfillment] = useState('on_site');
+  const [categories, setCategories] = useState<string[]>([]);
   const [sqmName, setSqmName] = useState('');
   const [custId, setCustId] = useState('');
   const [distId, setDistId] = useState('');
@@ -128,10 +150,11 @@ function TrainingFormDialog({
   const [productLine, setProductLine] = useState('');
   const [plannedDate, setPlannedDate] = useState('');
   const [status, setStatus] = useState('planned');
-  const [category, setCategory] = useState('');
-  const [linkPanelId, setLinkPanelId] = useState('');
   const [notes, setNotes] = useState('');
+  const [panels, setPanels] = useState<PanelRow[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const shipOnly = fulfillment === 'ship_only';
 
   useEffect(() => {
     if (!open) return;
@@ -141,6 +164,8 @@ function TrainingFormDialog({
 
   useEffect(() => {
     if (!open) return;
+    setFulfillment(record?.fulfillment_type || 'on_site');
+    setCategories(record?.categories || []);
     setSqmName(record?.sqm_name || '');
     setCustId(record?.customer || '');
     setDistId(record?.customer_district || '');
@@ -148,9 +173,14 @@ function TrainingFormDialog({
     setProductLine(record?.product_line || '');
     setPlannedDate(record?.planned_date ? String(record.planned_date).slice(0, 10) : '');
     setStatus(record?.status || 'planned');
-    setCategory(record?.category || '');
-    setLinkPanelId(record?.linked_panel_need_id || '');
     setNotes(record?.notes || '');
+    setPanels(
+      (record?.panels || []).map((p) => ({
+        panel_type: p.panel_type || '',
+        qty: p.qty_needed != null ? String(p.qty_needed) : '1',
+        needed_by_date: p.needed_by_date ? String(p.needed_by_date).slice(0, 10) : '',
+      })),
+    );
   }, [open, record]);
 
   useEffect(() => {
@@ -158,61 +188,75 @@ function TrainingFormDialog({
     listDistrictsForCustomer(custId).then(setDistricts);
   }, [custId]);
 
+  const toggleCategory = (c: string) => {
+    setCategories((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
+  };
+
+  const addPanel = () => setPanels((prev) => [...prev, { panel_type: '', qty: '1', needed_by_date: '' }]);
+  const removePanel = (idx: number) => setPanels((prev) => prev.filter((_, i) => i !== idx));
+  const updatePanel = (idx: number, patch: Partial<PanelRow>) =>
+    setPanels((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+
   const handleSave = async () => {
-    if (!plannedDate) { toast.error('Planned date is required.'); return; }
-    if (!sqmName.trim() && !custId) { toast.error('Enter an SQM or select a customer.'); return; }
+    // Validation
+    if (shipOnly) {
+      if (!custId) { toast.error('Customer is required for ship-only requests.'); return; }
+      const valid = panels.filter((p) => p.panel_type);
+      if (!valid.length) { toast.error('Add at least one panel with a panel type.'); return; }
+    } else {
+      if (!plannedDate) { toast.error('Planned date is required for on-site visits.'); return; }
+      if (!sqmName.trim() && !custId) { toast.error('Enter an SQM or select a customer.'); return; }
+    }
+    if (panels.some((p) => !p.panel_type)) {
+      toast.error('Every panel row must have a panel type (or remove it).');
+      return;
+    }
+
     const sqmEmail = sqms.find((s) => s.name === sqmName)?.email ?? null;
-    const newPanelId = linkPanelId || null;
-    const oldPanelId = record?.linked_panel_need_id || null;
-    const payload: any = {
-      sqm_name: sqmName.trim() || null,
-      sqm_email: sqmEmail,
+    const panelPayload: VisitPanel[] = panels
+      .filter((p) => p.panel_type)
+      .map((p) => {
+        const q = parseInt(p.qty, 10);
+        return {
+          panel_type: p.panel_type,
+          qty_needed: isNaN(q) || q < 1 ? 1 : q,
+          needed_by_date: p.needed_by_date || null,
+        };
+      });
+
+    const payload: Partial<ScheduledVisit> = {
+      fulfillment_type: fulfillment,
+      categories: shipOnly ? [] : categories,
+      sqm_name: shipOnly ? null : (sqmName.trim() || null),
+      sqm_email: shipOnly ? null : sqmEmail,
       customer: custId || null,
       customer_district: distId || null,
       operating_company: opCompany || null,
       product_line: productLine || null,
-      planned_date: plannedDate,
+      planned_date: plannedDate || null,
       status,
-      category: category || null,
-      linked_panel_need_id: newPanelId,
       notes: notes.trim() || null,
     };
+
     setSaving(true);
     try {
-      const saved = editing
-        ? await updateScheduledTraining(record.id, payload)
-        : await createScheduledTraining({ ...payload, created_by: currentUser?.name || currentUser?.email || null });
-      const trainingId = saved?.id || record?.id;
-      // Keep the reciprocal link on the panel need in sync (best-effort).
-      try {
-        if (oldPanelId && oldPanelId !== newPanelId) {
-          await updatePanelInstallNeed(oldPanelId, { linked_training_id: null });
-        }
-        if (newPanelId && trainingId) {
-          await updatePanelInstallNeed(newPanelId, { linked_training_id: trainingId });
-        }
-      } catch {
-        toast.error('Training saved, but failed to sync the linked panel need.');
+      if (editing && record) {
+        await updateScheduledVisit(record.id, payload, panelPayload);
+      } else {
+        await createScheduledVisit(
+          { ...payload, created_by: currentUser?.name || currentUser?.email || null },
+          panelPayload,
+        );
       }
-      toast.success(`Training ${editing ? 'updated' : 'scheduled'} successfully`);
+      toast.success(`Visit ${editing ? 'updated' : 'scheduled'} successfully`);
       onSaved();
       onClose();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to save training');
+    } catch {
+      // toast already raised in data layer
     } finally {
       setSaving(false);
     }
   };
-
-  const panelLinkOptions = useMemo(() => {
-    const opts = panelNeeds
-      .filter((p) => (p.status || 'open') !== 'cancelled' || p.id === linkPanelId)
-      .map((p) => ({
-        value: p.id,
-        label: `${p.panel_type || 'Panel'} — ${custLabel(p.customer)}${p.needed_by_date ? ` (needed ${String(p.needed_by_date).slice(0, 10)})` : ''}`,
-      }));
-    return opts;
-  }, [panelNeeds, linkPanelId, custLabel]);
 
   const sqmOptions = useMemo(() => {
     const names = sqms.map((s) => s.name);
@@ -224,31 +268,55 @@ function TrainingFormDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{editing ? 'Edit Training Visit' : 'Add Training Visit'}</DialogTitle>
+          <DialogTitle>{editing ? 'Edit Visit' : 'Schedule Visit'}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mt-2">
-          <Field label="Planned Date" required>
+        {/* Fulfillment type segmented control */}
+        <div className="mt-2">
+          <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Fulfillment Type</Label>
+          <div className="inline-flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+            {FULFILLMENT_TYPES.map((ft) => (
+              <button
+                key={ft.value}
+                type="button"
+                onClick={() => setFulfillment(ft.value)}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  fulfillment === ft.value
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                {ft.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mt-4">
+          <Field label="Planned Date" required={!shipOnly}>
             <Input type="date" value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)} />
+            {shipOnly && <p className="text-[11px] text-muted-foreground mt-1">Optional for ship-only requests.</p>}
           </Field>
 
-          <Field label="SQM">
-            {sqms.length > 0 ? (
-              <Combobox
-                value={sqmName}
-                onValueChange={setSqmName}
-                options={sqmOptions}
-                placeholder="— Select or type SQM —"
-                searchPlaceholder="Search SQMs…"
-                emptyText="No SQMs found."
-                allowClear
-              />
-            ) : (
-              <Input value={sqmName} onChange={(e) => setSqmName(e.target.value)} placeholder="SQM name" />
-            )}
-          </Field>
+          {!shipOnly && (
+            <Field label="SQM">
+              {sqms.length > 0 ? (
+                <Combobox
+                  value={sqmName}
+                  onValueChange={setSqmName}
+                  options={sqmOptions}
+                  placeholder="— Select or type SQM —"
+                  searchPlaceholder="Search SQMs…"
+                  emptyText="No SQMs found."
+                  allowClear
+                />
+              ) : (
+                <Input value={sqmName} onChange={(e) => setSqmName(e.target.value)} placeholder="SQM name" />
+              )}
+            </Field>
+          )}
 
-          <Field label="Customer">
+          <Field label="Customer" required={shipOnly}>
             <Combobox
               value={custId}
               onValueChange={(v) => { setCustId(v); setDistId(''); }}
@@ -301,257 +369,96 @@ function TrainingFormDialog({
 
           <Field label="Status">
             <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)}>
-              {TRAINING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              {VISIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
+        </div>
 
-          <Field label="Category">
-            <Combobox
-              value={category}
-              onValueChange={setCategory}
-              options={SCHEDULER_CATEGORIES.map((c) => ({ value: c, label: c }))}
-              placeholder="— Select —"
-              searchPlaceholder="Search categories…"
-              emptyText="No categories found."
-              allowClear
-            />
-          </Field>
-
-          <Field label="Link to Panel Need">
-            <Combobox
-              value={linkPanelId}
-              onValueChange={setLinkPanelId}
-              options={panelLinkOptions}
-              placeholder="— Select —"
-              searchPlaceholder="Search panel needs…"
-              emptyText="No panel needs found."
-              allowClear
-            />
-          </Field>
-
-          <div className="md:col-span-2">
-            <Field label="Notes">
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Optional notes" />
-            </Field>
+        {/* Categories (on-site only) */}
+        {!shipOnly && (
+          <div className="mt-4">
+            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Categories</Label>
+            <div className="flex flex-wrap gap-2">
+              {SCHEDULER_CATEGORIES.map((c) => {
+                const active = categories.includes(c);
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => toggleCategory(c)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                      active
+                        ? 'bg-violet-100 text-violet-800 border-violet-300 dark:bg-violet-900/40 dark:text-violet-300 dark:border-violet-700'
+                        : 'bg-card text-muted-foreground border-border hover:bg-accent'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+        )}
+
+        {/* Panels (repeatable) */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+              Panels{shipOnly && <span className="text-red-500 ml-0.5">*</span>}
+            </Label>
+            <Button type="button" variant="outline" size="sm" onClick={addPanel}>
+              <Plus className="w-3.5 h-3.5 mr-1" /> Add panel
+            </Button>
+          </div>
+          {panels.length === 0 && (
+            <p className="text-xs text-muted-foreground py-2">
+              {shipOnly ? 'Add at least one panel.' : 'No panels added (optional for on-site visits).'}
+            </p>
+          )}
+          <div className="space-y-2">
+            {panels.map((p, idx) => (
+              <div key={idx} className="grid grid-cols-1 sm:grid-cols-[1fr_80px_150px_auto] gap-2 items-end rounded-md border border-border bg-card p-2">
+                <div>
+                  <Label className="text-[11px] text-muted-foreground mb-1 block">Panel type</Label>
+                  <Combobox
+                    value={p.panel_type}
+                    onValueChange={(v) => updatePanel(idx, { panel_type: v })}
+                    options={PANEL_TYPES.map((pt) => ({ value: pt, label: pt }))}
+                    placeholder="— Select panel —"
+                    searchPlaceholder="Search panel types…"
+                    emptyText="No panel types found."
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] text-muted-foreground mb-1 block">Qty</Label>
+                  <Input type="number" min={1} value={p.qty} onChange={(e) => updatePanel(idx, { qty: e.target.value })} />
+                </div>
+                <div>
+                  <Label className="text-[11px] text-muted-foreground mb-1 block">Needed by</Label>
+                  <Input type="date" value={p.needed_by_date} onChange={(e) => updatePanel(idx, { needed_by_date: e.target.value })} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removePanel(idx)}
+                  className="h-9 w-9 flex items-center justify-center rounded-md text-muted-foreground hover:text-red-500 hover:bg-accent"
+                  aria-label="Remove panel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <Field label="Notes">
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Optional notes" />
+          </Field>
         </div>
 
         <DialogFooter className="mt-4">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : (editing ? 'Save' : 'Add Training')}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Panel need create/edit dialog ─────────────────────────────────────────────
-function PanelNeedFormDialog({
-  open, onClose, onSaved, record, currentUser, trainings, custLabel,
-}: {
-  open: boolean; onClose: () => void; onSaved: () => void; record: any; currentUser: any;
-  trainings: any[]; custLabel: (id: string | null) => string;
-}) {
-  const editing = !!record;
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [districts, setDistricts] = useState<any[]>([]);
-  const [epCompanies, setEpCompanies] = useState<string[]>([]);
-
-  const [custId, setCustId] = useState('');
-  const [distId, setDistId] = useState('');
-  const [opCompany, setOpCompany] = useState('');
-  const [panelType, setPanelType] = useState('');
-  const [qty, setQty] = useState('1');
-  const [neededBy, setNeededBy] = useState('');
-  const [status, setStatus] = useState('open');
-  const [category, setCategory] = useState('');
-  const [linkTrainingId, setLinkTrainingId] = useState('');
-  const [notes, setNotes] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    Promise.all([listCustomers(), listEpCompanies()]).then(([c, e]) => { setCustomers(c); setEpCompanies(e); });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    setCustId(record?.customer || '');
-    setDistId(record?.customer_district || '');
-    setOpCompany(record?.operating_company || '');
-    setPanelType(record?.panel_type || '');
-    setQty(record?.qty_needed != null ? String(record.qty_needed) : '1');
-    setNeededBy(record?.needed_by_date ? String(record.needed_by_date).slice(0, 10) : '');
-    setStatus(record?.status || 'open');
-    setCategory(record?.category || '');
-    setLinkTrainingId(record?.linked_training_id || '');
-    setNotes(record?.notes || '');
-  }, [open, record]);
-
-  useEffect(() => {
-    if (!custId) { setDistricts([]); return; }
-    listDistrictsForCustomer(custId).then(setDistricts);
-  }, [custId]);
-
-  const handleSave = async () => {
-    if (!panelType) { toast.error('Panel type is required.'); return; }
-    if (!neededBy) { toast.error('Needed-by date is required.'); return; }
-    if (!custId) { toast.error('Customer is required.'); return; }
-    const qtyNum = parseInt(qty, 10);
-    const newTrainingId = linkTrainingId || null;
-    const oldTrainingId = record?.linked_training_id || null;
-    const payload: any = {
-      customer: custId,
-      customer_district: distId || null,
-      operating_company: opCompany || null,
-      panel_type: panelType,
-      qty_needed: isNaN(qtyNum) || qtyNum < 1 ? 1 : qtyNum,
-      needed_by_date: neededBy,
-      status,
-      category: category || null,
-      linked_training_id: newTrainingId,
-      notes: notes.trim() || null,
-    };
-    setSaving(true);
-    try {
-      const saved = editing
-        ? await updatePanelInstallNeed(record.id, payload)
-        : await createPanelInstallNeed({ ...payload, created_by: currentUser?.name || currentUser?.email || null });
-      const panelId = saved?.id || record?.id;
-      // Keep the reciprocal link on the training visit in sync (best-effort).
-      try {
-        if (oldTrainingId && oldTrainingId !== newTrainingId) {
-          await updateScheduledTraining(oldTrainingId, { linked_panel_need_id: null });
-        }
-        if (newTrainingId && panelId) {
-          await updateScheduledTraining(newTrainingId, { linked_panel_need_id: panelId });
-        }
-      } catch {
-        toast.error('Panel need saved, but failed to sync the linked training.');
-      }
-      toast.success(`Panel need ${editing ? 'updated' : 'added'} successfully`);
-      onSaved();
-      onClose();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to save panel need');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const trainingLinkOptions = useMemo(() => {
-    return trainings
-      .filter((t) => (t.status || 'planned') !== 'cancelled' || t.id === linkTrainingId)
-      .map((t) => ({
-        value: t.id,
-        label: `${t.sqm_name || 'Training'} — ${custLabel(t.customer)}${t.planned_date ? ` (${String(t.planned_date).slice(0, 10)})` : ''}`,
-      }));
-  }, [trainings, linkTrainingId, custLabel]);
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{editing ? 'Edit Panel Need' : 'Add Panel Need'}</DialogTitle>
-        </DialogHeader>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mt-2">
-          <Field label="Needed By" required>
-            <Input type="date" value={neededBy} onChange={(e) => setNeededBy(e.target.value)} />
-          </Field>
-
-          <Field label="Panel Type" required>
-            <Combobox
-              value={panelType}
-              onValueChange={setPanelType}
-              options={PANEL_TYPES.map((p) => ({ value: p, label: p }))}
-              placeholder="— Select panel type —"
-              searchPlaceholder="Search panel types…"
-              emptyText="No panel types found."
-            />
-          </Field>
-
-          <Field label="Customer" required>
-            <Combobox
-              value={custId}
-              onValueChange={(v) => { setCustId(v); setDistId(''); }}
-              options={customers.map((c) => ({ value: c.row_id, label: c.customer }))}
-              placeholder="— Select customer —"
-              searchPlaceholder="Search customers…"
-              emptyText="No customers found."
-            />
-          </Field>
-
-          <Field label="District">
-            <Combobox
-              value={distId}
-              onValueChange={setDistId}
-              disabled={!custId}
-              options={districts.map((d) => ({ value: d.row_id, label: d.customer_district }))}
-              placeholder="— Select district —"
-              searchPlaceholder="Search districts…"
-              emptyText="No districts found."
-              allowClear
-            />
-          </Field>
-
-          <Field label="Operating Company">
-            <Combobox
-              value={opCompany}
-              onValueChange={setOpCompany}
-              options={(opCompany && !epCompanies.includes(opCompany) ? [opCompany, ...epCompanies] : epCompanies)
-                .map((o) => ({ value: o, label: o }))}
-              placeholder="— Select —"
-              searchPlaceholder="Search operating companies…"
-              emptyText="No operating companies found."
-              allowClear
-            />
-          </Field>
-
-          <Field label="Quantity Needed">
-            <Input type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} />
-          </Field>
-
-          <Field label="Status">
-            <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)}>
-              {PANEL_NEED_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-
-          <Field label="Category">
-            <Combobox
-              value={category}
-              onValueChange={setCategory}
-              options={SCHEDULER_CATEGORIES.map((c) => ({ value: c, label: c }))}
-              placeholder="— Select —"
-              searchPlaceholder="Search categories…"
-              emptyText="No categories found."
-              allowClear
-            />
-          </Field>
-
-          <Field label="Link to Training">
-            <Combobox
-              value={linkTrainingId}
-              onValueChange={setLinkTrainingId}
-              options={trainingLinkOptions}
-              placeholder="— Select —"
-              searchPlaceholder="Search trainings…"
-              emptyText="No trainings found."
-              allowClear
-            />
-          </Field>
-
-          <div className="md:col-span-2">
-            <Field label="Notes">
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Optional notes" />
-            </Field>
-          </div>
-        </div>
-
-        <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : (editing ? 'Save' : 'Add Panel Need')}</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : (editing ? 'Save' : 'Schedule Visit')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -565,8 +472,7 @@ export default function Scheduler() {
   const { user } = useAuth();
 
   const [view, setView] = useState<'calendar' | 'list'>('calendar');
-  const [trainings, setTrainings] = useState<any[]>([]);
-  const [panelNeeds, setPanelNeeds] = useState<any[]>([]);
+  const [visits, setVisits] = useState<ScheduledVisit[]>([]);
   const [custNames, setCustNames] = useState<Record<string, string>>({});
   const [distNames, setDistNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -574,29 +480,24 @@ export default function Scheduler() {
   const [month, setMonth] = useState<Date>(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | undefined>(new Date());
 
-  const [trainingDialog, setTrainingDialog] = useState(false);
-  const [panelDialog, setPanelDialog] = useState(false);
-  const [editingTraining, setEditingTraining] = useState<any>(null);
-  const [editingPanel, setEditingPanel] = useState<any>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'training' | 'panel'; row: any } | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingVisit, setEditingVisit] = useState<ScheduledVisit | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ScheduledVisit | null>(null);
 
-  const [trainingStatusFilter, setTrainingStatusFilter] = useState('all');
-  const [panelStatusFilter, setPanelStatusFilter] = useState('all');
-  const [trainingSort, setTrainingSort] = useState<SortDir>('asc');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [visitSort, setVisitSort] = useState<SortDir>('asc');
+  const [panelTypeFilter, setPanelTypeFilter] = useState('all');
   const [panelSort, setPanelSort] = useState<SortDir>('asc');
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [t, p, custs] = await Promise.all([
-        listScheduledTrainings(), listPanelInstallNeeds(), listCustomers(),
-      ]);
-      setTrainings(t);
-      setPanelNeeds(p);
+      const [v, custs] = await Promise.all([listScheduledVisits(), listCustomers()]);
+      setVisits(v);
       const cmap: Record<string, string> = {};
       for (const c of custs) cmap[c.row_id] = c.customer;
       setCustNames(cmap);
-      const distIds = [...t, ...p].map((r) => r.customer_district).filter(Boolean);
+      const distIds = v.map((r) => r.customer_district).filter(Boolean) as string[];
       const dists = await listDistrictsByIds(distIds);
       const dmap: Record<string, string> = {};
       for (const d of dists) dmap[d.row_id] = d.customer_district;
@@ -618,120 +519,108 @@ export default function Scheduler() {
     return d ? `${c} · ${d}` : c;
   };
 
-  // Lookups so a linked record can be named from either side.
-  const panelById = useMemo(() => {
-    const m: Record<string, any> = {};
-    for (const p of panelNeeds) m[p.id] = p;
-    return m;
-  }, [panelNeeds]);
-  const trainingById = useMemo(() => {
-    const m: Record<string, any> = {};
-    for (const t of trainings) m[t.id] = t;
-    return m;
-  }, [trainings]);
-
-  // Counterpart label for a training's linked panel need / a panel's linked training.
-  const linkedPanelLabel = (t: any): string | null => {
-    const p = t?.linked_panel_need_id ? panelById[t.linked_panel_need_id] : null;
-    if (!p) return null;
-    return `${p.panel_type || 'Panel'} — ${custLabel(p.customer)}`;
-  };
-  const linkedTrainingLabel = (p: any): string | null => {
-    const t = p?.linked_training_id ? trainingById[p.linked_training_id] : null;
-    if (!t) return null;
-    return `${t.sqm_name || 'Training'} — ${custLabel(t.customer)}`;
+  // The date a visit appears on the calendar.
+  const visitCalendarDate = (v: ScheduledVisit): string | null => {
+    if (v.fulfillment_type === 'ship_only') return earliestPanelDate(v) || null;
+    return v.planned_date ? String(v.planned_date).slice(0, 10) : null;
   };
 
-  // Map of day-key → events for calendar dots + side panel.
-  const trainingByDay = useMemo(() => {
-    const m = new Map<string, any[]>();
-    for (const t of trainings) {
-      const d = parseLocalDate(t.planned_date);
+  // Map of day-key → visits for calendar dots + side panel.
+  const visitsByDay = useMemo(() => {
+    const m = new Map<string, ScheduledVisit[]>();
+    for (const v of visits) {
+      const ds = visitCalendarDate(v);
+      const d = parseLocalDate(ds);
       if (!d) continue;
       const k = dayKey(d);
-      (m.get(k) || m.set(k, []).get(k))!.push(t);
+      (m.get(k) || m.set(k, []).get(k))!.push(v);
     }
     return m;
-  }, [trainings]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visits]);
 
-  const panelByDay = useMemo(() => {
-    const m = new Map<string, any[]>();
-    for (const p of panelNeeds) {
-      const d = parseLocalDate(p.needed_by_date);
-      if (!d) continue;
-      const k = dayKey(d);
-      (m.get(k) || m.set(k, []).get(k))!.push(p);
+  // Per-panel amber indicators by day (any panel needed_by_date).
+  const panelDatesByDay = useMemo(() => {
+    const m = new Set<string>();
+    for (const v of visits) {
+      for (const p of v.panels || []) {
+        const d = parseLocalDate(p.needed_by_date);
+        if (d) m.add(dayKey(d));
+      }
     }
     return m;
-  }, [panelNeeds]);
+  }, [visits]);
 
-  // Custom day cell: number + colored dots (blue=training, amber=panel need).
   const DayContent = useMemo(() => {
     function DayContentInner(props: { date: Date }) {
       const k = dayKey(props.date);
-      const hasT = trainingByDay.has(k);
-      const hasP = panelByDay.has(k);
+      const dayVisits = visitsByDay.get(k) || [];
+      const hasOnSite = dayVisits.some((v) => v.fulfillment_type !== 'ship_only');
+      const hasShip = dayVisits.some((v) => v.fulfillment_type === 'ship_only') || panelDatesByDay.has(k);
       return (
         <div className="relative flex h-full w-full items-center justify-center">
           <span>{props.date.getDate()}</span>
-          {(hasT || hasP) && (
+          {(hasOnSite || hasShip) && (
             <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5">
-              {hasT && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
-              {hasP && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />}
+              {hasOnSite && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
+              {hasShip && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />}
             </span>
           )}
         </div>
       );
     }
     return DayContentInner;
-  }, [trainingByDay, panelByDay]);
+  }, [visitsByDay, panelDatesByDay]);
 
   const selectedKey = selectedDay ? dayKey(selectedDay) : '';
-  const selectedTrainings = trainingByDay.get(selectedKey) || [];
-  const selectedPanels = panelByDay.get(selectedKey) || [];
+  const selectedVisits = visitsByDay.get(selectedKey) || [];
 
-  const openEditTraining = (row: any) => { setEditingTraining(row); setTrainingDialog(true); };
-  const openEditPanel = (row: any) => { setEditingPanel(row); setPanelDialog(true); };
+  const openEdit = (row: ScheduledVisit) => { setEditingVisit(row); setDialogOpen(true); };
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     try {
-      if (deleteTarget.kind === 'training') await deleteScheduledTraining(deleteTarget.row.id);
-      else await deletePanelInstallNeed(deleteTarget.row.id);
+      await deleteScheduledVisit(deleteTarget.id);
       toast.success('Deleted successfully');
       setDeleteTarget(null);
       loadData();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to delete');
+    } catch {
+      // toast raised in data layer
     }
   };
 
-  const quickStatusTraining = async (row: any, next: string) => {
-    try { await updateScheduledTraining(row.id, { status: next }); loadData(); }
-    catch (err: any) { toast.error(err?.message || 'Failed to update status'); }
-  };
-  const quickStatusPanel = async (row: any, next: string) => {
-    try { await updatePanelInstallNeed(row.id, { status: next }); loadData(); }
-    catch (err: any) { toast.error(err?.message || 'Failed to update status'); }
+  const quickStatus = async (row: ScheduledVisit, next: string) => {
+    try {
+      await updateScheduledVisit(row.id, { status: next }, row.panels || []);
+      loadData();
+    } catch {
+      // toast raised in data layer
+    }
   };
 
-  const filteredTrainings = useMemo(() => {
-    let rows = trainings;
-    if (trainingStatusFilter !== 'all') rows = rows.filter((r) => (r.status || 'planned') === trainingStatusFilter);
+  const filteredVisits = useMemo(() => {
+    let rows = visits;
+    if (statusFilter !== 'all') rows = rows.filter((r) => (r.status || 'planned') === statusFilter);
     return [...rows].sort((a, b) => {
-      const cmp = String(a.planned_date || '').localeCompare(String(b.planned_date || ''));
-      return trainingSort === 'asc' ? cmp : -cmp;
+      const cmp = String(visitCalendarDate(a) || '').localeCompare(String(visitCalendarDate(b) || ''));
+      return visitSort === 'asc' ? cmp : -cmp;
     });
-  }, [trainings, trainingStatusFilter, trainingSort]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visits, statusFilter, visitSort]);
 
-  const filteredPanels = useMemo(() => {
-    let rows = panelNeeds;
-    if (panelStatusFilter !== 'all') rows = rows.filter((r) => (r.status || 'open') === panelStatusFilter);
-    return [...rows].sort((a, b) => {
-      const cmp = String(a.needed_by_date || '').localeCompare(String(b.needed_by_date || ''));
+  // Flat panel-demand view: one row per panel across all visits.
+  const flatPanels = useMemo(() => {
+    const rows: { visit: ScheduledVisit; panel: VisitPanel }[] = [];
+    for (const v of visits) {
+      for (const p of v.panels || []) rows.push({ visit: v, panel: p });
+    }
+    let filtered = rows;
+    if (panelTypeFilter !== 'all') filtered = filtered.filter((r) => r.panel.panel_type === panelTypeFilter);
+    return filtered.sort((a, b) => {
+      const cmp = String(a.panel.needed_by_date || '').localeCompare(String(b.panel.needed_by_date || ''));
       return panelSort === 'asc' ? cmp : -cmp;
     });
-  }, [panelNeeds, panelStatusFilter, panelSort]);
+  }, [visits, panelTypeFilter, panelSort]);
 
   return (
     <div className="p-4 md:p-8">
@@ -743,14 +632,11 @@ export default function Scheduler() {
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
               <CalendarClock className="w-7 h-7" /> Scheduler
             </h1>
-            <p className="text-gray-600 dark:text-gray-300 mt-2">Upcoming SQM training visits and panel install needs</p>
+            <p className="text-gray-600 dark:text-gray-300 mt-2">On-site visits and panel ship-only requests</p>
           </div>
           <div className="flex gap-2 w-full md:w-auto">
-            <Button variant="outline" onClick={() => { setEditingTraining(null); setTrainingDialog(true); }} className="flex-1 md:flex-none">
-              <Plus className="w-4 h-4 mr-2" /> Add Training
-            </Button>
-            <Button onClick={() => { setEditingPanel(null); setPanelDialog(true); }} className="flex-1 md:flex-none">
-              <Plus className="w-4 h-4 mr-2" /> Add Panel Need
+            <Button onClick={() => { setEditingVisit(null); setDialogOpen(true); }} className="flex-1 md:flex-none">
+              <Plus className="w-4 h-4 mr-2" /> Schedule Visit
             </Button>
           </div>
         </div>
@@ -796,8 +682,8 @@ export default function Scheduler() {
                   className="w-full"
                 />
                 <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> Training</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" /> Panel Need</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> On-site visit</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" /> Panel/ship need</span>
                 </div>
               </CardContent>
             </Card>
@@ -809,63 +695,46 @@ export default function Scheduler() {
                   {selectedDay ? format(selectedDay, 'EEEE, MMMM d, yyyy') : 'Select a day'}
                 </h2>
 
-                {selectedTrainings.length === 0 && selectedPanels.length === 0 && (
+                {selectedVisits.length === 0 && (
                   <p className="text-sm text-muted-foreground py-8 text-center">No scheduled items on this day.</p>
                 )}
 
-                {selectedTrainings.length > 0 && (
-                  <div className="mb-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground mb-2">
-                      <GraduationCap className="w-4 h-4 text-blue-500" /> Trainings
-                    </div>
-                    <div className="space-y-2">
-                      {selectedTrainings.map((t) => (
-                        <div key={t.id} className="flex items-start justify-between gap-2 rounded-md border border-border bg-card p-3">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
-                              <span className="truncate">{custDistLabel(t.customer, t.customer_district)}</span>
-                              <LinkIndicator label={linkedPanelLabel(t)} />
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {t.sqm_name || 'Unassigned SQM'}{t.product_line ? ` · ${t.product_line}` : ''}
-                            </div>
-                            {t.category && <div className="mt-1"><CategoryBadge category={t.category} /></div>}
+                <div className="space-y-2">
+                  {selectedVisits.map((v) => (
+                    <div key={v.id} className="rounded-md border border-border bg-card p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <FulfillmentBadge type={v.fulfillment_type} />
+                            <StatusBadge status={v.status} />
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <StatusBadge status={t.status} />
-                            <button onClick={() => openEditTraining(t)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4" /></button>
+                          <div className="text-sm font-medium text-foreground truncate">
+                            {custDistLabel(v.customer, v.customer_district)}
                           </div>
+                          <div className="text-xs text-muted-foreground">
+                            {v.fulfillment_type === 'ship_only'
+                              ? 'Ship-only request'
+                              : (v.sqm_name || 'Unassigned SQM')}
+                            {v.product_line ? ` · ${v.product_line}` : ''}
+                          </div>
+                          {v.categories?.length > 0 && <div className="mt-1"><CategoryChips categories={v.categories} /></div>}
+                          {(v.panels || []).length > 0 && (
+                            <ul className="mt-2 space-y-0.5">
+                              {(v.panels || []).map((p, i) => (
+                                <li key={i} className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                  <Cpu className="w-3 h-3 text-amber-500 shrink-0" />
+                                  {p.panel_type} × {p.qty_needed ?? 1}
+                                  {p.needed_by_date ? ` · needed ${prettyDate(p.needed_by_date)}` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                         </div>
-                      ))}
+                        <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Edit"><Edit className="w-4 h-4" /></button>
+                      </div>
                     </div>
-                  </div>
-                )}
-
-                {selectedPanels.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground mb-2">
-                      <Cpu className="w-4 h-4 text-amber-500" /> Panel Needs
-                    </div>
-                    <div className="space-y-2">
-                      {selectedPanels.map((p) => (
-                        <div key={p.id} className="flex items-start justify-between gap-2 rounded-md border border-border bg-card p-3">
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
-                              <span className="truncate">{custDistLabel(p.customer, p.customer_district)}</span>
-                              <LinkIndicator label={linkedTrainingLabel(p)} />
-                            </div>
-                            <div className="text-xs text-muted-foreground">{p.panel_type} × {p.qty_needed ?? 1}</div>
-                            {p.category && <div className="mt-1"><CategoryBadge category={p.category} /></div>}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <StatusBadge status={p.status} />
-                            <button onClick={() => openEditPanel(p)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4" /></button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -874,16 +743,16 @@ export default function Scheduler() {
         {/* ════════════ LIST VIEW ════════════ */}
         {view === 'list' && (
           <div className="space-y-8">
-            {/* Upcoming Trainings */}
+            {/* Visits */}
             <div>
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                  <GraduationCap className="w-5 h-5 text-blue-500" /> Upcoming Trainings
+                  <CalendarClock className="w-5 h-5 text-blue-500" /> Visits
                 </h2>
                 <select className="h-9 rounded-md border border-input bg-input-background px-3 text-sm dark:bg-input/30 text-foreground"
-                  value={trainingStatusFilter} onChange={(e) => setTrainingStatusFilter(e.target.value)}>
+                  value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                   <option value="all">All statuses</option>
-                  {TRAINING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {VISIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <Card>
@@ -892,43 +761,46 @@ export default function Scheduler() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>
-                          <button className="flex items-center gap-1" onClick={() => setTrainingSort((d) => d === 'asc' ? 'desc' : 'asc')}>
-                            Planned Date <ArrowUpDown className="w-3 h-3" />
+                          <button className="flex items-center gap-1" onClick={() => setVisitSort((d) => d === 'asc' ? 'desc' : 'asc')}>
+                            Date <ArrowUpDown className="w-3 h-3" />
                           </button>
                         </TableHead>
+                        <TableHead>Type</TableHead>
                         <TableHead>SQM</TableHead>
                         <TableHead>Customer / District</TableHead>
-                        <TableHead>Product Line</TableHead>
-                        <TableHead>Category</TableHead>
+                        <TableHead>Op Company</TableHead>
+                        <TableHead>Categories</TableHead>
+                        <TableHead>Panels</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredTrainings.length === 0 && (
-                        <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No scheduled trainings.</TableCell></TableRow>
+                      {filteredVisits.length === 0 && (
+                        <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No scheduled visits.</TableCell></TableRow>
                       )}
-                      {filteredTrainings.map((t) => (
-                        <TableRow key={t.id}>
-                          <TableCell className="whitespace-nowrap">{prettyDate(t.planned_date)}</TableCell>
-                          <TableCell>{t.sqm_name || '—'}</TableCell>
+                      {filteredVisits.map((v) => (
+                        <TableRow key={v.id}>
+                          <TableCell className="whitespace-nowrap">{prettyDate(visitCalendarDate(v))}</TableCell>
+                          <TableCell><FulfillmentBadge type={v.fulfillment_type} /></TableCell>
+                          <TableCell>{v.sqm_name || '—'}</TableCell>
+                          <TableCell>{custDistLabel(v.customer, v.customer_district)}</TableCell>
+                          <TableCell>{v.operating_company || '—'}</TableCell>
+                          <TableCell>{v.categories?.length ? <CategoryChips categories={v.categories} /> : '—'}</TableCell>
                           <TableCell>
-                            <span className="inline-flex items-center gap-1.5">
-                              {custDistLabel(t.customer, t.customer_district)}
-                              <LinkIndicator label={linkedPanelLabel(t)} />
-                            </span>
+                            {(v.panels || []).length > 0
+                              ? <span className="inline-block rounded-md px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{(v.panels || []).length} panel{(v.panels || []).length === 1 ? '' : 's'}</span>
+                              : '—'}
                           </TableCell>
-                          <TableCell>{t.product_line || '—'}</TableCell>
-                          <TableCell>{t.category ? <CategoryBadge category={t.category} /> : '—'}</TableCell>
                           <TableCell>
                             <select className="h-8 rounded-md border border-input bg-input-background px-2 text-xs dark:bg-input/30 text-foreground"
-                              value={t.status || 'planned'} onChange={(e) => quickStatusTraining(t, e.target.value)}>
-                              {TRAINING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                              value={v.status || 'planned'} onChange={(e) => quickStatus(v, e.target.value)}>
+                              {VISIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                             </select>
                           </TableCell>
                           <TableCell className="text-right whitespace-nowrap">
-                            <button onClick={() => openEditTraining(t)} className="text-muted-foreground hover:text-foreground mr-3" aria-label="Edit"><Edit className="w-4 h-4 inline" /></button>
-                            <button onClick={() => setDeleteTarget({ kind: 'training', row: t })} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4 inline" /></button>
+                            <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground mr-3" aria-label="Edit"><Edit className="w-4 h-4 inline" /></button>
+                            <button onClick={() => setDeleteTarget(v)} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4 inline" /></button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -938,16 +810,16 @@ export default function Scheduler() {
               </Card>
             </div>
 
-            {/* Panel Needs */}
+            {/* All Panel Needs (flat) */}
             <div>
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                  <Cpu className="w-5 h-5 text-amber-500" /> Panel Needs
+                  <Cpu className="w-5 h-5 text-amber-500" /> All Panel Needs
                 </h2>
                 <select className="h-9 rounded-md border border-input bg-input-background px-3 text-sm dark:bg-input/30 text-foreground"
-                  value={panelStatusFilter} onChange={(e) => setPanelStatusFilter(e.target.value)}>
-                  <option value="all">All statuses</option>
-                  {PANEL_NEED_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  value={panelTypeFilter} onChange={(e) => setPanelTypeFilter(e.target.value)}>
+                  <option value="all">All panel types</option>
+                  {PANEL_TYPES.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <Card>
@@ -960,40 +832,25 @@ export default function Scheduler() {
                             Needed By <ArrowUpDown className="w-3 h-3" />
                           </button>
                         </TableHead>
-                        <TableHead>Customer / District</TableHead>
                         <TableHead>Panel Type</TableHead>
                         <TableHead>Qty</TableHead>
-                        <TableHead>Category</TableHead>
+                        <TableHead>Customer</TableHead>
+                        <TableHead>Type</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredPanels.length === 0 && (
-                        <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No panel needs.</TableCell></TableRow>
+                      {flatPanels.length === 0 && (
+                        <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No panel needs.</TableCell></TableRow>
                       )}
-                      {filteredPanels.map((p) => (
-                        <TableRow key={p.id}>
-                          <TableCell className="whitespace-nowrap">{prettyDate(p.needed_by_date)}</TableCell>
-                          <TableCell>
-                            <span className="inline-flex items-center gap-1.5">
-                              {custDistLabel(p.customer, p.customer_district)}
-                              <LinkIndicator label={linkedTrainingLabel(p)} />
-                            </span>
-                          </TableCell>
-                          <TableCell>{p.panel_type || '—'}</TableCell>
-                          <TableCell>{p.qty_needed ?? 1}</TableCell>
-                          <TableCell>{p.category ? <CategoryBadge category={p.category} /> : '—'}</TableCell>
-                          <TableCell>
-                            <select className="h-8 rounded-md border border-input bg-input-background px-2 text-xs dark:bg-input/30 text-foreground"
-                              value={p.status || 'open'} onChange={(e) => quickStatusPanel(p, e.target.value)}>
-                              {PANEL_NEED_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                          </TableCell>
-                          <TableCell className="text-right whitespace-nowrap">
-                            <button onClick={() => openEditPanel(p)} className="text-muted-foreground hover:text-foreground mr-3" aria-label="Edit"><Edit className="w-4 h-4 inline" /></button>
-                            <button onClick={() => setDeleteTarget({ kind: 'panel', row: p })} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4 inline" /></button>
-                          </TableCell>
+                      {flatPanels.map(({ visit, panel }, i) => (
+                        <TableRow key={`${visit.id}-${i}`}>
+                          <TableCell className="whitespace-nowrap">{prettyDate(panel.needed_by_date)}</TableCell>
+                          <TableCell>{panel.panel_type || '—'}</TableCell>
+                          <TableCell>{panel.qty_needed ?? 1}</TableCell>
+                          <TableCell>{custLabel(visit.customer)}</TableCell>
+                          <TableCell><FulfillmentBadge type={visit.fulfillment_type} /></TableCell>
+                          <TableCell><StatusBadge status={visit.status} /></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1007,31 +864,20 @@ export default function Scheduler() {
         {loading && <p className="text-sm text-muted-foreground mt-4">Loading…</p>}
       </div>
 
-      {/* Dialogs */}
-      <TrainingFormDialog
-        open={trainingDialog}
-        onClose={() => { setTrainingDialog(false); setEditingTraining(null); }}
+      {/* Dialog */}
+      <VisitFormDialog
+        open={dialogOpen}
+        onClose={() => { setDialogOpen(false); setEditingVisit(null); }}
         onSaved={loadData}
-        record={editingTraining}
+        record={editingVisit}
         currentUser={user}
-        panelNeeds={panelNeeds}
-        custLabel={custLabel}
-      />
-      <PanelNeedFormDialog
-        open={panelDialog}
-        onClose={() => { setPanelDialog(false); setEditingPanel(null); }}
-        onSaved={loadData}
-        record={editingPanel}
-        currentUser={user}
-        trainings={trainings}
-        custLabel={custLabel}
       />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this {deleteTarget?.kind === 'training' ? 'training' : 'panel need'}?</AlertDialogTitle>
-            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+            <AlertDialogTitle>Delete this visit?</AlertDialogTitle>
+            <AlertDialogDescription>This also removes its panels. This action cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
