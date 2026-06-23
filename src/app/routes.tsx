@@ -35,6 +35,7 @@ import DocumentLibrary from './pages/DocumentLibrary';
 import TrainingChecklists from './pages/TrainingChecklists';
 import TrainingChecklistSession from './pages/TrainingChecklistSession';
 import TrainingChecklistSetup from './pages/TrainingChecklistSetup';
+import Scheduler from './pages/Scheduler';
 
 type Role = 'admin' | 'sqm' | 'ops';
 
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
       { path: "customers", Component: Customers },
       { path: "customers/:id", Component: CustomerDetail },
       { path: "districts/:id", Component: DistrictDetail },
+      { path: "scheduler", element: <RequireRole roles={['admin','sqm']}><Scheduler /></RequireRole> },
       { path: "field-visits", Component: FieldVisitsNew },
       { path: "field-visits/:id", Component: FieldVisitDetail },
       { path: "field-visits/:visitId/hardware-inspection", Component: HardwareInspection },
