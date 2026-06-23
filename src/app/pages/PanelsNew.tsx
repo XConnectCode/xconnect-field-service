@@ -389,7 +389,7 @@ export default function PanelsNew() {
 
   return (
     <div className="p-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[1600px] mx-auto">
 
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
@@ -896,7 +896,7 @@ export default function PanelsNew() {
                             </Link>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline">{panel.panel_type}</Badge>
+                            <Badge variant="outline">{panel.panel_type || '-'}</Badge>
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={panel.panel_status} />

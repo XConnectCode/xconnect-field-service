@@ -78,17 +78,17 @@ function Field({ label, value, editing = false, children }: FieldProps) {
 // ── Status badge color ─────────────────────────────────────────────────────────
 function getStatusColor(status: string) {
   switch (status?.toLowerCase()) {
-    case 'at facility': return 'bg-blue-100 text-blue-800';
-    case 'leased': return 'bg-green-100 text-green-800';
-    case 'in repair': return 'bg-orange-100 text-orange-800';
-    case 'loaned': return 'bg-yellow-100 text-yellow-800';
-    case 'sold': return 'bg-gray-100 text-gray-800';
+    case 'at facility': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
+    case 'leased': return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300';
+    case 'in repair': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300';
+    case 'loaned': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
+    case 'sold': return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
     // legacy values kept for backwards compat
-    case 'installed': return 'bg-green-100 text-green-800';
-    case 'in stock': return 'bg-blue-100 text-blue-800';
-    case 'in transit': return 'bg-yellow-100 text-yellow-800';
-    case 'maintenance': return 'bg-orange-100 text-orange-800';
-    default: return 'bg-gray-100 text-gray-800';
+    case 'installed': return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300';
+    case 'in stock': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
+    case 'in transit': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
+    case 'maintenance': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300';
+    default: return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
   }
 }
 
@@ -450,7 +450,7 @@ export default function PanelDetail() {
       <div className="max-w-6xl mx-auto space-y-6">
 
         {/* Hero header */}
-        <div className="rounded-xl border bg-gradient-to-br from-slate-50 to-white p-6 shadow-sm">
+        <div className="rounded-xl border dark:border-slate-700 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 p-6 shadow-sm">
           <Button
             variant="ghost"
             size="sm"
@@ -466,7 +466,7 @@ export default function PanelDetail() {
               <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                 {panel.serial_number || 'Panel Detail'}
               </h1>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {panel.panel_type || 'Unknown type'} &mdash; {panel.xc_base || 'No base'}
               </p>
             </div>

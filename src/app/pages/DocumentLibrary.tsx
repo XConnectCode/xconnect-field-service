@@ -143,7 +143,7 @@ export default function DocumentLibrary() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-800/50">
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
+      <div className="max-w-[1600px] mx-auto p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -204,8 +204,8 @@ export default function DocumentLibrary() {
                   <Badge
                     key={c}
                     className={`cursor-pointer ${categoryFilter === c
-                      ? 'bg-blue-100 text-blue-800 border-2 border-blue-300'
-                      : 'bg-gray-100 text-gray-600 border border-gray-300'}`}
+                      ? 'bg-blue-100 text-blue-800 border-2 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700'
+                      : 'bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'}`}
                     onClick={() => setCategoryFilter(c)}
                   >
                     {c}
@@ -217,8 +217,8 @@ export default function DocumentLibrary() {
                   <Badge
                     key={p}
                     className={`cursor-pointer ${productFilter === p
-                      ? 'bg-emerald-100 text-emerald-800 border-2 border-emerald-300'
-                      : 'bg-gray-100 text-gray-600 border border-gray-300'}`}
+                      ? 'bg-emerald-100 text-emerald-800 border-2 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700'
+                      : 'bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'}`}
                     onClick={() => setProductFilter(p)}
                   >
                     {p === 'All' ? 'All products' : p}

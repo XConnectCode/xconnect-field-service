@@ -14,7 +14,7 @@
  *   />
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Button } from '../../components/ui/button';
@@ -28,6 +28,7 @@ import { getAuthHeaders } from '../../lib/authHeaders';
 import { ButtonGroup } from '../../components/ui/button-group';
 import { Combobox } from '../../components/ui/combobox';
 import { computeVisitDuration } from '../../lib/visitDuration';
+import PanelsSeenPicker from '../../components/PanelsSeenPicker';
 
 const baseUrl  = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
@@ -103,10 +104,6 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   // surface_tester). Marking a panel here stamps it verified='Y' + last-seen
   // on save (handled server-side).
   const [panelsSeen,    setPanelsSeen]    = useState<string[]>([]);
-  // Type-ahead search box for the Panels Seen picker, plus a collapsible
-  // "browse all by type" fallback for users who prefer to scroll the full list.
-  const [panelSearch,   setPanelSearch]   = useState('');
-  const [showAllPanels, setShowAllPanels] = useState(false);
 
   // Fetch next available Visit ID — scan ALL field_visit_ids and find the true
   // numeric max. We can't .order() because Postgres sorts field_visit_id as
@@ -176,7 +173,12 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
       .then(({ data }) => setDistricts(data || []));
   }, [custId]);
 
-  useEffect(() => {
+  // Seed customer / district / operating company synchronously (before paint)
+  // when the dialog opens. useLayoutEffect — not useEffect — so the prefilled
+  // values are in state before the first paint, eliminating the visible lag
+  // where Operating Company flashed blank then populated on copy/new.
+  useLayoutEffect(() => {
+    if (!open) return;
     if (visit) {
       setCustId(visit.customer || '');
       setDistId(visit.customer_district || '');
@@ -192,7 +194,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
   // legacy visits saved before this field existed, fall back to the 3 old
   // single dropdown columns so nothing is lost on edit.
   useEffect(() => {
-    if (!open) { setPanelsSeen([]); setPanelSearch(''); setShowAllPanels(false); return; }
+    if (!open) { setPanelsSeen([]); return; }
     if (visit) {
       const arr: string[] = Array.isArray(visit.panels_seen) ? visit.panels_seen.filter(Boolean) : [];
       if (arr.length > 0) {
@@ -208,18 +210,6 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     }
   }, [visit, open]);
 
-  const togglePanelSeen = (serial: string) => {
-    setPanelsSeen(prev =>
-      prev.includes(serial) ? prev.filter(s => s !== serial) : [...prev, serial]
-    );
-  };
-  const addPanelSeen = (serial: string) => {
-    setPanelsSeen(prev => (prev.includes(serial) ? prev : [...prev, serial]));
-  };
-  const removePanelSeen = (serial: string) => {
-    setPanelsSeen(prev => prev.filter(s => s !== serial));
-  };
-
   // XC Rep: on edit keep the stored rep; on create auto-pull the logged-in
   // user. The field is a constrained dropdown of SQM reps, so only pre-select
   // the user's name when it actually matches a valid option; otherwise leave it
@@ -233,7 +223,6 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setSaving(true);
     const fd = new FormData(e.currentTarget);
 
     const arrival   = fd.get('arrival_date') as string;
@@ -242,6 +231,17 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     // Derive the 3 legacy single-value columns from the multi-select so older
     // reads still work: pick the first selected panel of each legacy type.
     const seenList = Array.from(new Set(panelsSeen.map(s => String(s).trim()).filter(Boolean)));
+
+    // A Field visit must record at least one panel seen (Facility visits may not
+    // involve panels). Block submit early so the validation fires before the
+    // network call and the form stays open for correction.
+    const fieldOrFacility = (fd.get('field_or_facility') as string) || 'Field';
+    if (fieldOrFacility === 'Field' && seenList.length === 0) {
+      toast.error('Select at least one panel seen for a Field visit.');
+      return;
+    }
+
+    setSaving(true);
     const typeOf = (serial: string) => {
       const p = allPanels.find(pp => getSerial(pp) === serial);
       return p?.panel_type || '';
@@ -291,43 +291,6 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
       setSaving(false);
     }
   };
-
-  // Panel options grouped by type
-  const panelsByType = (type: string) => allPanels.filter(p => p.panel_type === type);
-
-  // Build ordered type groups for the Panels Seen multi-select. Common legacy
-  // types lead; any remaining types follow alphabetically. Empty types skipped.
-  const TYPE_ORDER = ['Digital Shooting Panel', 'Surface Tester', 'P2500', 'P2000', 'P1000'];
-  const allTypes = Array.from(new Set(allPanels.map(p => p.panel_type).filter(Boolean)));
-  const orderedTypes = [
-    ...TYPE_ORDER.filter(t => allTypes.includes(t)),
-    ...allTypes.filter(t => !TYPE_ORDER.includes(t)).sort(),
-  ];
-  const panelTypeGroups = orderedTypes
-    .map(type => ({ type, panels: panelsByType(type) }))
-    .filter(g => g.panels.length > 0);
-  // Selected serials that aren't in the current panel list (e.g. legacy data).
-  const knownSerials = new Set(allPanels.map(p => getSerial(p)));
-  const orphanSeen = panelsSeen.filter(s => !knownSerials.has(s));
-
-  // Serial -> panel_type lookup for chip / search-result labels.
-  const typeBySerial = new Map<string, string>(
-    allPanels.map(p => [getSerial(p), p.panel_type || ''])
-  );
-
-  // Live type-ahead results: match the search text against serial OR type,
-  // hide already-selected panels, cap the list so the dropdown stays usable.
-  const searchQ = panelSearch.trim().toLowerCase();
-  const searchResults = searchQ === ''
-    ? []
-    : allPanels
-        .filter(p => {
-          const serial = getSerial(p);
-          if (panelsSeen.includes(serial)) return false;
-          const hay = `${serial} ${p.panel_type || ''}`.toLowerCase();
-          return hay.includes(searchQ);
-        })
-        .slice(0, 30);
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
@@ -422,7 +385,13 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
             <Combobox
               value={opCompany}
               onValueChange={setOpCompany}
-              options={epCompanies.map(o => ({ value: o, label: o }))}
+              // Ensure the seeded value renders its label immediately, even
+              // before the EP list finishes loading (Combobox shows the
+              // placeholder unless the value matches an option).
+              options={(opCompany && !epCompanies.includes(opCompany)
+                ? [opCompany, ...epCompanies]
+                : epCompanies
+              ).map(o => ({ value: o, label: o }))}
               placeholder="— Select —"
               searchPlaceholder="Search operating companies…"
               emptyText="No operating companies found."
@@ -504,122 +473,7 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           <Section title="Panels Seen" />
 
           <div className="col-span-1 md:col-span-2">
-            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">
-              Flag every panel you saw on this visit
-              <span className="ml-2 font-normal text-gray-400">
-                ({panelsSeen.length} selected · marks each Verified = Y)
-              </span>
-            </Label>
-
-            {/* ── Selected panels: removable chips ──────────────────────────── */}
-            {panelsSeen.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {panelsSeen.map(serial => {
-                  const t = typeBySerial.get(serial);
-                  return (
-                    <span
-                      key={serial}
-                      className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-xs bg-blue-600 text-white"
-                    >
-                      {serial}{t ? <span className="opacity-70">· {t}</span> : null}
-                      <button
-                        type="button"
-                        onClick={() => removePanelSeen(serial)}
-                        className="ml-0.5 w-4 h-4 inline-flex items-center justify-center rounded-full hover:bg-blue-700"
-                        title={`Remove ${serial}`}
-                        aria-label={`Remove ${serial}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ── Type-ahead search ─────────────────────────────────────────── */}
-            <div className="relative">
-              <Input
-                value={panelSearch}
-                onChange={e => setPanelSearch(e.target.value)}
-                placeholder="Search panels by serial # or type to add…"
-                autoComplete="off"
-              />
-              {searchQ !== '' && (
-                <div className="absolute z-20 left-0 right-0 mt-1 max-h-60 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-900 shadow-lg">
-                  {searchResults.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-gray-400">No matching panels.</div>
-                  ) : (
-                    searchResults.map(p => {
-                      const serial = getSerial(p);
-                      return (
-                        <button
-                          type="button"
-                          key={serial}
-                          onClick={() => { addPanelSeen(serial); setPanelSearch(''); }}
-                          className="w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-blue-50 dark:hover:bg-gray-800"
-                        >
-                          <span className="font-medium text-gray-800 dark:text-gray-100">{serial}</span>
-                          <span className="text-xs text-gray-400">{p.panel_type || ''}</span>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* ── Collapsible: browse all panels grouped by type ───────────── */}
-            <button
-              type="button"
-              onClick={() => setShowAllPanels(v => !v)}
-              className="mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              {showAllPanels ? '▾ Hide full list' : '▸ Browse all panels by type'}
-            </button>
-
-            {showAllPanels && (
-              <div className="mt-2 space-y-3 border border-gray-200 dark:border-gray-700 rounded-md p-3 max-h-72 overflow-y-auto">
-                {panelTypeGroups.length === 0 && (
-                  <p className="text-sm text-gray-400">No panels available.</p>
-                )}
-                {panelTypeGroups.map(({ type, panels }) => (
-                  <div key={type}>
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">{type}</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {panels.map(p => {
-                        const serial = getSerial(p);
-                        const on = panelsSeen.includes(serial);
-                        return (
-                          <button
-                            type="button"
-                            key={serial}
-                            onClick={() => togglePanelSeen(serial)}
-                            className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                              on
-                                ? 'bg-blue-600 border-blue-600 text-white'
-                                : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:border-blue-400'
-                            }`}
-                          >
-                            {on ? '✓ ' : ''}{serial}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Serials selected here but no longer in the panel list (e.g. legacy
-                values) are preserved so editing never silently drops them.
-                They already render as removable chips above; this note just
-                surfaces them when browsing. */}
-            {orphanSeen.length > 0 && (
-              <p className="mt-2 text-[11px] text-gray-400">
-                {orphanSeen.length} selected panel{orphanSeen.length > 1 ? 's are' : ' is'} not in the current panel list (legacy) — still saved.
-              </p>
-            )}
+            <PanelsSeenPicker panels={allPanels} value={panelsSeen} onChange={setPanelsSeen} />
           </div>
 
           {/* ── Summary ── */}

@@ -1230,10 +1230,10 @@ export default function IncidentDetail() {
                           <span
                             className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold shrink-0 ${
                               isAppSheet
-                                ? 'bg-gray-100 text-gray-600 border border-gray-300'
+                                ? 'bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                                 : r.report_type === 'Final'
-                                ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                                : 'bg-amber-100 text-amber-700 border border-amber-300'
+                                ? 'bg-blue-100 text-blue-700 border border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800'
+                                : 'bg-amber-100 text-amber-700 border border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800'
                             }`}
                           >
                             {isAppSheet ? 'A' : r.report_type[0]}

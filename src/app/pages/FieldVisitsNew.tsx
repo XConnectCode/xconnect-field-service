@@ -21,7 +21,7 @@ import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import FieldVisitForm from './forms/FieldVisitForm';
 import { displayVisitDuration } from '../lib/visitDuration';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
 // ── Time filter helpers ───────────────────────────────────────────────────────
@@ -362,7 +362,7 @@ export default function FieldVisitsNew() {
 
   return (
     <div className="p-4 md:p-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[1600px] mx-auto">
 
         {/* ── Header ── */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
@@ -471,6 +471,7 @@ export default function FieldVisitsNew() {
                         dataKey="count"
                         name="Visits"
                         radius={[4, 4, 0, 0]}
+                        fill={COLORS[0]}
                         onClick={(data: any) => {
                           const v = data?.name as string;
                           setDrill(prev => prev?.dim === 'purpose' && prev.value === v ? null : { dim: 'purpose', value: v });
@@ -478,7 +479,7 @@ export default function FieldVisitsNew() {
                         style={{ cursor: 'pointer' }}
                       >
                         {purposeData.map((_, i) => (
-                          <rect
+                          <Cell
                             key={i}
                             fill={COLORS[i % COLORS.length]}
                           />

@@ -47,6 +47,22 @@ function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
 }
 
+// Sanitize a single storage path SEGMENT (e.g. the category folder) to a
+// URL-safe slug: lowercase, every run of non-alphanumeric chars → a single
+// dash, no leading/trailing dash. Categories like "How-To's" (apostrophe) and
+// "Best Practices" (space) otherwise produced object keys that did not round-
+// trip between upload() and createSignedUrl() → "Object not found" on download.
+// The resulting key is stored verbatim in document_library.file_path and is
+// what download/share read back, so the two can never diverge for new uploads.
+function sanitizeSegment(segment: string): string {
+  return segment
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 120);
+}
+
 /**
  * Upload a file to the document-library bucket and record it in the
  * document_library table. Requires a real authenticated session (RLS gates
@@ -72,8 +88,13 @@ export async function uploadDocument(params: {
     );
   }
 
+  // Sanitize BOTH path segments so the key is always URL-safe. The category
+  // (folder) is the segment that historically broke downloads for categories
+  // with apostrophes/spaces; the filename keeps its readable form (sanitizeName
+  // already restricts it to URL-safe chars, preserving the extension).
+  const safeCategory = sanitizeSegment(category) || 'uncategorized';
   const safe = sanitizeName(file.name || 'document');
-  const path = `${category}/${Date.now()}-${safe}`;
+  const path = `${safeCategory}/${Date.now()}-${safe}`;
 
   const { error: uploadErr } = await supabase
     .storage

@@ -175,7 +175,7 @@ export default function Users() {
                     return (
                       <tr key={u.id} className="border-b last:border-0">
                         <td className="py-3 pr-4">
-                          <div className="font-medium text-gray-900">
+                          <div className="font-medium text-gray-900 dark:text-gray-100">
                             {u.name || u.email}
                             {isSelf && (
                               <span className="ml-2 text-xs text-gray-400">(you)</span>
@@ -199,7 +199,7 @@ export default function Users() {
                         <td className="py-3 pr-2">
                           <div className="flex items-center justify-end gap-2">
                             <select
-                              className="border rounded-md px-2 py-1 text-sm bg-white disabled:opacity-50"
+                              className="border dark:border-gray-700 rounded-md px-2 py-1 text-sm bg-white dark:bg-slate-800 dark:text-gray-100 disabled:opacity-50"
                               value={u.role}
                               disabled={busyId === u.id || (isSelf)}
                               title={isSelf ? 'You cannot change your own role' : 'Change role'}

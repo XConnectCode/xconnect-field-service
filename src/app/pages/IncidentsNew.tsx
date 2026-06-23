@@ -951,7 +951,7 @@ export default function IncidentsNew() {
           <>
         {/* Report filter banner */}
         {fromReport && (
-          <div className="mb-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800">
+          <div className="mb-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800 dark:bg-blue-950/30 dark:border-blue-900 dark:text-blue-300">
             <span>📊</span>
             <span>
               Filtered from Report —{' '}
@@ -1113,11 +1113,11 @@ export default function IncidentsNew() {
                             return (
                               <div className="flex items-center gap-1">
                                 <span title={hasPrelim ? 'Preliminary report exists' : 'No preliminary report'}
-                                  className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${hasPrelim ? 'bg-amber-100 text-amber-700 border border-amber-300' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}>
+                                  className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${hasPrelim ? 'bg-amber-100 text-amber-700 border border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800' : 'bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700'}`}>
                                   P
                                 </span>
                                 <span title={hasFinal ? 'Final report exists' : 'No final report'}
-                                  className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${hasFinal ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-400 border border-gray-200'}`}>
+                                  className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${hasFinal ? 'bg-blue-100 text-blue-700 border border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800' : 'bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700'}`}>
                                   F
                                 </span>
                                 {inc.report_sent && (

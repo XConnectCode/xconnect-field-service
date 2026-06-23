@@ -870,7 +870,7 @@ export default function TechnicalBulletin() {
                     className={`cursor-pointer ${
                       severity === sev
                         ? getSeverityColor(sev) + ' border-2'
-                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                        : 'bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                     }`}
                     onClick={() => setSeverity(sev)}
                   >
@@ -890,7 +890,7 @@ export default function TechnicalBulletin() {
                     className={`cursor-pointer ${
                       affectedProducts.includes(product)
                         ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                        : 'bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                     }`}
                     onClick={() => toggleProduct(product)}
                   >
@@ -1108,7 +1108,7 @@ export default function TechnicalBulletin() {
                     className={`cursor-pointer ${
                       roleTypes.includes(role)
                         ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-600 border border-gray-300'
+                        : 'bg-gray-100 text-gray-600 border border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                     }`}
                     onClick={() => {
                       if (roleTypes.includes(role)) {
