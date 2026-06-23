@@ -19,7 +19,7 @@ const LEASE_RATES: Record<string, { label: string; monthly: number; replace: num
   'P2500':                  { label: 'XC XFire Communication Panel – P2500',  monthly: 250,  replace: 14500 },
   'Digital Shooting Panel': { label: 'XFire Digital Shooting Panel',          monthly: 100,  replace: 11500 },
   'Master Safe Panel':      { label: 'XFire Master Safe Panel',               monthly: 50,   replace: 2000  },
-  'Toolstring Verifier':    { label: 'XFire Toolstring Verifier',             monthly: 75,   replace: 3500  },
+  'Surface Tester':         { label: 'XFire Surface Tester',                 monthly: 75,   replace: 3500  },
   'Pressure Box':           { label: 'XFire Surface Test Box',                monthly: 50,   replace: 7000  },
 };
 
@@ -316,7 +316,7 @@ export async function generateMonthlyPanelReport(opts: MonthlyPanelReportOptions
         { name: 'Digital Shooting Panel', price: 11500 },
         { name: 'XFire Test Box',         price: 7000  },
         { name: 'Master Safe Panel',      price: 2000  },
-        { name: 'Toolstring Verifier',    price: 3500  },
+        { name: 'Surface Tester',         price: 3500  },
       ],
     },
     {

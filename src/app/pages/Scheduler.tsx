@@ -35,13 +35,16 @@ import {
 } from '../components/ui/table';
 import { Calendar } from '../components/ui/calendar';
 import { Combobox } from '../components/ui/combobox';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import {
   CalendarClock, Plus, Edit, Trash, Truck, MapPin, Cpu, ArrowUpDown, X,
+  ExternalLink, PackageCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import {
   listScheduledVisits, createScheduledVisit, updateScheduledVisit, deleteScheduledVisit,
+  markVisitShipped,
   listSqms, listCustomers, listDistrictsForCustomer, listDistrictsByIds, listEpCompanies, listProductLines,
   PANEL_TYPES, VISIT_STATUSES, SCHEDULER_CATEGORIES, FULFILLMENT_TYPES,
   ScheduledVisit, VisitPanel,
@@ -74,7 +77,7 @@ function earliestPanelDate(v: ScheduledVisit): string | null {
 // ── Shared form field wrapper ─────────────────────────────────────────────────
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
-    <div>
+    <div className="min-w-0">
       <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">
         {label}{required && <span className="text-red-500 ml-0.5">*</span>}
       </Label>
@@ -92,8 +95,89 @@ function StatusBadge({ status }: { status: string | null }) {
       ? 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
       : s === 'confirmed'
       ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300'
+      : s === 'shipped'
+      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
       : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
   return <span className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium capitalize ${cls}`}>{s}</span>;
+}
+
+// Shows a tracking number, hyperlinked when a tracking URL is present.
+function TrackingCell({ number, url }: { number: string | null | undefined; url: string | null | undefined }) {
+  const n = (number || '').trim();
+  const u = (url || '').trim();
+  if (!n && !u) return <span className="text-muted-foreground">—</span>;
+  const label = n || 'Track';
+  if (u) {
+    return (
+      <a href={u} target="_blank" rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
+        {label}<ExternalLink className="w-3 h-3" />
+      </a>
+    );
+  }
+  return <span className="text-foreground">{label}</span>;
+}
+
+function ShippedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+      <PackageCheck className="w-3 h-3" /> Shipped
+    </span>
+  );
+}
+
+const isShipped = (v: { status?: string | null; shipped_at?: string | null }) =>
+  v.status === 'shipped' || !!v.shipped_at;
+
+// Quick action: mark a ship-only visit shipped, optionally capturing tracking
+// in a small popover. Skipping the fields just stamps status=shipped + shipped_at.
+function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; onDone: () => void; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [num, setNum] = useState(visit.tracking_number || '');
+  const [url, setUrl] = useState(visit.tracking_url || '');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) { setNum(visit.tracking_number || ''); setUrl(visit.tracking_url || ''); }
+  }, [open, visit.tracking_number, visit.tracking_url]);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await markVisitShipped(visit.id, { tracking_number: num, tracking_url: url });
+      toast.success('Marked shipped');
+      setOpen(false);
+      onDone();
+    } catch {
+      // toast raised in data layer
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className={compact ? 'h-7 px-2 text-xs' : ''}>
+          <Truck className={compact ? 'w-3 h-3 mr-1' : 'w-3.5 h-3.5 mr-1'} /> Mark shipped
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 space-y-3">
+        <div>
+          <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Tracking #</Label>
+          <Input value={num} onChange={(e) => setNum(e.target.value)} placeholder="Optional" />
+        </div>
+        <div>
+          <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 block">Tracking link</Label>
+          <Input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
+          <Button type="button" size="sm" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Confirm'}</Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function FulfillmentBadge({ type }: { type: string | null }) {
@@ -127,7 +211,15 @@ const selectCls =
   'text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none';
 
 // ── Unified create/edit dialog ────────────────────────────────────────────────
-type PanelRow = { panel_type: string; qty: string; needed_by_date: string };
+type PanelRow = {
+  panel_type: string;
+  qty: string;
+  needed_by_date: string;
+  tracking_number: string;
+  tracking_url: string;
+  shipped_at: string | null;
+  trackingOpen: boolean;
+};
 
 function VisitFormDialog({
   open, onClose, onSaved, record, currentUser,
@@ -151,6 +243,8 @@ function VisitFormDialog({
   const [plannedDate, setPlannedDate] = useState('');
   const [status, setStatus] = useState('planned');
   const [notes, setNotes] = useState('');
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [trackingUrl, setTrackingUrl] = useState('');
   const [panels, setPanels] = useState<PanelRow[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -174,11 +268,17 @@ function VisitFormDialog({
     setPlannedDate(record?.planned_date ? String(record.planned_date).slice(0, 10) : '');
     setStatus(record?.status || 'planned');
     setNotes(record?.notes || '');
+    setTrackingNumber(record?.tracking_number || '');
+    setTrackingUrl(record?.tracking_url || '');
     setPanels(
       (record?.panels || []).map((p) => ({
         panel_type: p.panel_type || '',
         qty: p.qty_needed != null ? String(p.qty_needed) : '1',
         needed_by_date: p.needed_by_date ? String(p.needed_by_date).slice(0, 10) : '',
+        tracking_number: p.tracking_number || '',
+        tracking_url: p.tracking_url || '',
+        shipped_at: p.shipped_at || null,
+        trackingOpen: !!(p.tracking_number || p.tracking_url),
       })),
     );
   }, [open, record]);
@@ -192,7 +292,10 @@ function VisitFormDialog({
     setCategories((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
   };
 
-  const addPanel = () => setPanels((prev) => [...prev, { panel_type: '', qty: '1', needed_by_date: '' }]);
+  const addPanel = () => setPanels((prev) => [...prev, {
+    panel_type: '', qty: '1', needed_by_date: '',
+    tracking_number: '', tracking_url: '', shipped_at: null, trackingOpen: false,
+  }]);
   const removePanel = (idx: number) => setPanels((prev) => prev.filter((_, i) => i !== idx));
   const updatePanel = (idx: number, patch: Partial<PanelRow>) =>
     setPanels((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
@@ -221,6 +324,9 @@ function VisitFormDialog({
           panel_type: p.panel_type,
           qty_needed: isNaN(q) || q < 1 ? 1 : q,
           needed_by_date: p.needed_by_date || null,
+          tracking_number: p.tracking_number.trim() || null,
+          tracking_url: p.tracking_url.trim() || null,
+          shipped_at: p.shipped_at || null,
         };
       });
 
@@ -232,10 +338,12 @@ function VisitFormDialog({
       customer: custId || null,
       customer_district: distId || null,
       operating_company: opCompany || null,
-      product_line: productLine || null,
+      product_line: shipOnly ? null : (productLine || null),
       planned_date: plannedDate || null,
       status,
       notes: notes.trim() || null,
+      tracking_number: trackingNumber.trim() || null,
+      tracking_url: trackingUrl.trim() || null,
     };
 
     setSaving(true);
@@ -266,7 +374,7 @@ function VisitFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>{editing ? 'Edit Visit' : 'Schedule Visit'}</DialogTitle>
         </DialogHeader>
@@ -354,24 +462,44 @@ function VisitFormDialog({
             />
           </Field>
 
-          <Field label="Product Line">
-            <Combobox
-              value={productLine}
-              onValueChange={setProductLine}
-              options={(productLine && !productLines.includes(productLine) ? [productLine, ...productLines] : productLines)
-                .map((o) => ({ value: o, label: o }))}
-              placeholder="— Select —"
-              searchPlaceholder="Search product lines…"
-              emptyText="No product lines found."
-              allowClear
-            />
-          </Field>
+          {!shipOnly && (
+            <Field label="Product Line">
+              <Combobox
+                value={productLine}
+                onValueChange={setProductLine}
+                options={(productLine && !productLines.includes(productLine) ? [productLine, ...productLines] : productLines)
+                  .map((o) => ({ value: o, label: o }))}
+                placeholder="— Select —"
+                searchPlaceholder="Search product lines…"
+                emptyText="No product lines found."
+                allowClear
+              />
+            </Field>
+          )}
 
           <Field label="Status">
             <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)}>
               {VISIT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
+        </div>
+
+        {/* Shipping / tracking (visit-level; emphasized for ship-only) */}
+        <div className="mt-4 rounded-md border border-border bg-card p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Truck className="w-4 h-4 text-amber-500" />
+            <Label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+              Shipping {shipOnly && <span className="text-muted-foreground font-normal">(for ship-only)</span>}
+            </Label>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+            <Field label="Tracking #">
+              <Input value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder="e.g. 1Z999…" />
+            </Field>
+            <Field label="Tracking link">
+              <Input type="url" value={trackingUrl} onChange={(e) => setTrackingUrl(e.target.value)} placeholder="https://…" />
+            </Field>
+          </div>
         </div>
 
         {/* Categories (on-site only) */}
@@ -417,34 +545,63 @@ function VisitFormDialog({
           )}
           <div className="space-y-2">
             {panels.map((p, idx) => (
-              <div key={idx} className="grid grid-cols-1 sm:grid-cols-[1fr_80px_150px_auto] gap-2 items-end rounded-md border border-border bg-card p-2">
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">Panel type</Label>
-                  <Combobox
-                    value={p.panel_type}
-                    onValueChange={(v) => updatePanel(idx, { panel_type: v })}
-                    options={PANEL_TYPES.map((pt) => ({ value: pt, label: pt }))}
-                    placeholder="— Select panel —"
-                    searchPlaceholder="Search panel types…"
-                    emptyText="No panel types found."
-                  />
+              <div key={idx} className="rounded-md border border-border bg-card p-2">
+                <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_72px_150px_auto] gap-2 items-end">
+                  <div className="min-w-0">
+                    <Label className="text-[11px] text-muted-foreground mb-1 block">Panel type</Label>
+                    <Combobox
+                      value={p.panel_type}
+                      onValueChange={(v) => updatePanel(idx, { panel_type: v })}
+                      options={PANEL_TYPES.map((pt) => ({ value: pt, label: pt }))}
+                      placeholder="— Select panel —"
+                      searchPlaceholder="Search panel types…"
+                      emptyText="No panel types found."
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <Label className="text-[11px] text-muted-foreground mb-1 block">Qty</Label>
+                    <Input type="number" min={1} value={p.qty} onChange={(e) => updatePanel(idx, { qty: e.target.value })} />
+                  </div>
+                  <div className="min-w-0">
+                    <Label className="text-[11px] text-muted-foreground mb-1 block">Needed by</Label>
+                    <Input type="date" value={p.needed_by_date} onChange={(e) => updatePanel(idx, { needed_by_date: e.target.value })} />
+                  </div>
+                  <div className="flex items-center gap-1 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => updatePanel(idx, { trackingOpen: !p.trackingOpen })}
+                      className={`h-9 w-9 flex items-center justify-center rounded-md hover:bg-accent ${
+                        p.trackingOpen || p.tracking_number || p.tracking_url
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                      aria-label="Toggle panel tracking"
+                      title="Tracking for this panel"
+                    >
+                      <Truck className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removePanel(idx)}
+                      className="h-9 w-9 flex items-center justify-center rounded-md text-muted-foreground hover:text-red-500 hover:bg-accent"
+                      aria-label="Remove panel"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">Qty</Label>
-                  <Input type="number" min={1} value={p.qty} onChange={(e) => updatePanel(idx, { qty: e.target.value })} />
-                </div>
-                <div>
-                  <Label className="text-[11px] text-muted-foreground mb-1 block">Needed by</Label>
-                  <Input type="date" value={p.needed_by_date} onChange={(e) => updatePanel(idx, { needed_by_date: e.target.value })} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removePanel(idx)}
-                  className="h-9 w-9 flex items-center justify-center rounded-md text-muted-foreground hover:text-red-500 hover:bg-accent"
-                  aria-label="Remove panel"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                {p.trackingOpen && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 pt-2 border-t border-border">
+                    <div className="min-w-0">
+                      <Label className="text-[11px] text-muted-foreground mb-1 block">Tracking # (override)</Label>
+                      <Input value={p.tracking_number} onChange={(e) => updatePanel(idx, { tracking_number: e.target.value })} placeholder="Optional" />
+                    </div>
+                    <div className="min-w-0">
+                      <Label className="text-[11px] text-muted-foreground mb-1 block">Link</Label>
+                      <Input type="url" value={p.tracking_url} onChange={(e) => updatePanel(idx, { tracking_url: e.target.value })} placeholder="https://…" />
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -704,10 +861,14 @@ export default function Scheduler() {
                     <div key={v.id} className="rounded-md border border-border bg-card p-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
+                          <div className="flex items-center flex-wrap gap-2 mb-1">
                             <FulfillmentBadge type={v.fulfillment_type} />
                             <StatusBadge status={v.status} />
+                            {isShipped(v) && <ShippedBadge />}
                           </div>
+                          {v.tracking_number || v.tracking_url ? (
+                            <div className="text-xs mb-1"><TrackingCell number={v.tracking_number} url={v.tracking_url} /></div>
+                          ) : null}
                           <div className="text-sm font-medium text-foreground truncate">
                             {custDistLabel(v.customer, v.customer_district)}
                           </div>
@@ -730,7 +891,12 @@ export default function Scheduler() {
                             </ul>
                           )}
                         </div>
-                        <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Edit"><Edit className="w-4 h-4" /></button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {v.fulfillment_type === 'ship_only' && !isShipped(v) && (
+                            <MarkShippedButton visit={v} onDone={loadData} compact />
+                          )}
+                          <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4" /></button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -771,13 +937,14 @@ export default function Scheduler() {
                         <TableHead>Op Company</TableHead>
                         <TableHead>Categories</TableHead>
                         <TableHead>Panels</TableHead>
+                        <TableHead>Tracking</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredVisits.length === 0 && (
-                        <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No scheduled visits.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No scheduled visits.</TableCell></TableRow>
                       )}
                       {filteredVisits.map((v) => (
                         <TableRow key={v.id}>
@@ -792,6 +959,12 @@ export default function Scheduler() {
                               ? <span className="inline-block rounded-md px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{(v.panels || []).length} panel{(v.panels || []).length === 1 ? '' : 's'}</span>
                               : '—'}
                           </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <TrackingCell number={v.tracking_number} url={v.tracking_url} />
+                              {isShipped(v) && <ShippedBadge />}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <select className="h-8 rounded-md border border-input bg-input-background px-2 text-xs dark:bg-input/30 text-foreground"
                               value={v.status || 'planned'} onChange={(e) => quickStatus(v, e.target.value)}>
@@ -799,8 +972,13 @@ export default function Scheduler() {
                             </select>
                           </TableCell>
                           <TableCell className="text-right whitespace-nowrap">
-                            <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground mr-3" aria-label="Edit"><Edit className="w-4 h-4 inline" /></button>
-                            <button onClick={() => setDeleteTarget(v)} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4 inline" /></button>
+                            <div className="inline-flex items-center gap-2">
+                              {v.fulfillment_type === 'ship_only' && !isShipped(v) && (
+                                <MarkShippedButton visit={v} onDone={loadData} compact />
+                              )}
+                              <button onClick={() => openEdit(v)} className="text-muted-foreground hover:text-foreground" aria-label="Edit"><Edit className="w-4 h-4 inline" /></button>
+                              <button onClick={() => setDeleteTarget(v)} className="text-muted-foreground hover:text-red-500" aria-label="Delete"><Trash className="w-4 h-4 inline" /></button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -836,23 +1014,35 @@ export default function Scheduler() {
                         <TableHead>Qty</TableHead>
                         <TableHead>Customer</TableHead>
                         <TableHead>Type</TableHead>
+                        <TableHead>Tracking</TableHead>
                         <TableHead>Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {flatPanels.length === 0 && (
-                        <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No panel needs.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No panel needs.</TableCell></TableRow>
                       )}
-                      {flatPanels.map(({ visit, panel }, i) => (
-                        <TableRow key={`${visit.id}-${i}`}>
-                          <TableCell className="whitespace-nowrap">{prettyDate(panel.needed_by_date)}</TableCell>
-                          <TableCell>{panel.panel_type || '—'}</TableCell>
-                          <TableCell>{panel.qty_needed ?? 1}</TableCell>
-                          <TableCell>{custLabel(visit.customer)}</TableCell>
-                          <TableCell><FulfillmentBadge type={visit.fulfillment_type} /></TableCell>
-                          <TableCell><StatusBadge status={visit.status} /></TableCell>
-                        </TableRow>
-                      ))}
+                      {flatPanels.map(({ visit, panel }, i) => {
+                        const tNum = panel.tracking_number || visit.tracking_number;
+                        const tUrl = panel.tracking_url || visit.tracking_url;
+                        const shipped = !!panel.shipped_at || isShipped(visit);
+                        return (
+                          <TableRow key={`${visit.id}-${i}`}>
+                            <TableCell className="whitespace-nowrap">{prettyDate(panel.needed_by_date)}</TableCell>
+                            <TableCell>{panel.panel_type || '—'}</TableCell>
+                            <TableCell>{panel.qty_needed ?? 1}</TableCell>
+                            <TableCell>{custLabel(visit.customer)}</TableCell>
+                            <TableCell><FulfillmentBadge type={visit.fulfillment_type} /></TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <TrackingCell number={tNum} url={tUrl} />
+                                {shipped && <ShippedBadge />}
+                              </div>
+                            </TableCell>
+                            <TableCell><StatusBadge status={visit.status} /></TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </CardContent>

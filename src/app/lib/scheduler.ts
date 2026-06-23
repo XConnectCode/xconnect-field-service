@@ -26,11 +26,10 @@ export const PANEL_TYPES = [
   'Pressure Box',
   'Surface Tester',
   'Toolstring Simulator',
-  'Toolstring Verifier',
 ];
 
 // Visit lifecycle statuses (applies to both fulfillment types).
-export const VISIT_STATUSES = ['planned', 'confirmed', 'completed', 'cancelled'];
+export const VISIT_STATUSES = ['planned', 'confirmed', 'shipped', 'completed', 'cancelled'];
 
 // Multi-select categories for on-site visits.
 export const SCHEDULER_CATEGORIES = [
@@ -55,6 +54,9 @@ export interface VisitPanel {
   qty_needed: number;
   needed_by_date: string | null;
   notes?: string | null;
+  tracking_number?: string | null;
+  tracking_url?: string | null;
+  shipped_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -72,6 +74,9 @@ export interface ScheduledVisit {
   planned_date: string | null;
   status: string | null;
   notes: string | null;
+  tracking_number?: string | null;
+  tracking_url?: string | null;
+  shipped_at?: string | null;
   created_by?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -113,6 +118,9 @@ function panelInsertRows(visitId: string, panels: VisitPanel[]) {
       qty_needed: p.qty_needed != null && p.qty_needed >= 1 ? p.qty_needed : 1,
       needed_by_date: p.needed_by_date || null,
       notes: p.notes?.trim() || null,
+      tracking_number: p.tracking_number?.trim() || null,
+      tracking_url: p.tracking_url?.trim() || null,
+      shipped_at: p.shipped_at || null,
     }));
 }
 
@@ -180,6 +188,31 @@ export async function deleteScheduledVisit(id: string): Promise<void> {
     if (error) throw error;
   } catch (err: any) {
     toast.error(err?.message || 'Failed to delete visit');
+    throw err;
+  }
+}
+
+/**
+ * Quick action: flag a visit as shipped (status='shipped', shipped_at=now), with
+ * an optional tracking number / link captured at the same moment. Only fields
+ * provided are overwritten, so calling without tracking just stamps the ship.
+ */
+export async function markVisitShipped(
+  id: string,
+  opts: { tracking_number?: string | null; tracking_url?: string | null } = {},
+): Promise<void> {
+  try {
+    const payload: Partial<ScheduledVisit> = {
+      status: 'shipped',
+      shipped_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (opts.tracking_number !== undefined) payload.tracking_number = opts.tracking_number?.trim() || null;
+    if (opts.tracking_url !== undefined) payload.tracking_url = opts.tracking_url?.trim() || null;
+    const { error } = await supabase.from('scheduled_visits').update(payload).eq('id', id);
+    if (error) throw error;
+  } catch (err: any) {
+    toast.error(err?.message || 'Failed to mark shipped');
     throw err;
   }
 }
