@@ -113,14 +113,24 @@ export default function TechnicalBulletins() {
 
   const handleGeneratePDF = async (bulletin: TechnicalBulletin) => {
     try {
-      await generateTechnicalBulletinPDF({
+      // Null-guard nullable DB array columns before any .length access.
+      const affectedProducts = bulletin.affected_products ?? [];
+      const affectedParts = bulletin.affected_parts ?? [];
+      const distributionList = bulletin.distribution_list ?? [];
+      const roleTypes = bulletin.role_types ?? [];
+      const problemImages = bulletin.problem_images ?? [];
+      const fixImages = bulletin.fix_images ?? [];
+
+      // Build as a Blob and trigger the download manually (mirrors the working
+      // detail page), since jsPDF's built-in save() can silently fail here.
+      const blob = await generateTechnicalBulletinPDF({
         bulletinNumber: bulletin.bulletin_number,
         title: bulletin.title,
         date: bulletin.date,
         severity: bulletin.severity,
-        affectedProducts: bulletin.affected_products,
-        failedParts: bulletin.affected_parts.length > 0 ? bulletin.affected_parts : undefined,
-        distributionList: bulletin.distribution_list.length > 0 ? bulletin.distribution_list : undefined,
+        affectedProducts: affectedProducts.length > 0 ? affectedProducts : ['All Products'],
+        failedParts: affectedParts.length > 0 ? affectedParts : undefined,
+        distributionList: distributionList.length > 0 ? distributionList : undefined,
         // Phase 2: pass the canonical sections when present; the PDF generator
         // falls back to the legacy fields below for pre-Phase-2 bulletins.
         sections: Array.isArray(bulletin.sections) && bulletin.sections.length > 0
@@ -130,11 +140,21 @@ export default function TechnicalBulletins() {
         background: bulletin.background || undefined,
         technicalDetails: bulletin.technical_details,
         recommendedActions: bulletin.recommended_actions,
-        roleType: bulletin.role_types.length > 0 ? bulletin.role_types : undefined,
-        problemImages: bulletin.problem_images.length > 0 ? bulletin.problem_images : undefined,
-        fixImages: bulletin.fix_images.length > 0 ? bulletin.fix_images : undefined,
-        returnBlob: false,
-      });
+        roleType: roleTypes.length > 0 ? roleTypes : undefined,
+        problemImages: problemImages.length > 0 ? problemImages : undefined,
+        fixImages: fixImages.length > 0 ? fixImages : undefined,
+        returnBlob: true,
+      }) as Blob;
+
+      const fileName = `Technical_Bulletin_TB-${bulletin.bulletin_number}_Standard.pdf`;
+      const localUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = localUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(localUrl), 4000);
       toast.success('PDF generated successfully!');
     } catch (error) {
       console.error('PDF generation error:', error);

@@ -570,7 +570,7 @@ export default function TechnicalBulletin() {
           toast.success(`${compact ? 'Compact' : 'Standard'} PDF saved to this bulletin.`);
         } catch (storeErr: any) {
           console.warn('Could not store bulletin PDF:', storeErr?.message);
-          toast.info('PDF downloaded, but could not be saved to the bulletin (storage unavailable).');
+          toast.info(`PDF downloaded, but could not be saved to the bulletin: ${storeErr?.message || 'storage unavailable'}`);
         }
       }
     } catch (error) {
