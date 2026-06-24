@@ -24,7 +24,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 
-const PANEL_STATUSES = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold'];
+const PANEL_STATUSES = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold', 'Shipped'];
 
 const STATUS_STYLES: Record<string, string> = {
   'At Facility': 'bg-green-600 hover:bg-green-700 text-white',
@@ -32,6 +32,7 @@ const STATUS_STYLES: Record<string, string> = {
   'In Repair':   'bg-amber-500 hover:bg-amber-600 text-white',
   'Loaned':      'bg-purple-600 hover:bg-purple-700 text-white',
   'Sold':        'bg-red-600 hover:bg-red-700 text-white',
+  'Shipped':     'bg-teal-600 hover:bg-teal-700 text-white',
 };
 
 const CHART_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16'];

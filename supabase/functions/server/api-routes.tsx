@@ -648,7 +648,8 @@ apiRoutes.post("/mark-panels-shipped", async (c) => {
         const { error: panErr } = await supabase
           .from('panels')
           .update({
-            panel_status: 'In Transit',
+            panel_status: 'Shipped',
+            shipped_date: new Date().toISOString().slice(0, 10),
             tracking_info: p.panel_tracking_number ?? tracking,
             customer: body.customer ?? null,
             customer_district: body.customer_district ?? null,
@@ -1330,7 +1331,9 @@ apiRoutes.put("/panels/:id", async (c) => {
         // 'At Facility' on the client (see PanelDetail handleMarkReturned).
         returned_date: body.returned_date,
         return_notes: body.return_notes,
-        return_confirmed_by: body.return_confirmed_by
+        return_confirmed_by: body.return_confirmed_by,
+        // Ship workflow: ship date stamped when panel_status set to 'Shipped'.
+        shipped_date: body.shipped_date
       })
       .eq('row_id', id)
       .select()

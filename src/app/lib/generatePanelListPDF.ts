@@ -35,6 +35,7 @@ const STATUS_COLORS: Record<string, [number, number, number]> = {
   'In Repair':   [245, 158, 11],
   'Loaned':      [168, 85, 247],
   'Sold':        [220, 38, 38],
+  'Shipped':     [13, 148, 136],
 };
 
 export async function generatePanelListPDF(opts: PanelListOptions): Promise<void> {

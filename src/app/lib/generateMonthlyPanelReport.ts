@@ -248,6 +248,7 @@ export async function generateMonthlyPanelReport(opts: MonthlyPanelReportOptions
     'In Repair':   [245, 158, 11],
     'Loaned':      [168, 85, 247],
     'Sold':        [220, 38, 38],
+    'Shipped':     [13, 148, 136],
   };
 
   let rowIdx = 0;

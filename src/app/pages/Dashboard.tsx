@@ -132,6 +132,7 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string }> = {
   "In Repair":   { color: "#f59e0b", bg: "#fffbeb" },
   "Loaned":      { color: "#a855f7", bg: "#faf5ff" },
   "Sold":        { color: "#ef4444", bg: "#fef2f2" },
+  "Shipped":     { color: "#0d9488", bg: "#f0fdfa" },
 };
 
 // ── Quick-edit enums ──────────────────────────────────────────────────────────
@@ -711,13 +712,14 @@ function makeModal(isDark: boolean): Record<string, React.CSSProperties> {
 // without leaving the dashboard. Customer/District are cascading lookups, so
 // they're loaded inside the modal. Anything not surfaced here is reachable via
 // "Open full panel".
-const PANEL_STATUS_OPTS = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold'];
+const PANEL_STATUS_OPTS = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold', 'Shipped'];
 const PANEL_STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   "At Facility": { bg: "#dbeafe", color: "#1e40af" },
   "Leased":      { bg: "#dcfce7", color: "#166534" },
   "In Repair":   { bg: "#ffedd5", color: "#9a3412" },
   "Loaned":      { bg: "#fef9c3", color: "#854d0e" },
   "Sold":        { bg: "#f1f5f9", color: "#475569" },
+  "Shipped":     { bg: "#ccfbf1", color: "#115e59" },
 };
 const YN_COLORS: Record<string, { bg: string; color: string }> = {
   Y:   { bg: "#dcfce7", color: "#166534" },
@@ -1143,7 +1145,7 @@ export default function Dashboard() {
         let pt = 0;
         for (const r of panelsRaw) { const k = r.panel_status ?? "Unknown"; sm[k] = (sm[k] ?? 0) + 1; pt++; }
         setPanelTotal(pt);
-        const order = ["At Facility", "Leased", "In Repair", "Loaned", "Sold"];
+        const order = ["At Facility", "Leased", "In Repair", "Loaned", "Sold", "Shipped"];
         const sorted = Object.entries(sm).sort(([a], [b]) => {
           const ai = order.indexOf(a); const bi = order.indexOf(b);
           if (ai !== -1 && bi !== -1) return ai - bi;
@@ -1418,7 +1420,7 @@ export default function Dashboard() {
       </h2>
       <div style={styles.gridAuto}>
         {loading
-          ? ["At Facility", "Leased", "In Repair", "Loaned", "Sold"].map(s => <PanelStatusCard key={s} status={s} count={0} total={0} loading styles={styles} isDark={isDark} />)
+          ? ["At Facility", "Leased", "In Repair", "Loaned", "Sold", "Shipped"].map(s => <PanelStatusCard key={s} status={s} count={0} total={0} loading styles={styles} isDark={isDark} />)
           : panelStatuses.map(({ status, count, total }) => <PanelStatusCard key={status} status={status} count={count} total={total} styles={styles} isDark={isDark} />)}
       </div>
 
