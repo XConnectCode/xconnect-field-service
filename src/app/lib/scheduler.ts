@@ -68,6 +68,12 @@ export function activityMeta(type: string | null | undefined) {
   return ACTIVITY_TYPES.find((a) => a.value === type) || ACTIVITY_TYPES[3];
 }
 
+// Maps scheduler activity types to valid "Visit Type" enum values (DB enum).
+const ACTIVITY_TO_VISIT_PURPOSE: Record<string, string> = {
+  install: 'XFire Installation',
+  training: 'Training',
+};
+
 // Job lifecycle statuses (scheduled_jobs.status).
 export const JOB_STATUSES = ['open', 'in_progress', 'completed', 'cancelled'];
 
@@ -596,8 +602,8 @@ export async function startFieldVisitForActivity(visit: ScheduledVisit): Promise
     }
 
     const purpose = visit.activity_type
-      ? activityMeta(visit.activity_type).label
-      : (visit.categories || []).join(', ') || null;
+      ? (ACTIVITY_TO_VISIT_PURPOSE[visit.activity_type] ?? null)
+      : null;
 
     // The fieldvisits INSERT + scheduled_visits link run server-side under the
     // service-role edge route — `fieldvisits` RLS has no anon write grant.
