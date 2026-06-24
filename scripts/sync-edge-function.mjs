@@ -15,7 +15,7 @@
  * `index.ts` is left alone (it imports `./index.tsx` and calls Deno.serve).
  */
 
-import { copyFileSync, readdirSync, mkdirSync, existsSync } from "node:fs";
+import { copyFileSync, readdirSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +24,18 @@ const repoRoot = join(__dirname, "..");
 
 const sourceDir = join(repoRoot, "supabase", "functions", "server");
 const targetDir = join(repoRoot, "supabase", "functions", "make-server-64775d98");
+
+// Clear the Supabase CLI's eszip scratch dir before every deploy. A stale
+// supabase/.temp can produce a corrupted/incomplete function bundle that boots
+// with a 503 BOOT_ERROR ("Function failed to start") on EVERY route, taking the
+// whole edge backend down even though the source code is correct. Removing it
+// here (cross-platform, no extra deps) makes `edge:deploy` / `edge:deploy:prod`
+// self-healing so the stale-temp failure can't recur.
+const tempDir = join(repoRoot, "supabase", ".temp");
+if (existsSync(tempDir)) {
+  rmSync(tempDir, { recursive: true, force: true });
+  console.log("  cleaned supabase/.temp (stale eszip scratch dir)");
+}
 
 if (!existsSync(sourceDir)) {
   console.error(`✗ Source folder not found: ${sourceDir}`);
