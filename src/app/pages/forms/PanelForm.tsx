@@ -47,7 +47,7 @@ const showPlusPanel    = (type: string) => type === 'P2500';
 const showGui          = (type: string, status: string) => GUI_TYPES.includes(type) && GUI_STATUSES.includes(status);
 const showSurfaceFw    = (type: string) => type === 'Surface Tester';
 const showShootingFw   = (type: string) => type === 'Digital Shooting Panel';
-const PANEL_STATUS_OPTS = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold'];
+const PANEL_STATUS_OPTS = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold', 'Shipped'];
 
 // ── Customer-assignment field rules (Unit #, SO #, Customer, District,
 //    Operating Company, Spare, Activity) ─────────────────────────────────────
@@ -200,6 +200,10 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
       verified:         fd.get('verified')         || 'N',
       activity:         clearAssign ? null : (assignVals.activity || null),
       comments:         fd.get('comments')         || null,
+      // Ship date: stamp today when marking Shipped (unless one was supplied).
+      shipped_date:     status === 'Shipped'
+                          ? (fd.get('shipped_date') || new Date().toISOString().slice(0, 10))
+                          : (fd.get('shipped_date') || null),
       // Always stamp the user performing this save (create OR edit) — never
       // carry over the prior editor or rely on a typed value.
       updated_by:       currentUser?.name || currentUser?.email || null,

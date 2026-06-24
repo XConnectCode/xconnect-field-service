@@ -34,6 +34,7 @@ const PANEL_STATUS_OPTS = [
   'In Repair',
   'Loaned',
   'Sold',
+  'Shipped',
 ];
 
 // Statuses where a panel is out with a customer / off-site and can be returned
@@ -83,6 +84,7 @@ function getStatusColor(status: string) {
     case 'in repair': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300';
     case 'loaned': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
     case 'sold': return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+    case 'shipped': return 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300';
     // legacy values kept for backwards compat
     case 'installed': return 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300';
     case 'in stock': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300';
@@ -279,6 +281,8 @@ export default function PanelDetail() {
       returned_date: panel.returned_date ?? '',
       return_notes: panel.return_notes ?? '',
       return_confirmed_by: panel.return_confirmed_by ?? '',
+      // Ship workflow field (date the panel was shipped out).
+      shipped_date: panel.shipped_date ?? '',
     });
     setEditing(true);
   };
@@ -305,6 +309,11 @@ export default function PanelDetail() {
       // status to 'At Facility' regardless of the dropdown (mirrors Mark Returned).
       const justReturned = !!form.returned_date && !panel.returned_date;
       const status = justReturned ? RETURNED_STATUS : (form.panel_status || '');
+      // When the panel is being marked Shipped, stamp a ship date: use the one
+      // entered, else default to today (plain wall-clock date column).
+      const shippedDate = status === 'Shipped'
+        ? (form.shipped_date || new Date().toISOString().slice(0, 10))
+        : (form.shipped_date || null);
       const payload: Record<string, any> = {
         // panel_type intentionally NOT sent — locked after creation (PanelForm parity).
         panel_status: status || null,
@@ -334,6 +343,8 @@ export default function PanelDetail() {
         returned_date: form.returned_date || null,
         return_notes: form.return_notes || null,
         return_confirmed_by: form.return_confirmed_by || null,
+        // Ship workflow field.
+        shipped_date: shippedDate,
       };
       await panelApi.update(id, payload, accessToken);
       toast.success('Panel updated successfully');
@@ -843,6 +854,27 @@ export default function PanelDetail() {
                       onChange={(e) => setField('return_notes', e.target.value)}
                     />
                   </Field>
+
+                  {/* Ship Date — shown when the panel is (being) marked Shipped.
+                      Destination is captured via the Customer / District /
+                      Operating Company fields above. */}
+                  {(editing ? form.panel_status === 'Shipped' : panel.panel_status === 'Shipped') && (
+                    <Field
+                      label="Ship Date"
+                      value={
+                        panel.shipped_date
+                          ? new Date(panel.shipped_date).toLocaleDateString()
+                          : '—'
+                      }
+                      editing={editing}
+                    >
+                      <Input
+                        type="date"
+                        value={form.shipped_date}
+                        onChange={(e) => setField('shipped_date', e.target.value)}
+                      />
+                    </Field>
+                  )}
                 </div>
               </CardContent>
             </Card>
