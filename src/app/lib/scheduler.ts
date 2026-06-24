@@ -584,6 +584,22 @@ async function nextFieldVisitId(): Promise<string> {
 export interface StartedFieldVisit { field_visit_id: string; row_id: string; }
 
 /**
+ * Resolve a field visit's row_id (UUID PK) from its business field_visit_id.
+ * The detail route /field-visits/:id looks up by row_id, but scheduled_visits
+ * only stores the business field_visit_id, so links must resolve at click time.
+ */
+export async function resolveFieldVisitRowId(fieldVisitId: string | number): Promise<string | null> {
+  if (fieldVisitId == null || fieldVisitId === '') return null;
+  const { data, error } = await supabase
+    .from('fieldvisits')
+    .select('row_id')
+    .eq('field_visit_id', String(fieldVisitId))
+    .maybeSingle();
+  if (error) { console.error('resolveFieldVisitRowId error:', error); return null; }
+  return data?.row_id ?? null;
+}
+
+/**
  * Create a fieldvisits row prefilled from an install/training activity, link it
  * both ways (scheduled_visits.field_visit_id ↔ fieldvisits.field_visit_id), and
  * return the new IDs. panels_seen is seeded from the activity's panel serials.

@@ -17,7 +17,7 @@
  * local parts so a stored date never shifts a day across timezones.
  */
 import { useState, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
@@ -44,7 +44,7 @@ import {
   markVisitShipped, markShipmentShipped,
   listScheduledJobs, createScheduledJob, updateScheduledJob, deleteScheduledJob,
   assignActivityToJob, createJobFromActivity,
-  listAvailablePanels, startFieldVisitForActivity, rollUpJobStatus,
+  listAvailablePanels, startFieldVisitForActivity, resolveFieldVisitRowId, rollUpJobStatus,
   listSqms, listCustomers, listDistrictsForCustomer, listDistrictsByIds, listEpCompanies, listProductLines,
   PANEL_TYPES, VISIT_STATUSES, SCHEDULER_CATEGORIES, FULFILLMENT_TYPES,
   ACTIVITY_TYPES, activityMeta, JOB_STATUSES,
@@ -1232,14 +1232,17 @@ export default function Scheduler() {
     try {
       const res = await startFieldVisitForActivity(v);
       toast.success(`Field visit #${res.field_visit_id} started`);
-      navigate(`/field-visits/${res.field_visit_id}`);
+      navigate(`/field-visits/${res.row_id}`);
     } catch {
       // toast raised in data layer
     }
   };
 
-  const openFieldVisit = (v: ScheduledVisit) => {
-    if (v.field_visit_id) navigate(`/field-visits/${v.field_visit_id}`);
+  const openFieldVisit = async (v: ScheduledVisit) => {
+    if (!v.field_visit_id) return;
+    const rowId = await resolveFieldVisitRowId(v.field_visit_id);
+    if (rowId) navigate(`/field-visits/${rowId}`);
+    else toast.error(`Could not open field visit #${v.field_visit_id}`);
   };
 
   // Primary on-site action: start a new linked field visit, or open the existing
@@ -1473,9 +1476,9 @@ export default function Scheduler() {
                           {v.categories?.length > 0 && <div className="mt-1"><CategoryChips categories={v.categories} /></div>}
                           {v.field_visit_id && (
                             <div className="mt-1 text-xs">
-                              <Link to={`/field-visits/${v.field_visit_id}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
+                              <button type="button" onClick={() => openFieldVisit(v)} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
                                 <MapPinned className="w-3 h-3" /> Field visit #{v.field_visit_id}
-                              </Link>
+                              </button>
                             </div>
                           )}
                           {(v.panels || []).length > 0 && (
@@ -1575,9 +1578,9 @@ export default function Scheduler() {
                                 )}
                                 {v.field_visit_id && (
                                   <div className="mt-0.5 text-xs">
-                                    <Link to={`/field-visits/${v.field_visit_id}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
+                                    <button type="button" onClick={() => openFieldVisit(v)} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
                                       <MapPinned className="w-3 h-3" /> Field visit #{v.field_visit_id}
-                                    </Link>
+                                    </button>
                                   </div>
                                 )}
                               </div>
@@ -1644,9 +1647,9 @@ export default function Scheduler() {
                           )}
                           {v.field_visit_id && (
                             <div className="mt-0.5 text-xs">
-                              <Link to={`/field-visits/${v.field_visit_id}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
+                              <button type="button" onClick={() => openFieldVisit(v)} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
                                 <MapPinned className="w-3 h-3" /> Field visit #{v.field_visit_id}
-                              </Link>
+                              </button>
                             </div>
                           )}
                         </div>
@@ -1756,9 +1759,9 @@ export default function Scheduler() {
                     )}
                     {v.field_visit_id && (
                       <div className="text-xs mb-1">
-                        <Link to={`/field-visits/${v.field_visit_id}`} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
+                        <button type="button" onClick={() => openFieldVisit(v)} className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline">
                           <MapPinned className="w-3 h-3" /> Field visit #{v.field_visit_id}
-                        </Link>
+                        </button>
                       </div>
                     )}
                     {(v.panels || []).length > 0 && (
