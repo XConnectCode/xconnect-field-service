@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
+import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
 import { useTheme } from "../lib/theme-context";
+import { generateExecutiveOverviewPDF } from "../lib/generateExecutiveOverviewPDF";
 import {
   TrendingUp,
   AlertTriangle,
   ShieldAlert,
   Clock,
   Building2,
-  Printer,
+  Download,
   ExternalLink,
   Filter,
   Search,
@@ -589,7 +591,38 @@ export default function Executive() {
           </p>
         </div>
         <button
-          onClick={() => window.print()}
+          onClick={async () => {
+            try {
+              await generateExecutiveOverviewPDF({
+                totals: {
+                  totalIncidents,
+                  openNewCount,
+                  xcRate: xcRate ? Math.round((xcRate.totXc / xcRate.tot) * 100) : null,
+                  xcCausedCount: xcRate ? xcRate.totXc : 0,
+                  totalOpen,
+                  aged90,
+                  totalStages: summary?.total_stages ?? 0,
+                  totalBarrels: summary?.total_barrels ?? 0,
+                  totalXfirePanels: summary?.total_xfire_panels ?? 0,
+                  leasedXfirePanels: summary?.leased_xfire_panels ?? 0,
+                },
+                trend,
+                aging,
+                customers,
+                districts,
+                filters: {
+                  customer: filterCustomer ? custName(filterCustomer) : undefined,
+                  district: filterDistrict ? distName(filterDistrict) : undefined,
+                  dateFrom: dateFrom || undefined,
+                  dateTo: dateTo || undefined,
+                  search: search.trim() || undefined,
+                },
+                filtersActive,
+              });
+            } catch (e) {
+              toast.error("PDF export failed: " + (e as Error).message);
+            }
+          }}
           className="exec-print-btn"
           style={{
             display: "inline-flex",
@@ -605,7 +638,7 @@ export default function Executive() {
             cursor: "pointer",
           }}
         >
-          <Printer size={16} /> Print / Save PDF
+          <Download size={16} /> Download PDF
         </button>
       </div>
 
