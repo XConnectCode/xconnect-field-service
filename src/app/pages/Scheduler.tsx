@@ -140,14 +140,20 @@ function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; 
 
   const needs = visit.panels || [];
   const hasPanelNeeds = needs.length > 0;
-  // Default the type filter / qty target to the scheduled need.
-  const needType = needs.find((p) => p.panel_type)?.panel_type || '';
-  const targetQty = needs.reduce((n, p) => n + (p.qty_needed ?? 1), 0) || 1;
+  // Per-type needed map: each distinct panel_type keeps its own quota.
+  const neededByType = needs.reduce((m, p) => {
+    const t = p.panel_type || 'any';
+    m[t] = (m[t] ?? 0) + (p.qty_needed ?? 1);
+    return m;
+  }, {} as Record<string, number>);
+  const neededEntries = Object.entries(neededByType); // [type, qty][]
+  const targetQty = neededEntries.reduce((a, [, q]) => a + q, 0) || 1;
 
-  const [typeFilter, setTypeFilter] = useState(needType || 'all');
+  const [typeFilter, setTypeFilter] = useState('all');
   const [avail, setAvail] = useState<AvailablePanel[]>([]);
   const [loadingPanels, setLoadingPanels] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({}); // row_id → per-panel tracking
+  const [panelIndex, setPanelIndex] = useState<Record<string, string>>({}); // row_id → panel_type (persists across filter changes)
   const [num, setNum] = useState(visit.tracking_number || '');
   const [url, setUrl] = useState(visit.tracking_url || '');
   const [busy, setBusy] = useState(false);
@@ -157,18 +163,37 @@ function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; 
     setNum(visit.tracking_number || '');
     setUrl(visit.tracking_url || '');
     setSelected({});
-    setTypeFilter(needType || 'all');
-  }, [open, visit.tracking_number, visit.tracking_url, needType]);
+    setTypeFilter('all');
+  }, [open, visit.tracking_number, visit.tracking_url]);
 
   useEffect(() => {
     if (!open || !hasPanelNeeds) return;
     setLoadingPanels(true);
     listAvailablePanels(typeFilter && typeFilter !== 'all' ? typeFilter : undefined)
-      .then(setAvail)
+      .then((rows) => {
+        setAvail(rows);
+        setPanelIndex((prev) => {
+          const next = { ...prev };
+          for (const r of rows) next[r.row_id] = r.panel_type || 'any';
+          return next;
+        });
+      })
       .finally(() => setLoadingPanels(false));
   }, [open, typeFilter, hasPanelNeeds]);
 
   const selectedIds = Object.keys(selected);
+  const selectedByType = selectedIds.reduce((m, id) => {
+    const t = panelIndex[id] || 'any';
+    m[t] = (m[t] ?? 0) + 1;
+    return m;
+  }, {} as Record<string, number>);
+  const onlyAny = neededEntries.length === 1 && neededEntries[0][0] === 'any';
+  const quotasMet = !hasPanelNeeds
+    ? true
+    : onlyAny
+      ? selectedIds.length >= targetQty
+      : neededEntries.every(([t, q]) => (selectedByType[t] ?? 0) >= q)
+        && Object.entries(selectedByType).every(([t, c]) => c <= (neededByType[t] ?? 0));
   const toggle = (rowId: string) => setSelected((prev) => {
     const next = { ...prev };
     if (rowId in next) delete next[rowId]; else next[rowId] = '';
@@ -183,11 +208,12 @@ function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; 
         await markVisitShipped(visit.id, { tracking_number: num, tracking_url: url });
       } else {
         if (selectedIds.length === 0) { toast.error('Select at least one panel serial to ship.'); setBusy(false); return; }
+        if (!quotasMet) { toast.error('Select the required serials for each needed panel type.'); setBusy(false); return; }
         const selections = selectedIds.map((rowId) => {
           const p = avail.find((a) => a.row_id === rowId);
           return {
             panel_row_id: rowId,
-            panel_type: p?.panel_type || needType || null,
+            panel_type: p?.panel_type || panelIndex[rowId] || null,
             tracking_number: selected[rowId] || null,
           };
         });
@@ -217,9 +243,22 @@ function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; 
           {hasPanelNeeds ? (
             <>
               <p className="text-xs text-muted-foreground">
-                Pick the actual panel serial(s) to ship. Need: <span className="font-medium text-foreground">{needType || 'any type'} × {targetQty}</span>.
+                Pick the actual panel serial(s) to ship. Need:{' '}
+                <span className="font-medium text-foreground">
+                  {neededEntries.map(([t, q]) => `${t === 'any' ? 'any type' : t} × ${q}`).join(', ')}
+                </span>.
                 Selected {selectedIds.length}/{targetQty}.
               </p>
+              <ul className="text-[11px] text-muted-foreground mt-1 space-y-0.5">
+                {neededEntries.map(([t, q]) => {
+                  const got = selectedByType[t] ?? 0;
+                  return (
+                    <li key={t}>
+                      {t === 'any' ? 'any type' : t}: {got}/{q} {got >= q ? '✓' : ''}
+                    </li>
+                  );
+                })}
+              </ul>
               <div className="mt-1">
                 <Label className="text-[11px] text-muted-foreground mb-1 block">Filter by panel type</Label>
                 <select className={selectCls} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
@@ -273,7 +312,7 @@ function MarkShippedButton({ visit, onDone, compact }: { visit: ScheduledVisit; 
 
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
-            <Button type="button" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Confirm shipment'}</Button>
+            <Button type="button" onClick={submit} disabled={busy || (hasPanelNeeds && !quotasMet)}>{busy ? 'Saving…' : 'Confirm shipment'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

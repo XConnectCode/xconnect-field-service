@@ -429,7 +429,6 @@ export interface AvailablePanel {
   serial_number: string | null;
   panel_type: string | null;
   panel_status: string | null;
-  firmware?: string | null;
   customer?: string | null;
 }
 
@@ -440,10 +439,14 @@ export interface AvailablePanel {
 export async function listAvailablePanels(panelType?: string): Promise<AvailablePanel[]> {
   let q = supabase
     .from('panels')
-    .select('row_id, serial_number, panel_type, panel_status, firmware, customer');
+    .select('row_id, serial_number, panel_type, panel_status, customer');
   if (panelType) q = q.eq('panel_type', panelType);
   const { data, error } = await q.order('serial_number', { ascending: true });
-  if (error) { console.error('listAvailablePanels error:', error); return []; }
+  if (error) {
+    console.error('listAvailablePanels error:', error);
+    toast.error('Failed to load panels: ' + error.message);
+    return [];
+  }
   const rows = (data || []) as AvailablePanel[];
   const atFacility = (s: string | null) => (s || '').toLowerCase() === 'at facility';
   return rows.sort((a, b) => {
