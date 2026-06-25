@@ -363,6 +363,17 @@ export default function PanelDetail() {
         failure_reported_by: panel.failure_reported_by ?? null,
         mfr_rma_date: panel.mfr_rma_date ?? null,
       };
+      // At-Facility transition: clear customer/assignment fields and reset
+      // verified/is_spare, overriding whatever the form had (mirrors edge net).
+      if (status === RETURNED_STATUS) {
+        payload.customer = null;
+        payload.customer_district = null;
+        payload.operating_company = null;
+        payload.unit_number = null;
+        payload.gui_version = null;
+        payload.verified = 'Y';
+        payload.is_spare = 'No';
+      }
       await panelApi.update(id, payload, accessToken);
       toast.success('Panel updated successfully');
       setEditing(false);
@@ -396,20 +407,13 @@ export default function PanelDetail() {
         shootingfw: panel.shootingfw ?? null,
         wl_controlfw: panel.wl_controlfw ?? null,
         loggingfw: panel.loggingfw ?? null,
-        gui_version: panel.gui_version ?? null,
         surfacefw: panel.surfacefw ?? null,
         received_date: panel.received_date ?? null,
         xc_base: panel.xc_base ?? null,
-        unit_number: panel.unit_number ?? null,
         'so#': panel['so#'] ?? null,
         tracking_info: panel.tracking_info ?? null,
         comments: panel.comments ?? null,
-        verified: panel.verified ?? 'N',
         rma: panel.rma ?? null,
-        is_spare: panel.is_spare ?? null,
-        customer_district: panel.customer_district ?? null,
-        operating_company: panel.operating_company ?? null,
-        customer: panel.customer ?? null,
         activity: panel.activity ?? 'N',
         // Return workflow + auto-status.
         panel_status: RETURNED_STATUS,
@@ -418,6 +422,15 @@ export default function PanelDetail() {
         return_confirmed_by: who,
         updated_by: who,
         date_updated: new Date().toLocaleDateString(),
+        // At-Facility transition: clear customer/assignment fields and reset
+        // verified/is_spare (mirrors handleSave + edge net).
+        customer: null,
+        customer_district: null,
+        operating_company: null,
+        unit_number: null,
+        gui_version: null,
+        verified: 'Y',
+        is_spare: 'No',
       };
       await panelApi.update(id, payload, accessToken);
       toast.success(`Panel returned — status set to ${RETURNED_STATUS}`);
