@@ -1116,7 +1116,7 @@ export default function PanelDetail() {
             {/* Mark Returned — hero action. Only for panels currently out in the
                 field (Leased / Loaned / In Repair). Returning auto-sets the
                 status to 'At Facility'. Sold panels never return. */}
-            {!editing && RETURNABLE_STATUSES.includes(panel.panel_status) && (
+            {!editing && panel.panel_status !== 'In Repair' && RETURNABLE_STATUSES.includes(panel.panel_status) && (
               <div className="rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-900 p-5 shadow-sm">
                 <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
                   <PackageCheck className="w-4 h-4" />
@@ -1201,7 +1201,7 @@ export default function PanelDetail() {
             {/* Return to Manufacturer (RMA) — a failed panel ships back to the
                 manufacturer (default AWS). Offered for any panel not Sold.
                 Sets status to 'In Repair' and stamps RMA / failure fields. */}
-            {!editing && panel.panel_status !== 'Sold' && (
+            {!editing && panel.panel_status !== 'Sold' && panel.panel_status !== 'In Repair' && (
               <div className="rounded-xl border border-orange-200 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-900 p-5 shadow-sm">
                 <div className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
                   <PackageX className="w-4 h-4" />
