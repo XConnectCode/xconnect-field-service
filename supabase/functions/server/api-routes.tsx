@@ -1339,7 +1339,12 @@ apiRoutes.put("/panels/:id", async (c) => {
         return_notes: body.return_notes,
         return_confirmed_by: body.return_confirmed_by,
         // Ship workflow: ship date stamped when panel_status set to 'Shipped'.
-        shipped_date: body.shipped_date
+        shipped_date: body.shipped_date,
+        // Manufacturer-return / failure-report workflow.
+        failure_description: body.failure_description,
+        failure_date: body.failure_date,
+        failure_reported_by: body.failure_reported_by,
+        mfr_rma_date: body.mfr_rma_date
       })
       .eq('row_id', id)
       .select()
