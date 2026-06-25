@@ -40,6 +40,12 @@ const PUBLIC_PATHS = new Set([
   '/make-server-64775d98/config',
   '/make-server-64775d98/schema',
   '/make-server-64775d98/diagnose-row-id',
+  // Slack intake webhooks — authenticated via HMAC signature inside
+  // slackIntakeRoutes (no Supabase JWT / requireUser); must be exempt from
+  // the blanket requireUser guard below or Slack requests get 401.
+  '/make-server-64775d98/slack/events',
+  '/make-server-64775d98/slack/interactions',
+  '/make-server-64775d98/slack/options',
 ]);
 apiRoutes.use('*', async (c, next) => {
   if (c.req.method === 'OPTIONS' || PUBLIC_PATHS.has(new URL(c.req.url).pathname)) {
