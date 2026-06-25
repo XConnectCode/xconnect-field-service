@@ -22,6 +22,7 @@
 import { Hono } from 'npm:hono';
 import { createClient } from 'npm:@supabase/supabase-js@2.49.2';
 import crypto from 'node:crypto';
+import { Buffer } from 'node:buffer';
 
 const FIVE_MINUTES_SECONDS = 60 * 5;
 
