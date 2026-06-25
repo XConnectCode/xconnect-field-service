@@ -10,11 +10,12 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Combobox } from '../components/ui/combobox';
 import { Textarea } from '../components/ui/textarea';
-import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck, Eye } from 'lucide-react';
+import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck, PackageX, FileDown, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { XC_PANEL_BASES } from '../lib/xcLocations';
+import { generateRepairFailureReportPDF } from '../lib/generateRepairFailureReportPDF';
 
 // ── Option arrays ──────────────────────────────────────────────────────────────
 const PANEL_TYPE_OPTS = [
@@ -139,6 +140,16 @@ export default function PanelDetail() {
   const [returnDateInput, setReturnDateInput] = useState('');
   const [returnNotesInput, setReturnNotesInput] = useState('');
   const [seenSaving, setSeenSaving] = useState(false);
+
+  // Return-to-Manufacturer (RMA) action state + controlled form inputs.
+  const [returningMfr, setReturningMfr] = useState(false);
+  const [mfrNameInput, setMfrNameInput] = useState('AWS');
+  const [mfrRmaInput, setMfrRmaInput] = useState('');
+  const [mfrShipDateInput, setMfrShipDateInput] = useState('');
+  const [mfrTrackingInput, setMfrTrackingInput] = useState('');
+  const [failureDescInput, setFailureDescInput] = useState('');
+  const [failureDateInput, setFailureDateInput] = useState('');
+  const [failureReportedByInput, setFailureReportedByInput] = useState('');
 
   // Reference data (same sources as PanelForm) for FK selects.
   const [customers,   setCustomers]   = useState<any[]>([]);
@@ -345,6 +356,12 @@ export default function PanelDetail() {
         return_confirmed_by: form.return_confirmed_by || null,
         // Ship workflow field.
         shipped_date: shippedDate,
+        // Manufacturer-return / failure-report fields — carried forward so a
+        // generic edit save doesn't blank them (no inputs for these here).
+        failure_description: panel.failure_description ?? null,
+        failure_date: panel.failure_date ?? null,
+        failure_reported_by: panel.failure_reported_by ?? null,
+        mfr_rma_date: panel.mfr_rma_date ?? null,
       };
       await panelApi.update(id, payload, accessToken);
       toast.success('Panel updated successfully');
@@ -413,6 +430,99 @@ export default function PanelDetail() {
       toast.error(err.message ?? 'Failed to mark panel returned');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Return to Manufacturer (RMA) ────────────────────────────────────────────
+  // A failed panel ships back to the manufacturer (default "AWS"). Mirrors
+  // handleMarkReturned's full carry-forward pattern (the edge PUT writes the
+  // whole object) but sets status to 'In Repair' and stamps RMA / ship / failure
+  // fields. The failure data persists in the 4 dedicated columns.
+  const handleReturnToManufacturer = async () => {
+    if (!id || !accessToken || !panel) return;
+    setSaving(true);
+    try {
+      const who = user?.name || user?.email || null;
+      const shipDate = mfrShipDateInput || todayISO();
+      const payload: Record<string, any> = {
+        // Carry forward all existing values so the whole-object PUT doesn't blank
+        // unrelated columns.
+        panel_type: panel.panel_type ?? null,
+        plus_panel: panel.plus_panel ?? null,
+        serial_number: panel.serial_number ?? null,
+        shootingfw: panel.shootingfw ?? null,
+        wl_controlfw: panel.wl_controlfw ?? null,
+        loggingfw: panel.loggingfw ?? null,
+        gui_version: panel.gui_version ?? null,
+        surfacefw: panel.surfacefw ?? null,
+        received_date: panel.received_date ?? null,
+        xc_base: panel.xc_base ?? null,
+        unit_number: panel.unit_number ?? null,
+        'so#': panel['so#'] ?? null,
+        comments: panel.comments ?? null,
+        verified: panel.verified ?? 'N',
+        is_spare: panel.is_spare ?? null,
+        customer_district: panel.customer_district ?? null,
+        operating_company: panel.operating_company ?? null,
+        customer: panel.customer ?? null,
+        activity: panel.activity ?? 'N',
+        returned_date: panel.returned_date ?? null,
+        return_notes: panel.return_notes ?? null,
+        return_confirmed_by: panel.return_confirmed_by ?? null,
+        // Manufacturer-return workflow.
+        panel_status: 'In Repair',
+        rma: mfrRmaInput || panel.rma || null,
+        shipped_date: shipDate,
+        tracking_info: mfrTrackingInput || panel.tracking_info || null,
+        mfr_rma_date: shipDate,
+        failure_description: failureDescInput || null,
+        failure_date: failureDateInput || null,
+        failure_reported_by: failureReportedByInput || who,
+        updated_by: who,
+        date_updated: new Date().toLocaleDateString(),
+      };
+      await panelApi.update(id, payload, accessToken);
+      toast.success(`Panel marked In Repair — returned to ${mfrNameInput || 'manufacturer'}`);
+      setReturningMfr(false);
+      await loadPanel();
+      await loadHistory();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to return panel to manufacturer');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Build & download the Repair / Failure Report PDF from the current form inputs
+  // (falling back to stored panel values).
+  const handleDownloadFailureReport = async () => {
+    if (!panel) return;
+    try {
+      await generateRepairFailureReportPDF({
+        manufacturer: mfrNameInput || 'AWS',
+        rma: mfrRmaInput || panel.rma || undefined,
+        shipDate: mfrShipDateInput || panel.shipped_date || undefined,
+        trackingInfo: mfrTrackingInput || panel.tracking_info || undefined,
+        panel: {
+          serial_number: panel.serial_number,
+          'serial#': panel['serial#'],
+          panel_type: panel.panel_type,
+          unit_number: panel.unit_number,
+          panel_status: panel.panel_status,
+          xc_base: panel.xc_base,
+          shootingfw: panel.shootingfw,
+          wl_controlfw: panel.wl_controlfw,
+          loggingfw: panel.loggingfw,
+          surfacefw: panel.surfacefw,
+          gui_version: panel.gui_version,
+          received_date: panel.received_date,
+        },
+        failureDescription: failureDescInput || panel.failure_description || undefined,
+        failureDate: failureDateInput || panel.failure_date || undefined,
+        reportedBy: failureReportedByInput || panel.failure_reported_by || user?.name || user?.email || undefined,
+      });
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to generate report');
     }
   };
 
@@ -1047,6 +1157,112 @@ export default function PanelDetail() {
                     </div>
                   </div>
                 </details>
+              </div>
+            )}
+
+            {/* Return to Manufacturer (RMA) — a failed panel ships back to the
+                manufacturer (default AWS). Offered for any panel not Sold.
+                Sets status to 'In Repair' and stamps RMA / failure fields. */}
+            {!editing && panel.panel_status !== 'Sold' && (
+              <div className="rounded-xl border border-orange-200 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-900 p-5 shadow-sm">
+                <div className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
+                  <PackageX className="w-4 h-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wide">
+                    Return to Manufacturer
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-orange-900/80 dark:text-orange-200/80">
+                  Ship a failed panel back to the manufacturer for repair &mdash;
+                  status will switch to <span className="font-semibold">In Repair</span>.
+                </p>
+
+                {!returningMfr ? (
+                  <Button
+                    className="mt-4 w-full bg-orange-600 hover:bg-orange-700 text-white"
+                    onClick={() => {
+                      setMfrNameInput('AWS');
+                      setMfrRmaInput(panel.rma || '');
+                      setMfrShipDateInput(todayISO());
+                      setMfrTrackingInput(panel.tracking_info || '');
+                      setFailureDescInput(panel.failure_description || '');
+                      setFailureDateInput(panel.failure_date || todayISO());
+                      setFailureReportedByInput(panel.failure_reported_by || user?.name || user?.email || '');
+                      setReturningMfr(true);
+                    }}
+                  >
+                    <PackageX className="w-4 h-4 mr-2" />
+                    Return to Manufacturer
+                  </Button>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">Manufacturer</Label>
+                      <Input value={mfrNameInput} onChange={(e) => setMfrNameInput(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">RMA #</Label>
+                      <Input value={mfrRmaInput} onChange={(e) => setMfrRmaInput(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">Ship Date</Label>
+                      <Input type="date" value={mfrShipDateInput} onChange={(e) => setMfrShipDateInput(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">Tracking #</Label>
+                      <Input value={mfrTrackingInput} onChange={(e) => setMfrTrackingInput(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">Failure Description</Label>
+                      <Textarea
+                        rows={3}
+                        value={failureDescInput}
+                        onChange={(e) => setFailureDescInput(e.target.value)}
+                        placeholder="What failed and how it was observed…"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">Failure Date</Label>
+                      <Input type="date" value={failureDateInput} onChange={(e) => setFailureDateInput(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">Reported By</Label>
+                      <Input value={failureReportedByInput} onChange={(e) => setFailureReportedByInput(e.target.value)} />
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={handleDownloadFailureReport}
+                    >
+                      <FileDown className="w-4 h-4 mr-2" />
+                      Download Failure Report
+                    </Button>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => setReturningMfr(false)}
+                        disabled={saving}
+                      >
+                        <X className="w-4 h-4 mr-1" />
+                        Cancel
+                      </Button>
+                      <Button
+                        className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                        onClick={handleReturnToManufacturer}
+                        disabled={saving}
+                      >
+                        {saving ? (
+                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                        ) : (
+                          <Save className="w-4 h-4 mr-1" />
+                        )}
+                        Save &amp; Mark In Repair
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
