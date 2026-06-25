@@ -61,7 +61,7 @@ export async function generateRepairFailureReportPDF(opts: RepairFailureReportOp
     try { doc.addImage(logoUrl, 'PNG', PAGE_W - MARGIN - 30, y, 30, 18); } catch {}
   }
 
-  y += 24;
+  y += 16;
 
   const kv = (label: string, value?: string | null): string[] => [label, dash(value)];
   const COL_W = [CONT_W * 0.4, CONT_W * 0.6];
@@ -76,7 +76,7 @@ export async function generateRepairFailureReportPDF(opts: RepairFailureReportOp
     kv('XC Base', panel.xc_base),
     kv('Received Date', panel.received_date),
   ], COL_W, y);
-  y += 8;
+  y += 5;
 
   // ── Firmware Versions ──
   y = drawSectionHeading(doc, 'Firmware Versions', y);
@@ -87,7 +87,7 @@ export async function generateRepairFailureReportPDF(opts: RepairFailureReportOp
     kv('Surface FW', panel.surfacefw),
     kv('GUI Version', panel.gui_version),
   ], COL_W, y);
-  y += 8;
+  y += 5;
 
   // ── Failure Details ──
   y = drawSectionHeading(doc, 'Failure Details', y);
@@ -95,27 +95,32 @@ export async function generateRepairFailureReportPDF(opts: RepairFailureReportOp
     kv('Reported By', reportedBy),
     kv('Failure Date', failureDate),
   ], COL_W, y);
-  y += 4;
+  y += 3;
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...GRAY_TEXT);
   doc.text('DESCRIPTION', MARGIN, y + 4);
-  y += 8;
+  y += 6;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);
   doc.setTextColor(...XC_DARK);
+  const DESC_STEP = 4.2;
   const descLines: string[] = doc.splitTextToSize(failureDescription || '—', CONT_W);
-  descLines.forEach((line: string) => {
-    if (y > PAGE_H - 20) { doc.addPage(); y = drawHeader(doc) + 15; }
+  const maxDescLines = Math.max(0, Math.floor((PAGE_H - 15 - y - 40) / DESC_STEP));
+  let renderLines = descLines;
+  if (descLines.length > maxDescLines) {
+    renderLines = descLines.slice(0, Math.max(0, maxDescLines - 1));
+    renderLines.push((descLines[Math.max(0, maxDescLines - 1)] || '').replace(/\s*$/, '') + ' …');
+  }
+  renderLines.forEach((line: string) => {
     doc.text(line, MARGIN, y);
-    y += 5;
+    y += DESC_STEP;
   });
-  y += 6;
+  y += 4;
 
   // ── Return Shipment ──
-  if (y + 50 > PAGE_H - 15) { doc.addPage(); y = drawHeader(doc) + 15; }
   y = drawSectionHeading(doc, 'Return Shipment', y);
   y = drawTable(doc, ['Field', 'Value'], [
     kv('Manufacturer', manufacturer),
