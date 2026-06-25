@@ -303,7 +303,8 @@ slackIntakeRoutes.post('/slack/events', async (c) => {
   const ev = payload.event;
   if (
     ev?.type === 'reaction_added' &&
-    ev.reaction === 'XC' &&
+    typeof ev.reaction === 'string' &&
+    ev.reaction.toLowerCase() === 'xc' &&
     ev.item?.channel === Deno.env.get('SLACK_INCIDENT_CHANNEL')
   ) {
     const channel = ev.item.channel;
