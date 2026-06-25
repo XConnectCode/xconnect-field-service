@@ -5,6 +5,7 @@ import * as kv from "./kv_store.tsx";
 import { createClient } from "npm:@supabase/supabase-js@2.49.2";
 import { apiRoutes } from "./api-routes.tsx";
 import { aiAssistRoutes } from "./ai-assist.tsx";
+import { slackIntakeRoutes } from "./slack-intake.tsx";
 import { initializeIncidentImagesBucket } from "./upload-handler.tsx";
 import { adminExists, getUserFromRequest, userRole } from "./auth-helpers.tsx";
 
@@ -52,6 +53,9 @@ app.route('/make-server-64775d98', apiRoutes);
 
 // AI incident-assistant proxy (provider/model are env-selected; see ai-assist.tsx)
 app.route('/make-server-64775d98', aiAssistRoutes);
+
+// Slack → FST incident intake (events, interactions, options). Auth = HMAC.
+app.route('/make-server-64775d98', slackIntakeRoutes);
 
 // Get database schema information
 app.get("/make-server-64775d98/schema", async (c) => {
