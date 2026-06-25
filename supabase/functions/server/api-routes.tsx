@@ -16,6 +16,22 @@ const supabase = createClient(
   }
 );
 
+// Field -> human label map used for panel_change_log diff logging on app edits.
+// Noise fields (date_updated, updated_by, last_seen_*) are intentionally omitted
+// so they are never diffed/logged.
+const PANEL_FIELD_LABELS: Record<string, string> = {
+  panel_status: 'Panel Status', customer: 'Customer', customer_district: 'District',
+  operating_company: 'Operating Company', unit_number: 'Unit Number', gui_version: 'GUI Version',
+  verified: 'Verified', is_spare: 'Is Spare', activity: 'Activity', comments: 'Comments',
+  rma: 'RMA', tracking_info: 'Tracking Info', shipped_date: 'Shipped Date',
+  returned_date: 'Returned Date', return_notes: 'Return Notes', return_confirmed_by: 'Return Confirmed By',
+  xc_base: 'XC Base', 'so#': 'SO #', plus_panel: 'Plus Panel',
+  shootingfw: 'Shooting FW', wl_controlfw: 'WL Control FW', loggingfw: 'Logging FW', surfacefw: 'Surface FW',
+  received_date: 'Received Date', serial_number: 'Serial Number', panel_type: 'Panel Type',
+  failure_description: 'Failure Description', failure_date: 'Failure Date',
+  failure_reported_by: 'Failure Reported By', mfr_rma_date: 'Mfr RMA Date',
+};
+
 export const apiRoutes = new Hono();
 
 // SECURITY: every route in this router runs against the SERVICE_ROLE client,
@@ -1304,48 +1320,71 @@ apiRoutes.put("/panels/:id", async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    
+
+    const updateObj: Record<string, any> = {
+      panel_type: body.panel_type,
+      plus_panel: body.plus_panel,
+      serial_number: body.serial_number,
+      shootingfw: body.shootingfw,
+      wl_controlfw: body.wl_controlfw,
+      loggingfw: body.loggingfw,
+      gui_version: body.gui_version,
+      surfacefw: body.surfacefw,
+      received_date: body.received_date,
+      xc_base: body.xc_base,
+      panel_status: body.panel_status,
+      unit_number: body.unit_number,
+      'so#': body['so#'],
+      date_updated: body.date_updated,
+      tracking_info: body.tracking_info,
+      comments: body.comments,
+      verified: body.verified,
+      rma: body.rma,
+      is_spare: body.is_spare,
+      customer_district: body.customer_district,
+      operating_company: body.operating_company,
+      customer: body.customer,
+      updated_by: body.updated_by,
+      activity: body.activity,
+      // Return workflow: when a leased/loaned/in-repair panel comes back to a
+      // XC facility. returned_date set => panel_status auto-flipped to
+      // 'At Facility' on the client (see PanelDetail handleMarkReturned).
+      returned_date: body.returned_date,
+      return_notes: body.return_notes,
+      return_confirmed_by: body.return_confirmed_by,
+      // Ship workflow: ship date stamped when panel_status set to 'Shipped'.
+      shipped_date: body.shipped_date,
+      // Manufacturer-return / failure-report workflow.
+      failure_description: body.failure_description,
+      failure_date: body.failure_date,
+      failure_reported_by: body.failure_reported_by,
+      mfr_rma_date: body.mfr_rma_date
+    };
+
+    // At-Facility safety net: whenever a panel transitions to 'At Facility',
+    // clear customer/assignment fields and reset verified/is_spare regardless
+    // of caller. Mirrors the frontend overrides; belt-and-suspenders so the
+    // diff log below captures the cleared values too.
+    if (body.panel_status === 'At Facility') {
+      updateObj.customer = null;
+      updateObj.customer_district = null;
+      updateObj.operating_company = null;
+      updateObj.unit_number = null;
+      updateObj.gui_version = null;
+      updateObj.verified = 'Y';
+      updateObj.is_spare = 'No';
+    }
+
+    // Fetch the current row before updating so we can diff for change-log.
+    const { data: before } = await supabase
+      .from('panels')
+      .select('*')
+      .eq('row_id', id)
+      .single();
+
     const { data, error } = await supabase
       .from('panels')
-      .update({
-        panel_type: body.panel_type,
-        plus_panel: body.plus_panel,
-        serial_number: body.serial_number,
-        shootingfw: body.shootingfw,
-        wl_controlfw: body.wl_controlfw,
-        loggingfw: body.loggingfw,
-        gui_version: body.gui_version,
-        surfacefw: body.surfacefw,
-        received_date: body.received_date,
-        xc_base: body.xc_base,
-        panel_status: body.panel_status,
-        unit_number: body.unit_number,
-        'so#': body['so#'],
-        date_updated: body.date_updated,
-        tracking_info: body.tracking_info,
-        comments: body.comments,
-        verified: body.verified,
-        rma: body.rma,
-        is_spare: body.is_spare,
-        customer_district: body.customer_district,
-        operating_company: body.operating_company,
-        customer: body.customer,
-        updated_by: body.updated_by,
-        activity: body.activity,
-        // Return workflow: when a leased/loaned/in-repair panel comes back to a
-        // XC facility. returned_date set => panel_status auto-flipped to
-        // 'At Facility' on the client (see PanelDetail handleMarkReturned).
-        returned_date: body.returned_date,
-        return_notes: body.return_notes,
-        return_confirmed_by: body.return_confirmed_by,
-        // Ship workflow: ship date stamped when panel_status set to 'Shipped'.
-        shipped_date: body.shipped_date,
-        // Manufacturer-return / failure-report workflow.
-        failure_description: body.failure_description,
-        failure_date: body.failure_date,
-        failure_reported_by: body.failure_reported_by,
-        mfr_rma_date: body.mfr_rma_date
-      })
+      .update(updateObj)
       .eq('row_id', id)
       .select()
       .single();
@@ -1353,6 +1392,35 @@ apiRoutes.put("/panels/:id", async (c) => {
     if (error) {
       console.error('Error updating panel:', error);
       return c.json({ error: error.message }, 500);
+    }
+
+    // Write per-field change-log diffs (entry_type='diff'), one row per changed
+    // field. A logging failure must never fail the update.
+    try {
+      const rows: Record<string, any>[] = [];
+      for (const key of Object.keys(PANEL_FIELD_LABELS)) {
+        const oldRaw = before?.[key] ?? null;
+        const newRaw = data?.[key] ?? null;
+        const oldStr = oldRaw == null ? null : String(oldRaw);
+        const newStr = newRaw == null ? null : String(newRaw);
+        if (oldStr === newStr) continue;
+        rows.push({
+          panel_row_id: id,
+          serial_number: data?.serial_number ?? before?.serial_number ?? null,
+          field: key,
+          field_label: PANEL_FIELD_LABELS[key],
+          old_value: oldStr,
+          new_value: newStr,
+          changed_by: body.updated_by ?? null,
+          changed_at: new Date().toISOString(),
+          entry_type: 'diff'
+        });
+      }
+      if (rows.length > 0) {
+        await supabase.from('panel_change_log').insert(rows);
+      }
+    } catch (logErr) {
+      console.error('Error writing panel change log:', logErr);
     }
 
     return c.json(data);
