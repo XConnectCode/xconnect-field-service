@@ -484,7 +484,9 @@ export default function PanelDetail() {
         return_confirmed_by: panel.return_confirmed_by ?? null,
         // Manufacturer-return workflow.
         panel_status: 'In Repair',
-        rma: mfrRmaInput || panel.rma || null,
+        // RMA is auto-assigned server-side (next RMA_NNN in sequence). Send empty
+        // so the edge's !body.rma branch fires and generates the number.
+        rma: '',
         shipped_date: shipDate,
         tracking_info: mfrTrackingInput || panel.tracking_info || null,
         mfr_rma_date: shipDate,
@@ -1237,7 +1239,9 @@ export default function PanelDetail() {
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">RMA #</Label>
-                      <Input value={mfrRmaInput} onChange={(e) => setMfrRmaInput(e.target.value)} />
+                      <div className="text-sm text-orange-900/60 dark:text-orange-200/60 italic">
+                        Auto-assigned on save (next in sequence)
+                      </div>
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs text-orange-900/70 dark:text-orange-200/70">Ship Date</Label>
