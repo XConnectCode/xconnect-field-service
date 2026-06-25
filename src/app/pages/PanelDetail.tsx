@@ -1128,25 +1128,20 @@ export default function PanelDetail() {
                   status will switch to <span className="font-semibold">{RETURNED_STATUS}</span>.
                 </p>
 
-                <Button
-                  className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={handleMarkReturned}
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
+                {!returning ? (
+                  <Button
+                    className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={() => {
+                      setReturnDateInput('');
+                      setReturnNotesInput('');
+                      setReturning(true);
+                    }}
+                  >
                     <PackageCheck className="w-4 h-4 mr-2" />
-                  )}
-                  Mark Returned
-                </Button>
-
-                {/* Optional overrides (back-date / add notes) — collapsed by default. */}
-                <details className="mt-3 group">
-                  <summary className="cursor-pointer text-xs text-blue-700 dark:text-blue-300 hover:underline list-none">
-                    Add return date / notes
-                  </summary>
-                  <div className="mt-3 space-y-3">
+                    Mark Returned
+                  </Button>
+                ) : (
+                  <div className="mt-4 space-y-3">
                     <div className="space-y-1">
                       <Label className="text-xs text-blue-900/70 dark:text-blue-200/70">
                         Returned Date (defaults to today)
@@ -1162,14 +1157,42 @@ export default function PanelDetail() {
                         Return Notes
                       </Label>
                       <Textarea
-                        rows={2}
+                        rows={3}
                         value={returnNotesInput}
                         onChange={(e) => setReturnNotesInput(e.target.value)}
                         placeholder="Condition, who dropped it off, etc."
                       />
                     </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => {
+                          setReturning(false);
+                          setReturnDateInput('');
+                          setReturnNotesInput('');
+                        }}
+                        disabled={saving}
+                      >
+                        <X className="w-4 h-4 mr-1" />
+                        Cancel
+                      </Button>
+                      <Button
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                        onClick={handleMarkReturned}
+                        disabled={saving}
+                      >
+                        {saving ? (
+                          <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                        ) : (
+                          <PackageCheck className="w-4 h-4 mr-1" />
+                        )}
+                        Confirm Return
+                      </Button>
+                    </div>
                   </div>
-                </details>
+                )}
               </div>
             )}
 
