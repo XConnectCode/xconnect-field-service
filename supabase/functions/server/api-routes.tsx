@@ -1375,6 +1375,32 @@ apiRoutes.put("/panels/:id", async (c) => {
       updateObj.is_spare = 'No';
     }
 
+    // Auto-assign sequential RMA number on manufacturer return. When a panel is
+    // set to 'In Repair' and no RMA was supplied, generate the next RMA_NNN.
+    // Strict pattern RMA_<digits> ignores legacy junk values. Floor of 23 means
+    // an empty DB yields RMA_024 (user's first manual one is RMA_023).
+    if (body.panel_status === 'In Repair' && (!body.rma || String(body.rma).trim() === '')) {
+      try {
+        const { data: rmaRows } = await supabase
+          .from('panels')
+          .select('rma')
+          .like('rma', 'RMA\\_%');
+        let maxFound = 0;
+        for (const row of rmaRows ?? []) {
+          const m = /^RMA_(\d+)$/.exec(String(row?.rma ?? ''));
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (n > maxFound) maxFound = n;
+          }
+        }
+        const nextNum = Math.max(23, maxFound) + 1;
+        updateObj.rma = 'RMA_' + String(nextNum).padStart(3, '0');
+      } catch (rmaErr) {
+        console.error('Error auto-assigning RMA number:', rmaErr);
+        // Fall back to leaving rma as-is; never block the update.
+      }
+    }
+
     // Fetch the current row before updating so we can diff for change-log.
     const { data: before } = await supabase
       .from('panels')
