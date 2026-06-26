@@ -137,9 +137,39 @@ function TextBlock({ label, value }: { label: string; value?: string }) {
   );
 }
 
+// ── Split-view list row (master-detail prototype) ──────────────────────────────
+function SplitListRow({ inc, selected, onSelect }: { inc: any; selected: boolean; onSelect: () => void }) {
+  const dateStr = inc?.date_incident ? safeFmtDate(inc.date_incident, 'M/d/yyyy') : '';
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full text-left px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 border-l-4 transition-colors ${
+        selected
+          ? 'bg-emerald-50 dark:bg-emerald-900/20 border-l-emerald-500'
+          : 'border-l-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">
+          {inc?.event_id || '—'} · {inc?.customerName || '-'}
+        </span>
+        <span className="text-xs text-gray-400 shrink-0">{dateStr}</span>
+      </div>
+      <div className="font-mono text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+        {(inc?.districtName || '-')} — {(inc?.event_category || '—')}
+      </div>
+      <div className="flex items-center gap-1 mt-1.5">
+        <StatusBadge status={inc?.incident_status} />
+        <XcCausedBadge caused={inc?.xc_caused} />
+      </div>
+    </button>
+  );
+}
+
 export default function IncidentsNew() {
   const { accessToken, user } = useAuth();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
   // ── Data ──────────────────────────────────────────────────────────────────
@@ -184,6 +214,10 @@ export default function IncidentsNew() {
   const [pickerIncident,  setPickerIncident]  = useState<any>(null);
   // Reports loaded from Supabase Storage / incident_reports table, keyed by event_id
   const [reportsByEvent,  setReportsByEvent]  = useState<Record<string, IncidentReportRow[]>>({});
+
+  // ── Layout flag (master-detail "split" prototype, opt-in via ?layout=split) ─
+  const layoutMode: 'table' | 'split' = searchParams.get('layout') === 'split' ? 'split' : 'table';
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // ── URL params ────────────────────────────────────────────────────────────
   const reportCustomerName = searchParams.get('customerName');
@@ -412,6 +446,28 @@ export default function IncidentsNew() {
     status:    inc => inc.incident_status,
     xc_caused: inc => inc.xc_caused,
   });
+
+  // Keep the split view's selection valid: default to the first row when the
+  // split view is active, and re-anchor if the current selection falls out of
+  // the filtered/sorted list.
+  useEffect(() => {
+    if (layoutMode !== 'split') return;
+    if (!sortedIncidents.length) { setSelectedId(null); return; }
+    setSelectedId(prev => {
+      const stillExists = prev && sortedIncidents.some(i => (i.row_id || i.event_id) === prev);
+      return stillExists ? prev : (sortedIncidents[0].row_id || sortedIncidents[0].event_id);
+    });
+  }, [layoutMode, sortedIncidents]);
+
+  // Toggle the split/table layout while preserving all other search params.
+  const setLayout = (mode: 'table' | 'split') => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (mode === 'split') next.set('layout', 'split');
+      else next.delete('layout');
+      return next;
+    }, { replace: true });
+  };
 
   const clearFilters = () => {
     setFilterCustomer('');
@@ -656,11 +712,38 @@ export default function IncidentsNew() {
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Incident Management</h1>
             <p className="text-gray-600 dark:text-gray-300 mt-2">Track and investigate field incidents</p>
           </div>
-          <Button className="w-full md:w-auto bg-gray-900 hover:bg-gray-800 text-white"
-            onClick={() => { setEditingIncident(null); setFormOpen(true); }}>
-            <Plus className="w-4 h-4 mr-2" />
-            Report Incident
-          </Button>
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            {/* Layout toggle (split prototype, opt-in) */}
+            <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => setLayout('table')}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  layoutMode === 'table'
+                    ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                }`}
+              >
+                Table
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayout('split')}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  layoutMode === 'split'
+                    ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                }`}
+              >
+                Split
+              </button>
+            </div>
+            <Button className="flex-1 md:flex-none bg-gray-900 hover:bg-gray-800 text-white"
+              onClick={() => { setEditingIncident(null); setFormOpen(true); }}>
+              <Plus className="w-4 h-4 mr-2" />
+              Report Incident
+            </Button>
+          </div>
         </div>
 
         {/* ── Dashboard / List tab toggle ── */}
@@ -1044,7 +1127,157 @@ export default function IncidentsNew() {
           </CardContent>
         </Card>
 
-        {/* Table */}
+        {/* Table (default) or master-detail Split view (?layout=split) */}
+        {layoutMode === 'split' ? (
+          sortedIncidents.length === 0 ? (
+            <Card className="border shadow-sm rounded-xl overflow-hidden">
+              <CardContent className="p-0">
+                <div className="text-center py-16 bg-gray-50/50">
+                  <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                  <p className="text-lg font-medium text-gray-900 dark:text-gray-100">No incidents found.</p>
+                  {filtersActive && (
+                    <button onClick={clearFilters} className="mt-2 text-sm text-blue-600 underline">Clear filters</button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ) : (() => {
+            const selected = sortedIncidents.find(i => (i.row_id || i.event_id) === selectedId) || null;
+            return (
+              <Card className="w-full border shadow-sm rounded-xl overflow-hidden">
+                <div className="flex w-full">
+
+                  {/* LEFT: dense incident list */}
+                  <div className="w-[360px] shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-y-auto max-h-[calc(100vh-260px)]">
+                    {sortedIncidents.map(inc => (
+                      <SplitListRow
+                        key={inc.row_id || inc.event_id}
+                        inc={inc}
+                        selected={(inc.row_id || inc.event_id) === selectedId}
+                        onSelect={() => setSelectedId(inc.row_id || inc.event_id)}
+                      />
+                    ))}
+                  </div>
+
+                  {/* RIGHT: read-only detail summary */}
+                  <div className="flex-1 overflow-y-auto max-h-[calc(100vh-260px)]">
+                    {!selected ? (
+                      <div className="h-full flex items-center justify-center py-24 text-gray-400 text-sm">
+                        Select an incident
+                      </div>
+                    ) : (() => {
+                      const r = selected;
+                      const fComp = resolveFailedComponentLabel(r.failed_component, componentsMap, '');
+                      const fType = resolveFailureTypeLabel(r.failure_type, listLookupMap, '');
+                      const dateStr = r.date_incident ? safeFmtDate(r.date_incident, 'M/d/yyyy') : '';
+                      const pdfs = getPDFs(r);
+                      const hasPrelim = !!(pdfs.preliminary.row || pdfs.preliminary.legacyUrl);
+                      const hasFinal  = !!(pdfs.final.row || pdfs.final.legacyUrl);
+                      return (
+                        <div className="p-6 space-y-6">
+
+                          {/* Header */}
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                                Incident {r.event_id || '—'}
+                              </h2>
+                              <StatusBadge status={r.incident_status} />
+                              <XcCausedBadge caused={r.xc_caused} />
+                            </div>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              {(r.customerName || '-')} — {(r.districtName || '-')}
+                              {dateStr && <> · {dateStr}</>}
+                            </p>
+                          </div>
+
+                          {/* Open full record + reachable per-row actions */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {r.row_id && (
+                              <Link to={`/incidents/${r.row_id}`}>
+                                <Button className="bg-gray-900 hover:bg-gray-800 text-white">
+                                  <ExternalLink className="w-4 h-4 mr-2" />
+                                  Open full record
+                                </Button>
+                              </Link>
+                            )}
+                            <Button variant="outline" size="sm" className="h-9" onClick={() => openView(r)}>
+                              <Eye className="w-4 h-4 mr-1.5" /> View
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-9" onClick={() => openEdit(r)}>
+                              <Edit className="w-4 h-4 mr-1.5" /> Edit
+                            </Button>
+                          </div>
+
+                          {/* Key fields */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                            <Field label="Well Name">{r.well_name}</Field>
+                            <Field label="Stage #">{r.stage_number ?? r['stage#']}</Field>
+                            <Field label="Event Category">{r.event_category}</Field>
+                            <Field label="Severity"><SeverityBadge severity={r.incident_severity} /></Field>
+                            <Field label="Reported By">{r.reported_by}</Field>
+                            <Field label="Failed Component">{fComp}</Field>
+                            <Field label="Failure Type">{fType}</Field>
+                          </div>
+
+                          {/* Description */}
+                          {r.incident_description && (
+                            <div>
+                              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Description</p>
+                              <p className="text-sm text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700 rounded-lg p-3 whitespace-pre-wrap leading-relaxed">
+                                {r.incident_description}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Reports indicator (same P/F lookup the table uses) */}
+                          <div>
+                            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Reports</p>
+                            <div className="flex items-center gap-1">
+                              {hasPrelim ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openPDFPreview(pdfs.preliminary)}
+                                  title="Preview preliminary report"
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold cursor-pointer transition-colors bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900/70">
+                                  P
+                                </button>
+                              ) : (
+                                <span title="No preliminary report"
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700">
+                                  P
+                                </span>
+                              )}
+                              {hasFinal ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openPDFPreview(pdfs.final)}
+                                  title="Preview final report"
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold cursor-pointer transition-colors bg-blue-100 text-blue-700 border border-blue-300 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800 dark:hover:bg-blue-900/70">
+                                  F
+                                </button>
+                              ) : (
+                                <span title="No final report"
+                                  className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700">
+                                  F
+                                </span>
+                              )}
+                              {r.report_sent && (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500" title={`Sent ${safeFmtDate(r.report_sent, 'M/d/yy') || ''}`} />
+                              )}
+                            </div>
+                          </div>
+
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                </div>
+              </Card>
+            );
+          })()
+        ) : (
         <Card className="border shadow-sm rounded-xl overflow-hidden">
           <CardHeader className="border-b bg-white dark:bg-gray-800 pb-4 pt-6 px-6">
             <CardTitle className="flex items-center justify-between text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -1169,6 +1402,7 @@ export default function IncidentsNew() {
             )}
           </CardContent>
         </Card>
+        )}
 
           </>
         )}
