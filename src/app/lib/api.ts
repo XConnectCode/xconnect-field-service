@@ -279,6 +279,32 @@ export const driverLoadFileApi = {
     apiRequest(`/images/${encodeURIComponent(imageId)}`, { method: 'DELETE' }, token),
 };
 
+// ── Panel file/image helpers (polymorphic images table) ───────────────────────
+// Mirrors qcPalletFileApi but targets the panels parent. Used by the repair /
+// failure-report auto-save and RMA-document attach flows on PanelDetail.
+export const panelFileApi = {
+  list: (panelRowId: string, token?: string) =>
+    apiRequest(`/images/panels/${encodeURIComponent(panelRowId)}`, {}, token),
+
+  upload: async (panelRowId: string, file: File, fieldName: string, token?: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('fieldName', fieldName);
+    const resp = await fetch(
+      `${API_BASE_URL}/images/panels/${encodeURIComponent(panelRowId)}`,
+      { method: 'POST', headers: { Authorization: await authHeader(token) }, body: fd },
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `Upload failed (HTTP ${resp.status})`);
+    }
+    return resp.json();
+  },
+
+  remove: (imageId: string, token?: string) =>
+    apiRequest(`/images/${encodeURIComponent(imageId)}`, { method: 'DELETE' }, token),
+};
+
 // Auth APIs
 export const authApi = {
   signup: (userData: { email: string; password: string; name: string; role: string }) => 
