@@ -486,6 +486,74 @@ export default function PanelDetail() {
     }
   };
 
+  // ── Repair Complete / Return ────────────────────────────────────────────────
+  // An In-Repair panel comes back from the manufacturer. Returns it to a XC
+  // facility (status 'At Facility') AND clears all RMA + repair fields. Mirrors
+  // handleMarkReturned's full carry-forward + At-Facility clearing, then layers
+  // the RMA/repair clearing on top. The edge net repeats this server-side so the
+  // cleared values land in the change log.
+  const handleRepairComplete = async () => {
+    if (!id || !accessToken || !panel) return;
+    setSaving(true);
+    try {
+      const who = user?.name || user?.email || null;
+      const payload: Record<string, any> = {
+        // Carry forward unrelated columns so the whole-object PUT doesn't blank
+        // them (mirrors handleMarkReturned).
+        panel_type: panel.panel_type ?? null,
+        plus_panel: panel.plus_panel ?? null,
+        serial_number: panel.serial_number ?? null,
+        shootingfw: panel.shootingfw ?? null,
+        wl_controlfw: panel.wl_controlfw ?? null,
+        loggingfw: panel.loggingfw ?? null,
+        surfacefw: panel.surfacefw ?? null,
+        received_date: panel.received_date ?? null,
+        xc_base: panel.xc_base ?? null,
+        'so#': panel['so#'] ?? null,
+        comments: panel.comments ?? null,
+        activity: panel.activity ?? 'N',
+        return_notes: panel.return_notes ?? null,
+        // Return workflow + auto-status.
+        panel_status: RETURNED_STATUS,
+        returned_date: todayISO(),
+        return_confirmed_by: who,
+        updated_by: who,
+        date_updated: new Date().toLocaleDateString(),
+        // At-Facility clearing (same as handleMarkReturned).
+        customer: null,
+        customer_district: null,
+        operating_company: null,
+        unit_number: null,
+        gui_version: null,
+        verified: 'Y',
+        is_spare: 'No',
+        // RMA + repair clearing (repair complete).
+        rma: null,
+        failure_description: null,
+        failure_date: null,
+        failure_reported_by: null,
+        mfr_rma_date: null,
+        tracking_info: null,
+        shipped_date: null,
+      };
+      await panelApi.update(id, payload, accessToken);
+      toast.success('Repair complete — panel returned to At Facility');
+      setMfrNameInput('');
+      setMfrRmaInput('');
+      setMfrShipDateInput('');
+      setMfrTrackingInput('');
+      setFailureDescInput('');
+      setFailureDateInput('');
+      setFailureReportedByInput('');
+      await loadPanel();
+      await loadHistory();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to complete repair');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // ── Return to Manufacturer (RMA) ────────────────────────────────────────────
   // A failed panel ships back to the manufacturer (default "AWS"). Mirrors
   // handleMarkReturned's full carry-forward pattern (the edge PUT writes the
@@ -1479,6 +1547,21 @@ export default function PanelDetail() {
                       </p>
                     </div>
                   )}
+                  <Button
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={handleRepairComplete}
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <PackageCheck className="w-4 h-4 mr-2" />
+                    )}
+                    Repair Complete / Return
+                  </Button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Returns panel to At Facility and clears RMA/repair fields.
+                  </p>
                   <Button
                     variant="outline"
                     className="w-full"
