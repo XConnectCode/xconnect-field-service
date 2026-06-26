@@ -3,7 +3,7 @@ name: Deploy Website (Production)
 on:
   push:
     branches:
-      - Release_1_0
+      - release/1.0.0
 
 jobs:
   deploy-production:
