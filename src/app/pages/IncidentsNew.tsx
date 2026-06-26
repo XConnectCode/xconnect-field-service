@@ -1112,14 +1112,34 @@ export default function IncidentsNew() {
                             const hasFinal  = !!(pdfs.final.row || pdfs.final.legacyUrl);
                             return (
                               <div className="flex items-center gap-1">
-                                <span title={hasPrelim ? 'Preliminary report exists' : 'No preliminary report'}
-                                  className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${hasPrelim ? 'bg-amber-100 text-amber-700 border border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800' : 'bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700'}`}>
-                                  P
-                                </span>
-                                <span title={hasFinal ? 'Final report exists' : 'No final report'}
-                                  className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ${hasFinal ? 'bg-blue-100 text-blue-700 border border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800' : 'bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700'}`}>
-                                  F
-                                </span>
+                                {hasPrelim ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openPDFPreview(pdfs.preliminary)}
+                                    title="Preview preliminary report"
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold cursor-pointer transition-colors bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900/70">
+                                    P
+                                  </button>
+                                ) : (
+                                  <span title="No preliminary report"
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700">
+                                    P
+                                  </span>
+                                )}
+                                {hasFinal ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openPDFPreview(pdfs.final)}
+                                    title="Preview final report"
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold cursor-pointer transition-colors bg-blue-100 text-blue-700 border border-blue-300 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800 dark:hover:bg-blue-900/70">
+                                    F
+                                  </button>
+                                ) : (
+                                  <span title="No final report"
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-gray-100 text-gray-400 border border-gray-200 dark:bg-gray-800 dark:text-gray-500 dark:border-gray-700">
+                                    F
+                                  </span>
+                                )}
                                 {inc.report_sent && (
                                   <CheckCircle2 className="w-4 h-4 text-emerald-500" title={`Sent ${safeFmtDate(inc.report_sent, 'M/d/yy') || ''}`} />
                                 )}
