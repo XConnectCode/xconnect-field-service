@@ -24,6 +24,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build project
+        env:
+          VITE_SUPABASE_PROJECT_ID: ${{ secrets.PROD_VITE_SUPABASE_PROJECT_ID }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_VITE_SUPABASE_ANON_KEY }}
         run: pnpm run build
 
       - name: Deploy to Netlify Production
