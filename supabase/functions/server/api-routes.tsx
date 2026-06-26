@@ -1361,6 +1361,14 @@ apiRoutes.put("/panels/:id", async (c) => {
       mfr_rma_date: body.mfr_rma_date
     };
 
+    // Fetch the current row before updating so we can diff for change-log and
+    // know the prior status (used by the In-Repair → At-Facility net below).
+    const { data: before } = await supabase
+      .from('panels')
+      .select('*')
+      .eq('row_id', id)
+      .single();
+
     // At-Facility safety net: whenever a panel transitions to 'At Facility',
     // clear customer/assignment fields and reset verified/is_spare regardless
     // of caller. Mirrors the frontend overrides; belt-and-suspenders so the
@@ -1373,6 +1381,21 @@ apiRoutes.put("/panels/:id", async (c) => {
       updateObj.gui_version = null;
       updateObj.verified = 'Y';
       updateObj.is_spare = 'No';
+    }
+
+    // Repair-complete net: when a panel returns to 'At Facility' specifically
+    // FROM 'In Repair', also clear all RMA + repair fields (mirrors the
+    // frontend handleRepairComplete). Gated on the prior status so an ordinary
+    // return doesn't wipe RMA/shipping data. Mutates updateObj before the
+    // .update() + diff so the cleared values are captured in change history.
+    if (body.panel_status === 'At Facility' && before?.panel_status === 'In Repair') {
+      updateObj.rma = null;
+      updateObj.failure_description = null;
+      updateObj.failure_date = null;
+      updateObj.failure_reported_by = null;
+      updateObj.mfr_rma_date = null;
+      updateObj.tracking_info = null;
+      updateObj.shipped_date = null;
     }
 
     // Auto-assign sequential RMA number on manufacturer return. When a panel is
@@ -1400,13 +1423,6 @@ apiRoutes.put("/panels/:id", async (c) => {
         // Fall back to leaving rma as-is; never block the update.
       }
     }
-
-    // Fetch the current row before updating so we can diff for change-log.
-    const { data: before } = await supabase
-      .from('panels')
-      .select('*')
-      .eq('row_id', id)
-      .single();
 
     const { data, error } = await supabase
       .from('panels')
