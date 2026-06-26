@@ -10,7 +10,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Combobox } from '../components/ui/combobox';
 import { Textarea } from '../components/ui/textarea';
-import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck, PackageX, FileDown, Eye, Paperclip } from 'lucide-react';
+import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck, PackageX, FileDown, Eye, Paperclip, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
@@ -55,6 +55,45 @@ const showPlusPanel  = (type: string) => type === 'P2500';
 const showGui        = (type: string, status: string) => GUI_TYPES.includes(type) && GUI_STATUSES.includes(status);
 const showSurfaceFw  = (type: string) => type === 'Surface Tester';
 const showShootingFw = (type: string) => type === 'Digital Shooting Panel';
+
+// ── Carrier tracking link ───────────────────────────────────────────────────────
+// Turns a raw tracking value (bare number — usually FedEx — or a full URL) into a
+// clickable carrier tracking URL. Returns null when there's nothing to link to.
+function buildTrackingUrl(raw: string): string | null {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+  const t = trimmed.replace(/[\s-]/g, '');
+  const enc = encodeURIComponent(t);
+
+  if (/^1Z[0-9A-Z]{16}$/i.test(t)) return `https://www.ups.com/track?tracknum=${enc}`;
+  if (/^(\d{20,22}|\d{13}|[A-Z]{2}\d{9}US)$/i.test(t)) {
+    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${enc}`;
+  }
+  // Default / fallback — user is ~99% FedEx.
+  return `https://www.fedex.com/fedextrack/?trknbr=${enc}`;
+}
+
+// Renders the raw tracking value as a clickable carrier link (falls back to plain
+// text if it can't be turned into a URL).
+function TrackingLink({ value, className }: { value: string; className?: string }) {
+  const url = buildTrackingUrl(value);
+  if (!url) {
+    return <span className={className}>{value}</span>;
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`text-blue-600 hover:underline inline-flex items-center gap-1 ${className ?? ''}`}
+    >
+      {value}
+      <ExternalLink className="w-3.5 h-3.5" />
+    </a>
+  );
+}
 
 // ── Field helper ───────────────────────────────────────────────────────────────
 interface FieldProps {
@@ -1094,6 +1133,23 @@ export default function PanelDetail() {
                       />
                     </Field>
                   )}
+
+                  {/* Tracking — shown read-only as a clickable carrier link.
+                      Editable via the Return-to-Manufacturer flow / form below. */}
+                  <Field
+                    label="Tracking"
+                    value={
+                      panel.tracking_info
+                        ? <TrackingLink value={panel.tracking_info} />
+                        : '—'
+                    }
+                    editing={editing}
+                  >
+                    <Input
+                      value={form.tracking_info}
+                      onChange={(e) => setField('tracking_info', e.target.value)}
+                    />
+                  </Field>
                 </div>
               </CardContent>
             </Card>
@@ -1413,6 +1469,16 @@ export default function PanelDetail() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {panel.tracking_info && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                        RMA Tracking
+                      </p>
+                      <p className="text-sm">
+                        <TrackingLink value={panel.tracking_info} />
+                      </p>
+                    </div>
+                  )}
                   <Button
                     variant="outline"
                     className="w-full"
