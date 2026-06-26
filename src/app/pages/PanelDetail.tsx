@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useAuth } from '../lib/auth-context';
-import { detailApi, panelApi } from '../lib/api';
+import { detailApi, panelApi, panelFileApi } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -10,7 +10,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Combobox } from '../components/ui/combobox';
 import { Textarea } from '../components/ui/textarea';
-import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck, PackageX, FileDown, Eye } from 'lucide-react';
+import { ArrowLeft, Pencil, Save, X, Loader2, History, PackageCheck, PackageX, FileDown, Eye, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from '../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
@@ -196,6 +196,7 @@ export default function PanelDetail() {
     try {
       const data = await detailApi.getPanel(id, accessToken);
       setPanel(data);
+      return data;
     } catch (error: any) {
       console.error('Error loading panel:', error);
       toast.error('Failed to load panel details');
@@ -499,8 +500,44 @@ export default function PanelDetail() {
       await panelApi.update(id, payload, accessToken);
       toast.success(`Panel marked In Repair — returned to ${mfrNameInput || 'manufacturer'}`);
       setReturningMfr(false);
-      await loadPanel();
+      const fresh = await loadPanel();
       await loadHistory();
+
+      // Auto-save the failure report to the panel's files. Never let an upload
+      // failure break the return flow — soft-warn at most.
+      const p = fresh || panel;
+      try {
+        const { blob, filename } = await generateRepairFailureReportPDF({
+          mode: 'blob',
+          manufacturer: mfrNameInput || 'AWS',
+          rma: p?.rma || mfrRmaInput || undefined,
+          shipDate: mfrShipDateInput || p?.shipped_date || undefined,
+          trackingInfo: mfrTrackingInput || p?.tracking_info || undefined,
+          panel: {
+            serial_number: p?.serial_number,
+            panel_type: p?.panel_type,
+            unit_number: p?.unit_number,
+            panel_status: p?.panel_status,
+            xc_base: p?.xc_base,
+            shootingfw: p?.shootingfw,
+            wl_controlfw: p?.wl_controlfw,
+            loggingfw: p?.loggingfw,
+            surfacefw: p?.surfacefw,
+            gui_version: p?.gui_version,
+            received_date: p?.received_date,
+          },
+          failureDescription: failureDescInput || p?.failure_description || undefined,
+          failureDate: failureDateInput || p?.failure_date || undefined,
+          reportedBy: failureReportedByInput || p?.failure_reported_by || user?.name || user?.email || undefined,
+        });
+        if (blob && p?.row_id) {
+          const file = new File([blob], filename, { type: 'application/pdf' });
+          await panelFileApi.upload(p.row_id, file, 'failure_report', accessToken);
+          toast.success('Failure report saved to panel files');
+        }
+      } catch (e) {
+        console.error('auto-save failure report failed', e);
+      }
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to return panel to manufacturer');
     } finally {
@@ -538,6 +575,63 @@ export default function PanelDetail() {
       });
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to generate report');
+    }
+  };
+
+  // Download the Repair / Failure Report sourced purely from stored panel.*
+  // values (no mfr form inputs — they don't exist once the panel is In Repair).
+  const handleDownloadFailureReportFromPanel = async () => {
+    if (!panel) return;
+    try {
+      await generateRepairFailureReportPDF({
+        manufacturer: 'AWS',
+        rma: panel.rma || undefined,
+        shipDate: panel.shipped_date || undefined,
+        trackingInfo: panel.tracking_info || undefined,
+        panel: {
+          serial_number: panel.serial_number,
+          'serial#': panel['serial#'],
+          panel_type: panel.panel_type,
+          unit_number: panel.unit_number,
+          panel_status: panel.panel_status,
+          xc_base: panel.xc_base,
+          shootingfw: panel.shootingfw,
+          wl_controlfw: panel.wl_controlfw,
+          loggingfw: panel.loggingfw,
+          surfacefw: panel.surfacefw,
+          gui_version: panel.gui_version,
+          received_date: panel.received_date,
+        },
+        failureDescription: panel.failure_description || undefined,
+        failureDate: panel.failure_date || undefined,
+        reportedBy: panel.failure_reported_by || undefined,
+      });
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to generate report');
+    }
+  };
+
+  // ── Attach an RMA document (PDF or image) to the panel's files ──────────────
+  const rmaDocInputRef = useRef<HTMLInputElement>(null);
+  const [rmaDocUploading, setRmaDocUploading] = useState(false);
+
+  const handleRmaDocSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!file || !panel?.row_id) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File is too large (max 10MB)');
+      return;
+    }
+    setRmaDocUploading(true);
+    try {
+      await panelFileApi.upload(panel.row_id, file, 'rma_document', accessToken);
+      toast.success('RMA document attached');
+      await loadPanel();
+    } catch (err: any) {
+      toast.error(err.message ?? 'Failed to attach document');
+    } finally {
+      setRmaDocUploading(false);
     }
   };
 
@@ -1304,6 +1398,58 @@ export default function PanelDetail() {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Repair / Failure Report — only while the panel is In Repair. The
+                Return-to-Manufacturer card (with its own download button) is
+                hidden in this state, so this provides always-available access to
+                regenerate the report and attach RMA paperwork. */}
+            {!editing && panel.panel_status === 'In Repair' && (
+              <Card className="rounded-xl">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <PackageX className="w-4 h-4 text-orange-600" />
+                    Repair / Failure Report
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={handleDownloadFailureReportFromPanel}
+                  >
+                    <FileDown className="w-4 h-4 mr-2" />
+                    Download Failure Report
+                  </Button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Auto-saved to panel files when marked In Repair. Regenerate anytime.
+                  </p>
+
+                  <input
+                    ref={rmaDocInputRef}
+                    type="file"
+                    accept="application/pdf,image/*"
+                    className="hidden"
+                    onChange={handleRmaDocSelected}
+                  />
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => rmaDocInputRef.current?.click()}
+                    disabled={rmaDocUploading}
+                  >
+                    {rmaDocUploading ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Paperclip className="w-4 h-4 mr-2" />
+                    )}
+                    Attach RMA Document
+                  </Button>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    PDF or image, up to 10MB. Appears in the panel Images card.
+                  </p>
+                </CardContent>
+              </Card>
             )}
 
             {/* Return details — shown once a panel has been returned. */}

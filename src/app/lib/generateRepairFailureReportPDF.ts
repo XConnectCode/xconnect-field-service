@@ -29,12 +29,13 @@ export interface RepairFailureReportOptions {
   failureDate?: string;
   reportedBy?: string;
   logoUrl?: string | null;
+  mode?: 'download' | 'blob';
 }
 
 const dash = (v?: string | null): string => (v && String(v).trim() ? String(v) : '—');
 
-export async function generateRepairFailureReportPDF(opts: RepairFailureReportOptions): Promise<void> {
-  const { manufacturer, rma, shipDate, trackingInfo, panel, failureDescription, failureDate, reportedBy, logoUrl } = opts;
+export async function generateRepairFailureReportPDF(opts: RepairFailureReportOptions): Promise<{ blob: Blob | null; filename: string }> {
+  const { manufacturer, rma, shipDate, trackingInfo, panel, failureDescription, failureDate, reportedBy, logoUrl, mode = 'download' } = opts;
   const doc = await loadJsPDF();
   const serial = getSerial(panel) || panel.serial_number || '';
 
@@ -132,5 +133,11 @@ export async function generateRepairFailureReportPDF(opts: RepairFailureReportOp
   drawFooters(doc);
 
   const safeSerial = (serial || 'panel').replace(/[^a-zA-Z0-9]/g, '');
-  doc.save(`Repair-Failure-Report_${safeSerial}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  const filename = `Repair-Failure-Report_${safeSerial}_${new Date().toISOString().slice(0, 10)}.pdf`;
+
+  if (mode === 'blob') {
+    return { blob: doc.output('blob') as Blob, filename };
+  }
+  doc.save(filename);
+  return { blob: null, filename };
 }
