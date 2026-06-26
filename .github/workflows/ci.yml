@@ -35,21 +35,49 @@ jobs:
       - name: Build app (Vite)
         run: pnpm build
 
-  edge-smoke:
-    name: Edge function smoke check
+  edge-smoke-staging:
+    name: Edge function smoke check (Staging)
     runs-on: ubuntu-latest
-    # Don't gate PRs from forks on a live URL check, and only run on push to main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build-test
     steps:
       - name: Hit /health on make-server-64775d98
         env:
           EDGE_URL: https://qbexqpvzmssmifimlfos.functions.supabase.co/make-server-64775d98
-          ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          ANON_KEY: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${ANON_KEY:-}" ]; then
-            echo "::warning::SUPABASE_ANON_KEY secret not set — skipping edge smoke check"
+            echo "::warning::ANON_KEY secret not set — skipping edge smoke check"
+            exit 0
+          fi
+          echo "GET $EDGE_URL/health"
+          status=$(curl -sS -o /tmp/health.json -w '%{http_code}' \
+            -H "Authorization: Bearer $ANON_KEY" \
+            -H "apikey: $ANON_KEY" \
+            "$EDGE_URL/health")
+          echo "HTTP $status"
+          cat /tmp/health.json || true
+          echo
+          if [ "$status" != "200" ]; then
+            echo "::error::Edge function /health returned $status"
+            exit 1
+          fi
+
+  edge-smoke-prod:
+    name: Edge function smoke check (Production)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
+    needs: build-test
+    steps:
+      - name: Hit /health on make-server-64775d98
+        env:
+          EDGE_URL: https://gbllxumuogsncoiaksum.functions.supabase.co/make-server-64775d98
+          ANON_KEY: ${{ secrets.PROD_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANON_KEY:-}" ]; then
+            echo "::warning::ANON_KEY secret not set — skipping edge smoke check"
             exit 0
           fi
           echo "GET $EDGE_URL/health"
