@@ -6,3 +6,10 @@ max_rows = 1000
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
+
+# Slack webhooks (events + interactivity) hit this function without a Supabase
+# JWT, so the platform JWT gate must be off. App routes are still protected
+# in-code (apiRoutes.use('*', requireUser) + requireAdmin on deletes); Slack
+# routes verify the Slack signing signature themselves.
+[functions.make-server-64775d98]
+verify_jwt = false
