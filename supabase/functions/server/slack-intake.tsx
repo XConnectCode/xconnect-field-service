@@ -395,10 +395,10 @@ slackIntakeRoutes.post('/slack/interactions', async (c) => {
       });
     }
 
-    // Resolve parent customer (row_id) from chosen district.
+    // Resolve parent customer (row_id) + readable names from chosen district.
     const { data: districtRow, error: dErr } = await supabase
       .from('districts')
-      .select('row_id, customer')
+      .select('row_id, customer, customer_name, customer_district')
       .eq('row_id', districtRowId)
       .single();
     if (dErr || !districtRow) {
@@ -462,12 +462,47 @@ slackIntakeRoutes.post('/slack/interactions', async (c) => {
       });
     }
 
-    // Nice-to-have: confirmation in the source thread.
+    // Confirmation reply in the source thread: a basics header + a link to
+    // the incident detail in the FST app.
     if (meta.channel && meta.message_ts) {
+      const appBaseUrl = (Deno.env.get('FST_APP_BASE_URL') ?? 'https://xconnectfst.netlify.app')
+        .replace(/\/+$/, '');
+      const detailUrl = `${appBaseUrl}/incidents/${inserted.row_id}`;
+
+      const customerName = (districtRow as any).customer_name ?? '';
+      const districtName = (districtRow as any).customer_district ?? '';
+      const custDist = [customerName, districtName].filter((s) => String(s).trim().length > 0).join(' — ');
+      const categoryLine = [eventCategory, xcCaused ? `XC Caused: ${xcCaused}` : '']
+        .filter((s) => String(s).trim().length > 0)
+        .join('  ·  ');
+
+      const headerLines = [
+        `*Incident #${inserted.event_id} logged to FST*`,
+        custDist ? `*Customer — District:* ${custDist}` : '',
+        categoryLine ? `*Category:* ${categoryLine}` : '',
+      ].filter((l) => l.length > 0);
+
       await slackApi('chat.postMessage', {
         channel: meta.channel,
         thread_ts: meta.message_ts,
-        text: `Incident ${inserted.event_id} logged to FST.`,
+        text: `Incident #${inserted.event_id} logged to FST — ${detailUrl}`,
+        blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: headerLines.join('\n') },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                style: 'primary',
+                text: { type: 'plain_text', text: 'View event details' },
+                url: detailUrl,
+              },
+            ],
+          },
+        ],
       });
     }
 
