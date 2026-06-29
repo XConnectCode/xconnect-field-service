@@ -98,6 +98,20 @@ function panelAttentionReasons(p: any): string[] {
   return reasons;
 }
 
+// Format a Date as a naive local wall-clock stamp (YYYY-MM-DDTHH:mm:ss.SSS, no
+// "Z"). The fieldvisits.arrival_date / sales_volume.date / incidents.date_incident
+// columns are stored as naive wall-clock (America/Denver) per the app-wide rule,
+// so the window boundaries must be compared in the same wall-clock terms.
+// Using toISOString() here converted local midnight to UTC (e.g. 00:00 MDT →
+// 06:00Z), shifting every boundary forward ~6–7h. On the narrow, fully-past
+// "Last Week" window that skew pushed the range off the data and Field Visit
+// Hours summed to 0; wider ranges hid the same skew.
+function toLocalStamp(d: Date): string {
+  const p = (n: number, len = 2) => String(n).padStart(len, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
 function getDateRange(filter: string): { start: string | null; end: string | null } {
   if (filter === "all_time") return { start: null, end: null };
   const now = new Date();
@@ -111,7 +125,7 @@ function getDateRange(filter: string): { start: string | null; end: string | nul
     case "this_quarter":start = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1); break;
     case "this_year":   start = new Date(now.getFullYear(), 0, 1); break;
   }
-  return { start: start.toISOString(), end: end.toISOString() };
+  return { start: toLocalStamp(start), end: toLocalStamp(end) };
 }
 
 // ── Time filter labels (human-readable, for banners/headings) ────────────────
