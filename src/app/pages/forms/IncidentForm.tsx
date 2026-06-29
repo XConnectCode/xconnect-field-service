@@ -269,6 +269,14 @@ export default function IncidentForm({
   const [failedComponent, setFailedComponent] = useState('');
   const [vendor, setVendor] = useState('');
   const [operatingCompany, setOperatingCompany] = useState('');
+  // Controlled mirrors for the four Technical Details dropdowns. These MUST be
+  // controlled: their <option> lists load asynchronously, and an uncontrolled
+  // <select defaultValue> set before the options exist silently falls back to
+  // "— Select —" and never re-syncs, which also nulled the saved value on save.
+  const [xcCaused, setXcCaused] = useState<string>(incident?.xc_caused || '');
+  const [eventCategory, setEventCategory] = useState<string>(incident?.event_category || '');
+  const [productLine, setProductLine] = useState<string>(incident?.product_line || '');
+  const [firingSystem, setFiringSystem] = useState<string>(incident?.firing_system || '');
 
   // Director Review (admin-only). Controlled so the admin can set/clear the
   // review sign-off inline; SQM sees a read-only badge. The actual reviewer
@@ -482,6 +490,10 @@ export default function IncidentForm({
       setFailedComponent(incident.failed_component || '');
       setVendor(incident.vendor || '');
       setOperatingCompany(incident.operating_company || '');
+      setXcCaused(incident.xc_caused || '');
+      setEventCategory(incident.event_category || '');
+      setProductLine(incident.product_line || '');
+      setFiringSystem(incident.firing_system || '');
     } else if (prefill) {
       setCustId(prefill.customer || '');
       setDistId(prefill.customer_district || '');
@@ -492,6 +504,10 @@ export default function IncidentForm({
       setFailedComponent('');
       setVendor('');
       setOperatingCompany(prefill.operating_company || '');
+      setXcCaused('');
+      setEventCategory('');
+      setProductLine('');
+      setFiringSystem('');
     } else {
       setCustId('');
       setDistId('');
@@ -502,6 +518,10 @@ export default function IncidentForm({
       setFailedComponent('');
       setVendor('');
       setOperatingCompany('');
+      setXcCaused('');
+      setEventCategory('');
+      setProductLine('');
+      setFiringSystem('');
     }
   }, [incident, prefill, open]);
 
@@ -522,13 +542,13 @@ export default function IncidentForm({
     // Build a candidate record from form + existing values to validate against.
     const candidate: Record<string, any> = {
       ...(incident || {}),
-      xc_caused:        fd.get('xc_caused') || incident?.xc_caused,
+      xc_caused:        xcCaused || incident?.xc_caused,
       vendor_caused:    fd.get('vendor_caused') || incident?.vendor_caused,
       vendor:           fd.get('vendor') || incident?.vendor,
       failed_component: fd.get('failed_component') || incident?.failed_component,
-      event_category:   fd.get('event_category') || incident?.event_category,
+      event_category:   eventCategory || incident?.event_category,
       failure_type:     fd.get('failure_type') || incident?.failure_type,
-      product_line:     fd.get('product_line') || incident?.product_line,
+      product_line:     productLine || incident?.product_line,
       root_cause:       fd.get('root_cause') || incident?.root_cause,
       // report_sent is not on the form — keep the existing value when validating
       report_sent:      incident?.report_sent,
@@ -583,10 +603,10 @@ export default function IncidentForm({
       date_incident: fd.get('date_incident') || null,
       incident_status: fd.get('incident_status') || null,
       incident_severity: fd.get('incident_severity') || null,
-      xc_caused: fd.get('xc_caused') || null,
-      event_category: fd.get('event_category') || null,
-      product_line: fd.get('product_line') || null,
-      firing_system: fd.get('firing_system') || null,
+      xc_caused: xcCaused || null,
+      event_category: eventCategory || null,
+      product_line: productLine || null,
+      firing_system: firingSystem || null,
       field_facility: fd.get('field_facility') || null,
       customer: custId || null,
       customer_district: distId || null,
@@ -975,10 +995,10 @@ export default function IncidentForm({
             </F>
           </SectionCard>
 
-          {/* 5. Classification */}
-          <SectionCard title="Incident Classification">
+          {/* 5. Technical Details */}
+          <SectionCard title="Technical Details">
             <F label="XC Caused">
-              <Sel name="xc_caused" defaultValue={incident?.xc_caused || ''}>
+              <Sel name="xc_caused" value={xcCaused} onChange={setXcCaused}>
                 <option value="">— Select —</option>
                 {opts(listItems, 'xc_caused').map((o) => (
                   <option key={o} value={o}>
@@ -991,7 +1011,8 @@ export default function IncidentForm({
             <F label="Event Category">
               <Sel
                 name="event_category"
-                defaultValue={incident?.event_category || ''}
+                value={eventCategory}
+                onChange={setEventCategory}
               >
                 <option value="">— Select —</option>
                 {opts(listItems, 'event_category').map((o) => (
@@ -1005,7 +1026,8 @@ export default function IncidentForm({
             <F label="Product Line">
               <Sel
                 name="product_line"
-                defaultValue={incident?.product_line || ''}
+                value={productLine}
+                onChange={setProductLine}
               >
                 <option value="">— Select —</option>
                 {opts(listItems, 'xc_products').map((o) => (
@@ -1019,7 +1041,8 @@ export default function IncidentForm({
             <F label="Firing System">
               <Sel
                 name="firing_system"
-                defaultValue={incident?.firing_system || ''}
+                value={firingSystem}
+                onChange={setFiringSystem}
               >
                 <option value="">— Select —</option>
                 {opts(listItems, 'firing_system').map((o) => (
