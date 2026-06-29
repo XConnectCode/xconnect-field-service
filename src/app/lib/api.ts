@@ -316,6 +316,8 @@ export const detailApi = {
   getFieldVisit: (id: string, token?: string) => apiRequest(`/field-visits/${id}`, {}, token),
   getIncident: (id: string, token?: string) => apiRequest(`/incidents/${id}`, {}, token),
   getPanel: (id: string, token?: string) => apiRequest(`/panels/${id}`, {}, token),
+  getPanelHistory: (id: string, serial?: string, token?: string) =>
+    apiRequest(`/panels/${id}/history${serial ? `?serial=${encodeURIComponent(serial)}` : ''}`, {}, token),
   getCustomer: (id: string, token?: string) => apiRequest(`/customers/${id}/details`, {}, token),
   getDistrict: (id: string, token?: string) => apiRequest(`/districts/${id}/details`, {}, token),
 };
