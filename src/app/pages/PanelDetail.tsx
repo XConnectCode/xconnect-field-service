@@ -234,21 +234,19 @@ export default function PanelDetail() {
   }, [accessToken]);
 
   // Load the change history for this panel (by row_id, falling back to serial
-  // so edits made before a row_id existed still surface).
+  // so edits made before a row_id existed still surface). Routed through the
+  // server API (service-role client) instead of the browser anon client: RLS on
+  // panel_change_log otherwise returns zero rows silently, leaving the section
+  // empty with no error.
   const loadHistory = async () => {
     if (!panel?.row_id || !accessToken) return;
     setHistoryLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('panel_change_log')
-        .select('id, entry_type, field, field_label, old_value, new_value, changed_by, changed_at')
-        .or(`panel_row_id.eq.${panel.row_id},serial_number.eq.${panel.serial_number}`)
-        .order('changed_at', { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      setHistory(data || []);
+      const data = await detailApi.getPanelHistory(panel.row_id, panel.serial_number, accessToken);
+      setHistory(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Error loading panel history:', err);
+      toast.error('Failed to load change history');
     } finally {
       setHistoryLoading(false);
     }

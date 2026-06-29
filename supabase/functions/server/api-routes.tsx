@@ -2871,6 +2871,35 @@ apiRoutes.get("/panels/:id", async (c) => {
   }
 });
 
+// Per-field change history for a panel (panel_change_log diffs the detail page
+// renders). Served via the service-role client so RLS on panel_change_log can't
+// silently return zero rows the way the browser anon client did. Canonical key is
+// panel_row_id == panels.row_id; serial_number is a fallback for entries logged
+// before a row_id existed.
+apiRoutes.get("/panels/:id/history", async (c) => {
+  try {
+    const id = c.req.param('id');
+    const serial = c.req.query('serial');
+    let query = supabase
+      .from('panel_change_log')
+      .select('id, entry_type, field, field_label, old_value, new_value, changed_by, changed_at')
+      .order('changed_at', { ascending: false })
+      .limit(200);
+    query = serial
+      ? query.or(`panel_row_id.eq.${id},serial_number.eq.${serial}`)
+      : query.eq('panel_row_id', id);
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching panel change log:', error);
+      return c.json({ error: error.message }, 500);
+    }
+    return c.json(data ?? []);
+  } catch (error) {
+    console.error('Error in panel history endpoint:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Get single customer with detailed KPIs
 apiRoutes.get("/customers/:id/details", async (c) => {
   try {
