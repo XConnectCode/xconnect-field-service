@@ -60,6 +60,13 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  /**
+   * Render shell. 'modal' (default) wraps the form in a Radix Dialog. 'page'
+   * renders the exact same header/form/footer inline so a parent route (e.g.
+   * FieldVisitDetail) can show editing as a full page. The form body,
+   * validation, and payload logic are identical in both variants.
+   */
+  variant?: 'modal' | 'page';
   visit?: any;
   currentUser?: any;
   /**
@@ -78,7 +85,7 @@ interface Props {
   } | null;
 }
 
-export default function FieldVisitForm({ open, onClose, onSaved, visit, currentUser, prefill }: Props) {
+export default function FieldVisitForm({ open, onClose, onSaved, variant = 'modal', visit, currentUser, prefill }: Props) {
   const editing = !!visit;
 
   const [customers,     setCustomers]     = useState<any[]>([]);
@@ -228,6 +235,25 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     const arrival   = fd.get('arrival_date') as string;
     const departure = fd.get('departure_date') as string;
 
+    // Date sanity checks (ported from FieldVisitDetail for full parity): the
+    // departure can't be in the future, and can't precede the arrival. Toast
+    // and abort before the network call so the form stays open for correction.
+    if (departure) {
+      const dep = new Date(departure);
+      if (!Number.isNaN(dep.getTime()) && dep.getTime() > Date.now()) {
+        toast.error('Departure date cannot be in the future.');
+        return;
+      }
+    }
+    if (arrival && departure) {
+      const arr = new Date(arrival);
+      const dep = new Date(departure);
+      if (!Number.isNaN(arr.getTime()) && !Number.isNaN(dep.getTime()) && dep < arr) {
+        toast.error('Departure date cannot be before the arrival date.');
+        return;
+      }
+    }
+
     // Derive the 3 legacy single-value columns from the multi-select so older
     // reads still work: pick the first selected panel of each legacy type.
     const seenList = Array.from(new Set(panelsSeen.map(s => String(s).trim()).filter(Boolean)));
@@ -292,14 +318,13 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
     }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-4xl w-[95vw] md:w-full max-h-[90vh] overflow-y-auto p-4 md:p-6">
-        <DialogHeader>
-          <DialogTitle>{editing ? `Edit Visit ${visit.field_visit_id}` : 'New Field Visit'}</DialogTitle>
-        </DialogHeader>
+  const titleText = editing ? `Edit Visit ${visit.field_visit_id}` : 'New Field Visit';
 
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mt-2">
+  // The form body is identical in both the modal and full-page shells; only the
+  // surrounding chrome differs. The submit button lives inside the <form>, so it
+  // works in either shell.
+  const formBody = (
+        <form id="fieldvisit-form" onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mt-2">
 
           {/* ── Core ── */}
           <Section title="Visit Info" />
@@ -496,6 +521,30 @@ export default function FieldVisitForm({ open, onClose, onSaved, visit, currentU
           </div>
 
         </form>
+  );
+
+  // ── Full-page shell (variant='page') ──
+  // Renders the same header/body inline, sized to fill the routed page, so visit
+  // editing looks like a full page instead of a modal. No Radix Dialog overlay.
+  if (variant === 'page') {
+    return (
+      <div className="flex flex-col h-[calc(100vh-4rem)] overflow-y-auto bg-white dark:bg-gray-900">
+        <div className="px-4 md:px-6 pt-5 pb-3 border-b shrink-0">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{titleText}</h1>
+        </div>
+        <div className="px-4 md:px-6 py-4">{formBody}</div>
+      </div>
+    );
+  }
+
+  // ── Modal shell (default) ──
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-4xl w-[95vw] md:w-full max-h-[90vh] overflow-y-auto p-4 md:p-6">
+        <DialogHeader>
+          <DialogTitle>{titleText}</DialogTitle>
+        </DialogHeader>
+        {formBody}
       </DialogContent>
     </Dialog>
   );
