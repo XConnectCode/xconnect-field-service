@@ -55,10 +55,14 @@ const PANEL_STATUS_OPTS = ['At Facility', 'Leased', 'In Repair', 'Loaned', 'Sold
 //   - Leased/Loaned/Sold → fields shown AND required
 //   - In Repair    → fields shown but optional (could be from XC or customer)
 const ASSIGN_REQUIRED_STATUSES = ['Leased', 'Loaned', 'Sold'];
+// Canonical "Sold" status string (matches the value in PANEL_STATUS_OPTS).
+const SOLD_STATUS = 'Sold';
 // Shown for everything except At Facility.
 const showAssign       = (status: string) => status !== '' && status !== 'At Facility';
 // Required only for Leased / Loaned / Sold.
 const assignRequired   = (status: string) => ASSIGN_REQUIRED_STATUSES.includes(status);
+// SO # is required only when the panel is Sold; optional for every other status.
+const soRequired       = (status: string) => status === SOLD_STATUS;
 const XC_BASE_OPTS      = XC_PANEL_BASES; // shared list (Denver kept for Panels inventory)
 const YES_NO_OPTS       = ['Yes', 'No'];
 const VERIFIED_OPTS     = ['Y', 'N'];
@@ -168,7 +172,7 @@ export default function PanelForm({ open, onClose, onSaved, variant = 'modal', p
       if (!assignVals.customer_district) missing.push('District');
       if (!assignVals.operating_company) missing.push('Operating Company');
       if (!assignVals.unit_number)       missing.push('Unit #');
-      if (!assignVals['so#'])            missing.push('SO #');
+      if (soRequired(status) && !assignVals['so#']) missing.push('SO #');
       if (!assignVals.is_spare)          missing.push('Spare');
       if (!assignVals.activity)          missing.push('Activity');
       if (missing.length) {
@@ -302,9 +306,9 @@ export default function PanelForm({ open, onClose, onSaved, variant = 'modal', p
           )}
 
           {showAssign(panelStatus) && (
-            <F label="SO #" required={assignRequired(panelStatus)}>
+            <F label="SO #" required={soRequired(panelStatus)}>
               <Input name="so" defaultValue={panel?.['so#'] || ''}
-                required={assignRequired(panelStatus)} />
+                required={soRequired(panelStatus)} />
             </F>
           )}
 
