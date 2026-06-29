@@ -50,6 +50,22 @@ function parseHHMMSS(str: string | null | undefined): number {
   return 0;
 }
 
+// Hours for a single field visit. Prefer the stored visit_duration text
+// ("HH:MM:SS"); when it is null/empty/unparseable, fall back to the gap
+// between departure_date and arrival_date. Contribute 0 if neither works.
+function visitHours(r: { visit_duration?: string | null; arrival_date?: string | null; departure_date?: string | null }): number {
+  const parsed = parseHHMMSS(r.visit_duration);
+  if (parsed > 0) return parsed;
+  if (r.arrival_date && r.departure_date) {
+    const arrival = new Date(r.arrival_date).getTime();
+    const departure = new Date(r.departure_date).getTime();
+    if (!isNaN(arrival) && !isNaN(departure) && departure > arrival) {
+      return (departure - arrival) / 3_600_000;
+    }
+  }
+  return 0;
+}
+
 function fmt(n: number | null | undefined): string | number {
   if (n === null || n === undefined) return "—";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -1130,8 +1146,8 @@ export default function Dashboard() {
 
         // Metrics
         const { count: visits } = await applyDates(supabase.from("fieldvisits").select("*", { count: "exact", head: true }), "arrival_date");
-        const visitsRaw = await fetchAllPages(applyDates(supabase.from("fieldvisits").select("visit_duration").not("visit_duration", "is", null), "arrival_date"));
-        const hours = visitsRaw.reduce((s, r) => s + parseHHMMSS(r.visit_duration), 0);
+        const visitsRaw = await fetchAllPages(applyDates(supabase.from("fieldvisits").select("visit_duration,arrival_date,departure_date"), "arrival_date"));
+        const hours = visitsRaw.reduce((s, r) => s + visitHours(r), 0);
 
         // Unified sales_volume view replaces the two separate barrels_sold /
         // stages fetches. One round-trip, split by metric_type in the browser.
