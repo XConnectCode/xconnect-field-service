@@ -865,7 +865,7 @@ export default function IncidentsNew() {
                         cx="50%"
                         cy="50%"
                         outerRadius={90}
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        label={({ name, percent }) => (percent >= 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : null)}
                         labelLine={false}
                         onClick={(entry: any) => {
                           if (!entry) return;

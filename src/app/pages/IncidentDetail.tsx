@@ -215,29 +215,39 @@ export default function IncidentDetail() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const restBase = `https://${projectId}.supabase.co/rest/v1`;
-      // Forward the user's session token so RLS sees the authenticated user on
-      // REST reads, and so the guarded edge routes (which reject the anon key)
-      // accept the request. loadAll only runs once accessToken exists.
+      // Forward the user's session token so the guarded edge routes (which
+      // reject the anon key) accept the request. loadAll only runs once
+      // accessToken exists.
       const token = accessToken ?? publicAnonKey;
-      const restHeaders = { 'apikey': publicAnonKey, 'Authorization': `Bearer ${token}` };
       const edgeHeaders = { 'Authorization': `Bearer ${token}` };
       const baseUrl = `https://${projectId}.supabase.co/functions/v1/make-server-64775d98`;
 
+      // Resolve the lists/components/vendors lookups via the supabase-js client
+      // (exactly how IncidentForm.tsx loads them) instead of raw PostgREST.
+      // The raw REST path silently came up empty/incomplete at render time —
+      // header/limit/RLS divergence dropped the rows the resolvers needed, so
+      // Failed Component & Failure Type fell back to N/A and vanished from the
+      // detail view + PDF. The supabase-js path is the proven, working one.
       const [incidentData, listsRes, compRes, vendorsRes, custRes, distRes] = await Promise.all([
         detailApi.getIncident(id!, accessToken!),
-        fetch(`${restBase}/lists?select=row_id,failed_component,failure_type`, { headers: restHeaders }),
-        fetch(`${restBase}/components?select=row_id,failed_component`, { headers: restHeaders }),
-        fetch(`${restBase}/vendors?select=row_id,vendor`, { headers: restHeaders }),
+        supabase.from('lists').select('row_id,failure_type'),
+        supabase.from('components').select('row_id,failed_component'),
+        supabase.from('vendors').select('row_id,vendor'),
         fetch(`${baseUrl}/customers`, { headers: edgeHeaders }),
         fetch(`${baseUrl}/districts`, { headers: edgeHeaders }),
       ]);
 
       setIncident(incidentData);
-      // Guard each response so a non-array error body can't crash the page.
-      if (listsRes.ok)   { const d = await listsRes.json();   setLists(Array.isArray(d) ? d : []); }
-      if (compRes.ok)    { const d = await compRes.json();    setComponents(Array.isArray(d) ? d : []); }
-      if (vendorsRes.ok) { const d = await vendorsRes.json(); setVendors(Array.isArray(d) ? d : []); }
+
+      // Surface lookup failures instead of silently leaving the maps empty.
+      if (listsRes.error)   console.error('Failed to load lists:', listsRes.error.message);
+      if (compRes.error)    console.error('Failed to load components:', compRes.error.message);
+      if (vendorsRes.error) console.error('Failed to load vendors:', vendorsRes.error.message);
+      setLists(Array.isArray(listsRes.data) ? listsRes.data : []);
+      setComponents(Array.isArray(compRes.data) ? compRes.data : []);
+      setVendors(Array.isArray(vendorsRes.data) ? vendorsRes.data : []);
+
+      // Customers/districts still come from the guarded edge function.
       if (custRes.ok)    { const d = await custRes.json();    setCustomers(Array.isArray(d) ? d : []); }
       if (distRes.ok)    { const d = await distRes.json();    setDistricts(Array.isArray(d) ? d : []); }
 

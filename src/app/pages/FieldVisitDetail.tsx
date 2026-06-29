@@ -7,16 +7,11 @@ import { getSerial } from '../lib/serialUtils';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Combobox } from '../components/ui/combobox';
-import { Textarea } from '../components/ui/textarea';
 import {
   ArrowLeft,
   AlertTriangle,
   ExternalLink,
   Pencil,
-  Save,
   X,
   Loader2,
   CheckCircle2,
@@ -37,23 +32,10 @@ import {
 import { generateTrainingVisitReportPDF } from '../lib/generateTrainingVisitReportPDF';
 import { generateCombinedFieldVisitPDF } from '../lib/generateCombinedFieldVisitPDF';
 import { generateHardwareInspectionPDF } from '../lib/generateHardwareInspectionPDF';
-import { displayVisitDuration, toInputValue, formatVisitTimestamp } from '../lib/visitDuration';
-import PanelsSeenPicker from '../components/PanelsSeenPicker';
+import { displayVisitDuration, formatVisitTimestamp } from '../lib/visitDuration';
+import FieldVisitForm from './forms/FieldVisitForm';
 
 // ── constants ─────────────────────────────────────────────────────────────────
-const VISIT_PURPOSE_OPTS = [
-  'XFire Installation',
-  'Training',
-  'Sales',
-  'R&D',
-  'Incident',
-  'Impromptu',
-  'Follow Up/Check Up',
-  'Delivery/Pickup',
-];
-
-const FIELD_OR_FACILITY_OPTS = ['Field', 'Facility'];
-
 const COMPLETE_STATUS = 'Complete';
 const isComplete = (v: any) => (v.visit_status || '').toLowerCase() === 'complete';
 
@@ -116,19 +98,13 @@ export default function FieldVisitDetail() {
   const [linkingId, setLinkingId] = useState<string | null>(null);
 
   const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState(false);
-  const [form, setForm] = useState<any>({});
-  // Unified multi-select of panel serials seen on this visit (replaces the 3
-  // legacy single dropdowns). Backed by the panels_seen JSON array; the 3 legacy
-  // columns are derived from it on save so existing readers/PDFs keep working.
-  const [panelsSeen, setPanelsSeen] = useState<string[]>([]);
 
-  // Reference data (same sources as FieldVisitForm) for FK / enum selects.
+  // Reference data still needed by the READ-ONLY view: `customers` resolves a
+  // session's stored customer row_id to a name; `allPanels` maps panel serials
+  // to types in the Panels Seen chip list. The edit FK/enum lists now live in
+  // the shared FieldVisitForm.
   const [customers,   setCustomers]   = useState<any[]>([]);
-  const [districts,   setDistricts]   = useState<any[]>([]);
-  const [sqmReps,     setSqmReps]     = useState<string[]>([]);
-  const [epCompanies, setEpCompanies] = useState<string[]>([]);
   const [allPanels,   setAllPanels]   = useState<any[]>([]);
 
   // ── data loading ────────────────────────────────────────────────────────────
@@ -136,31 +112,17 @@ export default function FieldVisitDetail() {
     loadVisit();
   }, [id]);
 
-  // Load customers / SQM reps / operating companies / panels once authenticated
-  // (mirrors FieldVisitForm). Filter out the 'Pre-Tracking' SQM placeholder.
+  // Load the customers + panels reference lists the read-only view needs.
   useEffect(() => {
     if (!accessToken) return;
     Promise.all([
       supabase.from('customers').select('row_id,customer').order('customer'),
-      supabase.from('sqm').select('sq_manager').order('sq_manager'),
-      supabase.from('ep').select('operating_company').order('operating_company'),
       supabase.from('panels').select('serial_number,panel_type').order('serial_number'),
-    ]).then(([c, s, e, p]) => {
+    ]).then(([c, p]) => {
       setCustomers(c.data || []);
-      setSqmReps((s.data || []).map((r: any) => r.sq_manager).filter((r: string) => r && r !== 'Pre-Tracking'));
-      setEpCompanies((e.data || []).map((r: any) => r.operating_company).filter(Boolean));
       setAllPanels(p.data || []);
     });
   }, [accessToken]);
-
-  // Cascade districts off the selected customer (form.customer while editing,
-  // else the visit's stored customer). Mirrors FieldVisitForm.
-  useEffect(() => {
-    const custId = editing ? form.customer : visit?.customer;
-    if (!custId) { setDistricts([]); return; }
-    supabase.from('districts').select('row_id,customer_district').eq('customer', custId).order('customer_district')
-      .then(({ data }) => setDistricts(data || []));
-  }, [editing, form.customer, visit?.customer]);
 
   const loadVisit = async () => {
     if (!id || !accessToken) {
@@ -213,132 +175,14 @@ export default function FieldVisitDetail() {
   };
 
   // ── edit helpers ────────────────────────────────────────────────────────────
+  // Open the full-page editor. Editing now routes through the shared
+  // FieldVisitForm (variant="page") via the early return below, so the visit
+  // detail and the create/quick-add modal enforce the SAME required-field
+  // validation (plus the ported departure-date sanity checks). The old inline
+  // editor — which checked only date ordering and no required fields — is gone.
   function enterEdit() {
     if (!visit) return;
-    setForm({
-      visit_purpose: visit.visit_purpose ?? '',
-      field_or_facility: visit.field_or_facility ?? '',
-      arrival_date: visit.arrival_date ?? '',
-      departure_date: visit.departure_date ?? '',
-      visit_duration: visit.visit_duration ?? '',
-      customer: visit.customer ?? '',
-      customer_district: visit.customer_district ?? '',
-      customer_rep: visit.customer_rep ?? '',
-      xc_rep: visit.xc_rep ?? '',
-      operating_company: visit.operating_company ?? '',
-      pad_name: visit.pad_name ?? '',
-      lat_long: visit.lat_long ?? '',
-      visit_summary: visit.visit_summary ?? '',
-    });
-    // Seed the unified picker: prefer panels_seen, fall back to the 3 legacy
-    // columns for visits saved before the unified field existed.
-    const arr: string[] = Array.isArray(visit.panels_seen) ? visit.panels_seen.filter(Boolean) : [];
-    if (arr.length > 0) {
-      setPanelsSeen(Array.from(new Set(arr.map((s: any) => String(s)))));
-    } else {
-      const legacy = [visit.digital_shooting_panel, visit.communication_panel, visit.surface_tester]
-        .map((s: any) => (s == null ? '' : String(s).trim()))
-        .filter((s: string) => s !== '');
-      setPanelsSeen(Array.from(new Set(legacy)));
-    }
     setEditing(true);
-  }
-
-  // Changing the customer resets the district (it belongs to the old customer).
-  // Mirrors the cascade reset in FieldVisitForm.
-  function handleCustomerChange(v: string) {
-    setForm((prev: any) => ({ ...prev, customer: v, customer_district: '' }));
-  }
-
-  function cancelEdit() {
-    setEditing(false);
-    setForm({});
-    setPanelsSeen([]);
-  }
-
-  function setField(name: string, value: string) {
-    setForm((prev: any) => ({ ...prev, [name]: value }));
-  }
-
-  // Validate edit-mode inputs before saving. Returns an error string or null.
-  function validateVisit(f: any): string | null {
-    // Visit duration is auto-computed from arrival/departure, not user-entered,
-    // so it is not validated here.
-    // Departure can't be in the future.
-    if (f.departure_date) {
-      const dep = new Date(f.departure_date);
-      if (!Number.isNaN(dep.getTime()) && dep.getTime() > Date.now()) {
-        return 'Departure date cannot be in the future.';
-      }
-    }
-    // Departure shouldn't precede arrival, when both are set.
-    if (f.arrival_date && f.departure_date) {
-      const arr = new Date(f.arrival_date);
-      const dep = new Date(f.departure_date);
-      if (!Number.isNaN(arr.getTime()) && !Number.isNaN(dep.getTime()) && dep < arr) {
-        return 'Departure date cannot be before the arrival date.';
-      }
-    }
-    return null;
-  }
-
-  async function handleSave() {
-    if (!id || !accessToken) return;
-    const validationError = validateVisit(form);
-    if (validationError) {
-      toast.error(validationError);
-      return;
-    }
-    setSaving(true);
-    try {
-      // Unified panels-seen list; derive the 3 legacy single-value columns (first
-      // selected of each type) so older reads / PDFs still work. Sending
-      // panels_seen also triggers the server's stampPanelsSeen (verified='Y' +
-      // last-seen) on each listed panel.
-      const seenList = Array.from(new Set(panelsSeen.map(s => String(s).trim()).filter(Boolean)));
-      const typeOf = (serial: string) => {
-        const p = allPanels.find(pp => getSerial(pp) === serial);
-        return p?.panel_type || '';
-      };
-      const firstOfType = (type: string) => seenList.find(s => typeOf(s) === type) || null;
-      const payload = {
-        // field_visit_id lets the server stamp last_seen_visit_id correctly.
-        field_visit_id: visit?.field_visit_id,
-        visit_purpose: form.visit_purpose || null,
-        field_or_facility: form.field_or_facility || null,
-        // Persist the datetime-local strings verbatim (naive wall-clock), matching
-        // the Edit modal. No UTC conversion — that would shift the stored time.
-        arrival_date: form.arrival_date || null,
-        departure_date: form.departure_date || null,
-        // visit_duration is derived from arrival/departure and is not persisted
-        // from the form (it would otherwise drift out of sync with the dates).
-        customer: form.customer || null,
-        customer_district: form.customer_district || null,
-        customer_rep: form.customer_rep || null,
-        xc_rep: form.xc_rep || null,
-        operating_company: form.operating_company || null,
-        pad_name: form.pad_name || null,
-        lat_long: form.lat_long || null,
-        panels_seen: seenList,
-        communication_panel: firstOfType('Communication Panel'),
-        digital_shooting_panel: firstOfType('Digital Shooting Panel'),
-        surface_tester: firstOfType('Surface Tester'),
-        visit_summary: form.visit_summary || null,
-        // Always stamp the saving user + today's date on edit (form parity).
-        updated_by: user?.name || user?.email || null,
-        date_updated: new Date().toLocaleDateString(),
-      };
-      await fieldVisitApi.update(id, payload, accessToken);
-      toast.success('Field visit updated successfully');
-      setEditing(false);
-      setForm({});
-      setPanelsSeen([]);
-      await loadVisit();
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to save field visit');
-    } finally {
-      setSaving(false);
-    }
   }
 
   // ── Mark Visit Complete ──────────────────────────────────────────────────────
@@ -578,6 +422,24 @@ export default function FieldVisitDetail() {
     return formatVisitTimestamp(val);
   }
 
+  // ── Edit mode: render the SHARED FieldVisitForm full-page ────────────────────
+  // Placed AFTER all hooks (Rules of Hooks). Editing reuses the exact same form
+  // — and therefore the exact same required-field validation plus the ported
+  // departure-date checks — as the create / quick-add modal, eliminating the
+  // divergence where the old inline editor saved records the modal would reject.
+  if (editing) {
+    return (
+      <FieldVisitForm
+        open
+        variant="page"
+        onClose={() => setEditing(false)}
+        onSaved={() => { setEditing(false); loadVisit(); }}
+        visit={visit}
+        currentUser={user}
+      />
+    );
+  }
+
   // ── render ──────────────────────────────────────────────────────────────────
   return (
     <div className="p-6 md:p-8">
@@ -620,119 +482,91 @@ export default function FieldVisitDetail() {
                   Complete
                 </Badge>
               )}
-              {!editing ? (
-                <>
-                  {/* Combined export: visit details + training + hardware + photos. */}
-                  <Button
-                    variant="outline"
-                    onClick={handleDownloadCombinedPDF}
-                    disabled={combinedPdfLoading}
-                    className="gap-1.5"
-                  >
-                    {combinedPdfLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <FileDown className="w-4 h-4" />
-                    )}
-                    {combinedPdfLoading ? 'Generating…' : 'Download PDF'}
-                  </Button>
+              {/* Combined export: visit details + training + hardware + photos. */}
+              <Button
+                variant="outline"
+                onClick={handleDownloadCombinedPDF}
+                disabled={combinedPdfLoading}
+                className="gap-1.5"
+              >
+                {combinedPdfLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FileDown className="w-4 h-4" />
+                )}
+                {combinedPdfLoading ? 'Generating…' : 'Download PDF'}
+              </Button>
 
-                  {/* Start / continue the hardware inspection (mirrors the
-                      Hardware Inspection card action, also surfaced here in the
-                      header next to the other header actions). */}
-                  <Button
-                    variant="outline"
-                    onClick={() => navigate(`/field-visits/${visit.field_visit_id}/hardware-inspection`)}
-                    className="gap-1.5"
-                  >
-                    <Wrench className="w-4 h-4" />
-                    {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0
-                      ? 'View Hardware Inspection'
-                      : 'Start Hardware Inspection'}
-                  </Button>
+              {/* Start / continue the hardware inspection (mirrors the
+                  Hardware Inspection card action, also surfaced here in the
+                  header next to the other header actions). */}
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/field-visits/${visit.field_visit_id}/hardware-inspection`)}
+                className="gap-1.5"
+              >
+                <Wrench className="w-4 h-4" />
+                {hwInspection?.row_id && (hwInspection.items?.length || 0) > 0
+                  ? 'View Hardware Inspection'
+                  : 'Start Hardware Inspection'}
+              </Button>
 
-                  {/* Primary action: log an incident pre-linked to this visit. */}
-                  <Button
-                    variant="outline"
-                    onClick={handleLogIncident}
-                    className="gap-1.5"
-                  >
-                    <FilePlus className="w-4 h-4" />
-                    Log Incident
-                  </Button>
+              {/* Primary action: log an incident pre-linked to this visit. */}
+              <Button
+                variant="outline"
+                onClick={handleLogIncident}
+                className="gap-1.5"
+              >
+                <FilePlus className="w-4 h-4" />
+                Log Incident
+              </Button>
 
-                  {/* Attach a training checklist (shown for Training-purpose visits). */}
-                  {visit.visit_purpose === 'Training' && (
-                    <Button
-                      variant="outline"
-                      onClick={handleAttachTraining}
-                      className="gap-1.5"
-                    >
-                      <GraduationCap className="w-4 h-4" />
-                      Attach Training Checklist
-                    </Button>
-                  )}
-
-                  {/* Primary action: mark complete / reopen. */}
-                  {isComplete(visit) ? (
-                    <Button
-                      variant="outline"
-                      onClick={handleReopen}
-                      disabled={completing}
-                      className="gap-1.5 text-amber-700 border-amber-200 hover:bg-amber-50"
-                    >
-                      {completing ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <X className="w-4 h-4" />
-                      )}
-                      Reopen Visit
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={handleMarkComplete}
-                      disabled={completing}
-                      className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                    >
-                      {completing ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-4 h-4" />
-                      )}
-                      Mark Complete
-                    </Button>
-                  )}
-
-                  <Button size="sm" variant="ghost" onClick={enterEdit}>
-                    <Pencil className="w-3.5 h-3.5 mr-1.5" />
-                    Edit
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="sm"
-                    onClick={handleSave}
-                    disabled={saving}
-                  >
-                    {saving ? (
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <Save className="w-3.5 h-3.5 mr-1.5" />
-                    )}
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={cancelEdit}
-                    disabled={saving}
-                  >
-                    <X className="w-3.5 h-3.5 mr-1.5" />
-                    Cancel
-                  </Button>
-                </>
+              {/* Attach a training checklist (shown for Training-purpose visits). */}
+              {visit.visit_purpose === 'Training' && (
+                <Button
+                  variant="outline"
+                  onClick={handleAttachTraining}
+                  className="gap-1.5"
+                >
+                  <GraduationCap className="w-4 h-4" />
+                  Attach Training Checklist
+                </Button>
               )}
+
+              {/* Primary action: mark complete / reopen. */}
+              {isComplete(visit) ? (
+                <Button
+                  variant="outline"
+                  onClick={handleReopen}
+                  disabled={completing}
+                  className="gap-1.5 text-amber-700 border-amber-200 hover:bg-amber-50"
+                >
+                  {completing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <X className="w-4 h-4" />
+                  )}
+                  Reopen Visit
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleMarkComplete}
+                  disabled={completing}
+                  className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  {completing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  Mark Complete
+                </Button>
+              )}
+
+              <Button size="sm" variant="ghost" onClick={enterEdit}>
+                <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                Edit
+              </Button>
             </div>
           </div>
         </div>
@@ -752,116 +586,45 @@ export default function FieldVisitDetail() {
                 <Field
                   label="Visit Purpose"
                   value={visit.visit_purpose}
-                  editing={editing}
-                >
-                  <select
-                    value={form.visit_purpose}
-                    onChange={(e) => setField('visit_purpose', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">Select purpose…</option>
-                    {VISIT_PURPOSE_OPTS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                  editing={false}
+                />
 
                 <Field
                   label="Field or Facility"
                   value={visit.field_or_facility}
-                  editing={editing}
-                >
-                  <select
-                    value={form.field_or_facility}
-                    onChange={(e) =>
-                      setField('field_or_facility', e.target.value)
-                    }
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">Select…</option>
-                    {FIELD_OR_FACILITY_OPTS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                  editing={false}
+                />
 
                 <Field
                   label="Arrival Date"
                   value={fmtDate(visit.arrival_date)}
-                  editing={editing}
-                >
-                  <Input
-                    type="datetime-local"
-                    value={toInputValue(form.arrival_date)}
-                    onChange={(e) => setField('arrival_date', e.target.value)}
-                    className="text-sm"
-                  />
-                </Field>
+                  editing={false}
+                />
 
                 <Field
                   label="Departure Date"
                   value={fmtDate(visit.departure_date)}
-                  editing={editing}
-                >
-                  <Input
-                    type="datetime-local"
-                    value={toInputValue(form.departure_date)}
-                    onChange={(e) => setField('departure_date', e.target.value)}
-                    className="text-sm"
-                  />
-                </Field>
-
-                {/* Visit Duration is auto-computed from arrival → departure and
-                    is read-only. In edit mode it updates live from the form's
-                    date fields; otherwise it reflects the saved visit. */}
-                <Field
-                  label="Visit Duration"
-                  value={
-                    editing
-                      ? displayVisitDuration({
-                          arrival_date: form.arrival_date,
-                          departure_date: form.departure_date,
-                          visit_duration: visit.visit_duration,
-                        })
-                      : displayVisitDuration(visit)
-                  }
-                  editing={editing}
-                  readOnlyHint="Auto-calculated from arrival → departure"
+                  editing={false}
                 />
 
-                {/* XC Rep — constrained SQM dropdown (FieldVisitForm parity). */}
+                {/* Visit Duration is auto-computed from arrival → departure. */}
+                <Field
+                  label="Visit Duration"
+                  value={displayVisitDuration(visit)}
+                  editing={false}
+                />
+
                 <Field
                   label="XC Representative"
                   value={visit.xc_rep}
-                  editing={editing}
-                >
-                  <select
-                    value={form.xc_rep ?? ''}
-                    onChange={(e) => setField('xc_rep', e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">— Select —</option>
-                    {sqmReps.map((r) => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                </Field>
+                  editing={false}
+                />
 
                 <Field
                   label="Customer Representative"
                   value={visit.customer_rep}
-                  editing={editing}
-                >
-                  <Input
-                    value={form.customer_rep}
-                    onChange={(e) => setField('customer_rep', e.target.value)}
-                    className="text-sm"
-                  />
-                </Field>
+                  editing={false}
+                />
               </CardContent>
             </Card>
 
@@ -871,84 +634,35 @@ export default function FieldVisitDetail() {
                 <CardTitle className="text-base">Location &amp; Operator</CardTitle>
               </CardHeader>
               <CardContent className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-                {/* Customer — editable FK select with district cascade (form parity). */}
                 <Field
                   label="Customer"
                   value={visit.customerName}
-                  editing={editing}
-                >
-                  <select
-                    value={form.customer ?? ''}
-                    onChange={(e) => handleCustomerChange(e.target.value)}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">— Select customer —</option>
-                    {customers.map((c) => (
-                      <option key={c.row_id} value={c.row_id}>{c.customer}</option>
-                    ))}
-                  </select>
-                </Field>
+                  editing={false}
+                />
 
-                {/* District — FK select cascading off the selected customer. */}
                 <Field
                   label="District"
                   value={visit.districtName}
-                  editing={editing}
-                >
-                  <select
-                    value={form.customer_district ?? ''}
-                    onChange={(e) => setField('customer_district', e.target.value)}
-                    disabled={!form.customer}
-                    className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                  >
-                    <option value="">— Select district —</option>
-                    {districts.map((d) => (
-                      <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>
-                    ))}
-                  </select>
-                </Field>
+                  editing={false}
+                />
 
-                {/* Operating Company — constrained ep dropdown (form parity). */}
                 <Field
                   label="Operating Company"
                   value={visit.operating_company}
-                  editing={editing}
-                >
-                  <Combobox
-                    value={form.operating_company ?? ''}
-                    onValueChange={(v) => setField('operating_company', v)}
-                    options={epCompanies.map((o) => ({ value: o, label: o }))}
-                    placeholder="— Select —"
-                    searchPlaceholder="Search operating companies…"
-                    emptyText="No operating companies found."
-                    allowClear
-                  />
-                </Field>
+                  editing={false}
+                />
 
                 <Field
                   label="Pad Name"
                   value={visit.pad_name}
-                  editing={editing}
-                >
-                  <Input
-                    value={form.pad_name}
-                    onChange={(e) => setField('pad_name', e.target.value)}
-                    className="text-sm"
-                  />
-                </Field>
+                  editing={false}
+                />
 
                 <Field
                   label="Coordinates (Lat/Long)"
                   value={visit.lat_long}
-                  editing={editing}
-                >
-                  <Input
-                    value={form.lat_long}
-                    onChange={(e) => setField('lat_long', e.target.value)}
-                    placeholder="e.g. 40.7128, -74.0060"
-                    className="text-sm"
-                  />
-                </Field>
+                  editing={false}
+                />
               </CardContent>
             </Card>
 
@@ -958,39 +672,35 @@ export default function FieldVisitDetail() {
                 <CardTitle className="text-base">Panels Seen</CardTitle>
               </CardHeader>
               <CardContent>
-                {editing ? (
-                  <PanelsSeenPicker panels={allPanels} value={panelsSeen} onChange={setPanelsSeen} />
-                ) : (
-                  (() => {
-                    const seen: string[] = Array.isArray(visit.panels_seen) && visit.panels_seen.length > 0
-                      ? visit.panels_seen.filter(Boolean).map((s: any) => String(s))
-                      : [visit.digital_shooting_panel, visit.communication_panel, visit.surface_tester]
-                          .map((s: any) => (s == null ? '' : String(s).trim()))
-                          .filter((s: string) => s !== '');
-                    const uniq = Array.from(new Set(seen));
-                    const typeBySerial = new Map<string, string>(
-                      allPanels.map((p) => [getSerial(p), p.panel_type || ''])
-                    );
-                    if (uniq.length === 0) {
-                      return <p className="text-sm text-gray-500 dark:text-gray-400">— No panels recorded —</p>;
-                    }
-                    return (
-                      <div className="flex flex-wrap gap-1.5">
-                        {uniq.map((serial) => {
-                          const t = typeBySerial.get(serial);
-                          return (
-                            <span
-                              key={serial}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-blue-600 text-white"
-                            >
-                              {serial}{t ? <span className="opacity-70">· {t}</span> : null}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()
-                )}
+                {(() => {
+                  const seen: string[] = Array.isArray(visit.panels_seen) && visit.panels_seen.length > 0
+                    ? visit.panels_seen.filter(Boolean).map((s: any) => String(s))
+                    : [visit.digital_shooting_panel, visit.communication_panel, visit.surface_tester]
+                        .map((s: any) => (s == null ? '' : String(s).trim()))
+                        .filter((s: string) => s !== '');
+                  const uniq = Array.from(new Set(seen));
+                  const typeBySerial = new Map<string, string>(
+                    allPanels.map((p) => [getSerial(p), p.panel_type || ''])
+                  );
+                  if (uniq.length === 0) {
+                    return <p className="text-sm text-gray-500 dark:text-gray-400">— No panels recorded —</p>;
+                  }
+                  return (
+                    <div className="flex flex-wrap gap-1.5">
+                      {uniq.map((serial) => {
+                        const t = typeBySerial.get(serial);
+                        return (
+                          <span
+                            key={serial}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-blue-600 text-white"
+                          >
+                            {serial}{t ? <span className="opacity-70">· {t}</span> : null}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
 
@@ -1000,20 +710,11 @@ export default function FieldVisitDetail() {
                 <CardTitle className="text-base">Visit Summary</CardTitle>
               </CardHeader>
               <CardContent>
-                {editing ? (
-                  <Textarea
-                    value={form.visit_summary}
-                    onChange={(e) => setField('visit_summary', e.target.value)}
-                    rows={6}
-                    className="text-sm"
-                  />
-                ) : (
-                  <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
-                    <pre className="whitespace-pre-wrap text-sm text-gray-900 dark:text-gray-100 font-sans">
-                      {visit.visit_summary || 'No summary provided'}
-                    </pre>
-                  </div>
-                )}
+                <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
+                  <pre className="whitespace-pre-wrap text-sm text-gray-900 dark:text-gray-100 font-sans">
+                    {visit.visit_summary || 'No summary provided'}
+                  </pre>
+                </div>
               </CardContent>
             </Card>
           </div>

@@ -88,11 +88,18 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  /**
+   * Render shell. 'modal' (default) wraps the form in a Radix Dialog. 'page'
+   * renders the exact same header/form/footer inline so a parent route (e.g.
+   * PanelDetail) can show editing as a full page. The form body, validation,
+   * and payload logic are identical in both variants.
+   */
+  variant?: 'modal' | 'page';
   panel?: any;
   currentUser?: any;
 }
 
-export default function PanelForm({ open, onClose, onSaved, panel, currentUser }: Props) {
+export default function PanelForm({ open, onClose, onSaved, variant = 'modal', panel, currentUser }: Props) {
   const editing = !!panel;
 
   const [customers,   setCustomers]   = useState<any[]>([]);
@@ -196,8 +203,12 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
       surfacefw:        showSurfaceFw(type) ? (fd.get('surfacefw') || null) : null,
       tracking_info:    fd.get('tracking_info')    || null,
       rma:              fd.get('rma')              || null,
-      is_spare:         clearAssign ? null : (assignVals.is_spare || null),
-      verified:         fd.get('verified')         || 'N',
+      // At Facility unifies the detail-page behavior into the form: a panel
+      // back in-house is marked verified and explicitly not-a-spare. Otherwise
+      // is_spare is cleared (At Facility had no assignment) and verified keeps
+      // its submitted value (default 'N').
+      is_spare:         clearAssign ? 'No' : (assignVals.is_spare || null),
+      verified:         clearAssign ? 'Y' : (fd.get('verified') || 'N'),
       activity:         clearAssign ? null : (assignVals.activity || null),
       comments:         fd.get('comments')         || null,
       // Ship date: stamp today when marking Shipped (unless one was supplied).
@@ -230,14 +241,13 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
     }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{editing ? `Edit Panel ${panel?.serial_number}` : 'Add New XFire Panel'}</DialogTitle>
-        </DialogHeader>
+  const titleText = editing ? `Edit Panel ${panel?.serial_number}` : 'Add New XFire Panel';
 
-        <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-x-6 gap-y-4 mt-2">
+  // The form body is identical in both the modal and full-page shells; only the
+  // surrounding chrome differs. The submit button lives inside the <form>, so it
+  // works in either shell.
+  const formBody = (
+        <form id="panel-form" onSubmit={handleSubmit} className="grid grid-cols-2 gap-x-6 gap-y-4 mt-2">
 
           {/* ── Identity ── */}
           <Section title="Panel Identity" />
@@ -465,6 +475,30 @@ export default function PanelForm({ open, onClose, onSaved, panel, currentUser }
           </div>
 
         </form>
+  );
+
+  // ── Full-page shell (variant='page') ──
+  // Renders the same header/body inline, sized to fill the routed page, so panel
+  // editing looks like a full page instead of a modal. No Radix Dialog overlay.
+  if (variant === 'page') {
+    return (
+      <div className="flex flex-col h-[calc(100vh-4rem)] overflow-y-auto bg-white dark:bg-gray-900">
+        <div className="px-4 md:px-6 pt-5 pb-3 border-b shrink-0">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{titleText}</h1>
+        </div>
+        <div className="px-4 md:px-6 py-4">{formBody}</div>
+      </div>
+    );
+  }
+
+  // ── Modal shell (default) ──
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{titleText}</DialogTitle>
+        </DialogHeader>
+        {formBody}
       </DialogContent>
     </Dialog>
   );

@@ -16,6 +16,7 @@ import ImageUpload from '../components/ImageUpload';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { XC_PANEL_BASES } from '../lib/xcLocations';
 import { generateRepairFailureReportPDF } from '../lib/generateRepairFailureReportPDF';
+import PanelForm from './forms/PanelForm';
 
 // ── Option arrays ──────────────────────────────────────────────────────────────
 const PANEL_TYPE_OPTS = [
@@ -172,7 +173,6 @@ export default function PanelDetail() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setFormState] = useState<any>({});
 
   // Mark-Returned hero action state (optional overrides before confirming).
   const [returning, setReturning] = useState(false);
@@ -190,11 +190,6 @@ export default function PanelDetail() {
   const [failureDateInput, setFailureDateInput] = useState('');
   const [failureReportedByInput, setFailureReportedByInput] = useState('');
 
-  // Reference data (same sources as PanelForm) for FK selects.
-  const [customers,   setCustomers]   = useState<any[]>([]);
-  const [districts,   setDistricts]   = useState<any[]>([]);
-  const [epCompanies, setEpCompanies] = useState<string[]>([]);
-
   // Change history (field-level diffs from panel_change_log).
   const [history, setHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -205,27 +200,6 @@ export default function PanelDetail() {
   useEffect(() => {
     loadPanel();
   }, [id]);
-
-  // Load customers + operating companies once we're authenticated (mirrors PanelForm).
-  useEffect(() => {
-    if (!accessToken) return;
-    Promise.all([
-      supabase.from('customers').select('row_id,customer').order('customer'),
-      supabase.from('ep').select('operating_company').order('operating_company'),
-    ]).then(([c, e]) => {
-      setCustomers(c.data || []);
-      setEpCompanies((e.data || []).map((r: any) => r.operating_company).filter(Boolean));
-    });
-  }, [accessToken]);
-
-  // Cascade districts off the currently-selected customer (form.customer while
-  // editing, else the panel's stored customer). Mirrors PanelForm.
-  useEffect(() => {
-    const custId = editing ? form.customer : panel?.customer;
-    if (!custId) { setDistricts([]); return; }
-    supabase.from('districts').select('row_id,customer_district').eq('customer', custId).order('customer_district')
-      .then(({ data }) => setDistricts(data || []));
-  }, [editing, form.customer, panel?.customer]);
 
   const loadPanel = async () => {
     if (!id || !accessToken) {
@@ -299,132 +273,13 @@ export default function PanelDetail() {
     try { return new Date(iso).toLocaleString(); } catch { return iso; }
   };
 
-  const setField = (name: string, value: any) => {
-    setFormState((prev: any) => ({ ...prev, [name]: value }));
-  };
-
+  // Open the full-page editor. Editing now routes through the shared PanelForm
+  // (variant="page") via the early return below, so the panel detail and the
+  // create/quick-add modal enforce the SAME required-field validation. The old
+  // hand-rolled inline editor (which skipped all required-field checks) is gone.
   const handleEdit = () => {
     if (!panel) return;
-    setFormState({
-      // panel_type is LOCKED on edit (matches PanelForm) — captured for display
-      // / conditional logic only, never editable.
-      panel_type: panel.panel_type ?? '',
-      panel_status: panel.panel_status ?? '',
-      xc_base: panel.xc_base ?? '',
-      customer: panel.customer ?? '',
-      customer_district: panel.customer_district ?? '',
-      operating_company: panel.operating_company ?? '',
-      unit_number: panel.unit_number ?? '',
-      'so#': panel['so#'] ?? '',
-      plus_panel: panel.plus_panel ?? '',
-      shootingfw: panel.shootingfw ?? '',
-      wl_controlfw: panel.wl_controlfw ?? '',
-      loggingfw: panel.loggingfw ?? '',
-      surfacefw: panel.surfacefw ?? '',
-      gui_version: panel.gui_version ?? '',
-      tracking_info: panel.tracking_info ?? '',
-      rma: panel.rma ?? '',
-      is_spare: panel.is_spare ?? '',
-      verified: panel.verified ?? 'N',
-      activity: panel.activity ?? 'N',
-      comments: panel.comments ?? '',
-      // Return workflow fields (editable for back-dating / corrections).
-      returned_date: panel.returned_date ?? '',
-      return_notes: panel.return_notes ?? '',
-      return_confirmed_by: panel.return_confirmed_by ?? '',
-      // Ship workflow field (date the panel was shipped out).
-      shipped_date: panel.shipped_date ?? '',
-    });
     setEditing(true);
-  };
-
-  const handleCancel = () => {
-    setEditing(false);
-    setFormState({});
-  };
-
-  // When customer changes in edit mode, clear the district (it belongs to the
-  // old customer). Mirrors the cascade reset in PanelForm.
-  const handleCustomerChange = (v: string) => {
-    setFormState((prev: any) => ({ ...prev, customer: v, customer_district: '' }));
-  };
-
-  const handleSave = async () => {
-    if (!id || !accessToken) return;
-    setSaving(true);
-    try {
-      // panel_type is locked on edit, so use the stored value for conditional rules.
-      const type   = panel.panel_type || '';
-      // Auto-status: if a Returned Date was entered in edit mode (and there was
-      // none before), the panel has come back to a XC facility — force the
-      // status to 'At Facility' regardless of the dropdown (mirrors Mark Returned).
-      const justReturned = !!form.returned_date && !panel.returned_date;
-      const status = justReturned ? RETURNED_STATUS : (form.panel_status || '');
-      // When the panel is being marked Shipped, stamp a ship date: use the one
-      // entered, else default to today (plain wall-clock date column).
-      const shippedDate = status === 'Shipped'
-        ? (form.shipped_date || new Date().toISOString().slice(0, 10))
-        : (form.shipped_date || null);
-      const payload: Record<string, any> = {
-        // panel_type intentionally NOT sent — locked after creation (PanelForm parity).
-        panel_status: status || null,
-        xc_base: form.xc_base || null,
-        customer: form.customer || null,
-        customer_district: form.customer_district || null,
-        operating_company: form.operating_company || null,
-        unit_number: form.unit_number || null,
-        'so#': form['so#'] || null,
-        // Conditional fields: only persist when applicable, else null (PanelForm parity).
-        plus_panel: showPlusPanel(type) ? (form.plus_panel || null) : null,
-        gui_version: showGui(type, status) ? (form.gui_version || null) : null,
-        shootingfw: showShootingFw(type) ? (form.shootingfw || null) : null,
-        surfacefw: showSurfaceFw(type) ? (form.surfacefw || null) : null,
-        wl_controlfw: form.wl_controlfw || null,
-        loggingfw: form.loggingfw || null,
-        tracking_info: form.tracking_info || null,
-        rma: form.rma || null,
-        is_spare: form.is_spare || null,
-        verified: form.verified || 'N',
-        activity: form.activity || 'N',
-        comments: form.comments || null,
-        // Always stamp the saving user + today's date on edit (PanelForm parity).
-        updated_by: user?.name || user?.email || null,
-        date_updated: new Date().toLocaleDateString(),
-        // Return workflow fields.
-        returned_date: form.returned_date || null,
-        return_notes: form.return_notes || null,
-        return_confirmed_by: form.return_confirmed_by || null,
-        // Ship workflow field.
-        shipped_date: shippedDate,
-        // Manufacturer-return / failure-report fields — carried forward so a
-        // generic edit save doesn't blank them (no inputs for these here).
-        failure_description: panel.failure_description ?? null,
-        failure_date: panel.failure_date ?? null,
-        failure_reported_by: panel.failure_reported_by ?? null,
-        mfr_rma_date: panel.mfr_rma_date ?? null,
-      };
-      // At-Facility transition: clear customer/assignment fields and reset
-      // verified/is_spare, overriding whatever the form had (mirrors edge net).
-      if (status === RETURNED_STATUS) {
-        payload.customer = null;
-        payload.customer_district = null;
-        payload.operating_company = null;
-        payload.unit_number = null;
-        payload.gui_version = null;
-        payload.verified = 'Y';
-        payload.is_spare = 'No';
-      }
-      await panelApi.update(id, payload, accessToken);
-      toast.success('Panel updated successfully');
-      setEditing(false);
-      setFormState({});
-      await loadPanel();
-      await loadHistory();
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to save panel');
-    } finally {
-      setSaving(false);
-    }
   };
 
   // ── Mark Returned ──────────────────────────────────────────────────────────
@@ -781,6 +636,24 @@ export default function PanelDetail() {
     );
   }
 
+  // ── Edit mode: render the SHARED PanelForm full-page ─────────────────────────
+  // Placed AFTER all hooks (required by the Rules of Hooks). Editing the panel
+  // reuses the exact same form — and therefore the exact same required-field
+  // validation — as the create / quick-add modal, eliminating the divergence
+  // where the old inline editor saved records the modal would have rejected.
+  if (editing) {
+    return (
+      <PanelForm
+        open
+        variant="page"
+        onClose={() => setEditing(false)}
+        onSaved={() => { setEditing(false); loadPanel(); loadHistory(); }}
+        panel={panel}
+        currentUser={user}
+      />
+    );
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="p-6 md:p-8">
@@ -813,48 +686,24 @@ export default function PanelDetail() {
                 {panel.panel_status || 'Unknown'}
               </Badge>
 
-              {!editing ? (
-                <>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleMarkSeen}
-                    disabled={seenSaving}
-                    title="Set Verified = Y and stamp last-seen now"
-                  >
-                    {seenSaving ? (
-                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                    ) : (
-                      <Eye className="w-4 h-4 mr-1" />
-                    )}
-                    Mark Seen
-                  </Button>
-                  <Button size="sm" onClick={handleEdit}>
-                    <Pencil className="w-4 h-4 mr-1" />
-                    Edit
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleCancel}
-                    disabled={saving}
-                  >
-                    <X className="w-4 h-4 mr-1" />
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={handleSave} disabled={saving}>
-                    {saving ? (
-                      <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                    ) : (
-                      <Save className="w-4 h-4 mr-1" />
-                    )}
-                    Save
-                  </Button>
-                </>
-              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleMarkSeen}
+                disabled={seenSaving}
+                title="Set Verified = Y and stamp last-seen now"
+              >
+                {seenSaving ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <Eye className="w-4 h-4 mr-1" />
+                )}
+                Mark Seen
+              </Button>
+              <Button size="sm" onClick={handleEdit}>
+                <Pencil className="w-4 h-4 mr-1" />
+                Edit
+              </Button>
             </div>
           </div>
         </div>
@@ -872,126 +721,18 @@ export default function PanelDetail() {
               </CardHeader>
               <CardContent>
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-                  {/* Panel Type is LOCKED after creation (PanelForm parity) —
-                      always read-only, even in edit mode. */}
+                  {/* Panel Type is LOCKED after creation (PanelForm parity). */}
                   <Field label="Panel Type" value={panel.panel_type} />
-
-                  <Field
-                    label="Panel Status"
-                    value={panel.panel_status}
-                    editing={editing}
-                  >
-                    <Sel
-                      value={form.panel_status}
-                      onChange={(v) => setField('panel_status', v)}
-                      opts={PANEL_STATUS_OPTS}
-                      placeholder="Select status"
-                    />
-                  </Field>
-
-                  {/* Customer (FK) — editable select with district cascade. */}
-                  <Field
-                    label="Customer"
-                    value={panel.customerName}
-                    editing={editing}
-                  >
-                    <select
-                      value={form.customer ?? ''}
-                      onChange={(e) => handleCustomerChange(e.target.value)}
-                      className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                    >
-                      <option value="">— Not assigned —</option>
-                      {customers.map((c) => (
-                        <option key={c.row_id} value={c.row_id}>{c.customer}</option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  {/* District (FK) — cascades off selected customer. */}
-                  <Field
-                    label="District"
-                    value={panel.districtName}
-                    editing={editing}
-                  >
-                    <select
-                      value={form.customer_district ?? ''}
-                      onChange={(e) => setField('customer_district', e.target.value)}
-                      disabled={!form.customer}
-                      className="w-full border border-gray-300 dark:border-gray-600 rounded-md p-2 text-sm"
-                    >
-                      <option value="">— Not assigned —</option>
-                      {districts.map((d) => (
-                        <option key={d.row_id} value={d.row_id}>{d.customer_district}</option>
-                      ))}
-                    </select>
-                  </Field>
-
-                  {/* Operating Company (FK from ep table). */}
-                  <Field
-                    label="Operating Company"
-                    value={panel.operating_company}
-                    editing={editing}
-                  >
-                    <Combobox
-                      value={form.operating_company ?? ''}
-                      onValueChange={(v) => setField('operating_company', v)}
-                      options={epCompanies.map((o) => ({ value: o, label: o }))}
-                      placeholder="— Select —"
-                      searchPlaceholder="Search operating companies…"
-                      emptyText="No operating companies found."
-                      allowClear
-                    />
-                  </Field>
-
-                  <Field
-                    label="XC Base"
-                    value={panel.xc_base}
-                    editing={editing}
-                  >
-                    <Sel
-                      value={form.xc_base}
-                      onChange={(v) => setField('xc_base', v)}
-                      opts={XC_BASE_OPTS}
-                      placeholder="Select base"
-                    />
-                  </Field>
-
-                  <Field
-                    label="Unit Number"
-                    value={panel.unit_number}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.unit_number}
-                      onChange={(e) => setField('unit_number', e.target.value)}
-                    />
-                  </Field>
-
-                  <Field
-                    label="SO #"
-                    value={panel['so#']}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form['so#']}
-                      onChange={(e) => setField('so#', e.target.value)}
-                    />
-                  </Field>
-
+                  <Field label="Panel Status" value={panel.panel_status} />
+                  <Field label="Customer" value={panel.customerName} />
+                  <Field label="District" value={panel.districtName} />
+                  <Field label="Operating Company" value={panel.operating_company} />
+                  <Field label="XC Base" value={panel.xc_base} />
+                  <Field label="Unit Number" value={panel.unit_number} />
+                  <Field label="SO #" value={panel['so#']} />
                   {/* Plus Panel — only applies to P2500 (PanelForm parity). */}
                   {showPlusPanel(panel.panel_type) && (
-                    <Field
-                      label="Plus Panel"
-                      value={panel.plus_panel}
-                      editing={editing}
-                    >
-                      <Sel
-                        value={form.plus_panel}
-                        onChange={(v) => setField('plus_panel', v)}
-                        opts={YES_NO_OPTS}
-                        placeholder="Select"
-                      />
-                    </Field>
+                    <Field label="Plus Panel" value={panel.plus_panel} />
                   )}
                 </div>
               </CardContent>
@@ -1006,67 +747,17 @@ export default function PanelDetail() {
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
                   {/* Shooting FW — only for Digital Shooting Panel (PanelForm parity). */}
                   {showShootingFw(panel.panel_type) && (
-                    <Field
-                      label="Shooting FW"
-                      value={panel.shootingfw}
-                      editing={editing}
-                    >
-                      <Input
-                        value={form.shootingfw}
-                        onChange={(e) => setField('shootingfw', e.target.value)}
-                      />
-                    </Field>
+                    <Field label="Shooting FW" value={panel.shootingfw} />
                   )}
-
-                  <Field
-                    label="WL Control FW"
-                    value={panel.wl_controlfw}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.wl_controlfw}
-                      onChange={(e) => setField('wl_controlfw', e.target.value)}
-                    />
-                  </Field>
-
-                  <Field
-                    label="Logging FW"
-                    value={panel.loggingfw}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.loggingfw}
-                      onChange={(e) => setField('loggingfw', e.target.value)}
-                    />
-                  </Field>
-
+                  <Field label="WL Control FW" value={panel.wl_controlfw} />
+                  <Field label="Logging FW" value={panel.loggingfw} />
                   {/* Surface FW — only for Surface Tester (PanelForm parity). */}
                   {showSurfaceFw(panel.panel_type) && (
-                    <Field
-                      label="Surface FW"
-                      value={panel.surfacefw}
-                      editing={editing}
-                    >
-                      <Input
-                        value={form.surfacefw}
-                        onChange={(e) => setField('surfacefw', e.target.value)}
-                      />
-                    </Field>
+                    <Field label="Surface FW" value={panel.surfacefw} />
                   )}
-
-                  {/* GUI Version — only for GUI panel types in Leased/Loaned status
-                      (PanelForm parity). While editing, use the in-progress status. */}
-                  {showGui(panel.panel_type, editing ? form.panel_status : panel.panel_status) && (
-                    <Field
-                      label="GUI Version"
-                      value={panel.gui_version}
-                      editing={editing}
-                    >
-                      <Input
-                        value={form.gui_version}
-                        onChange={(e) => setField('gui_version', e.target.value)}
-                      />
-                    </Field>
+                  {/* GUI Version — only for GUI panel types in Leased/Loaned status. */}
+                  {showGui(panel.panel_type, panel.panel_status) && (
+                    <Field label="GUI Version" value={panel.gui_version} />
                   )}
                 </div>
               </CardContent>
@@ -1079,69 +770,15 @@ export default function PanelDetail() {
               </CardHeader>
               <CardContent>
                 <div className="grid sm:grid-cols-2 gap-x-6 gap-y-4">
-                  <Field
-                    label="RMA"
-                    value={panel.rma}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.rma}
-                      onChange={(e) => setField('rma', e.target.value)}
-                    />
-                  </Field>
-
-                  <Field
-                    label="Is Spare?"
-                    value={panel.is_spare}
-                    editing={editing}
-                  >
-                    <Sel
-                      value={form.is_spare}
-                      onChange={(v) => setField('is_spare', v)}
-                      opts={['Yes', 'No']}
-                      placeholder="Select"
-                    />
-                  </Field>
-
-                  <Field
-                    label="Verified"
-                    value={panel.verified}
-                    editing={editing}
-                  >
-                    <Sel
-                      value={form.verified}
-                      onChange={(v) => setField('verified', v)}
-                      opts={['Y', 'N']}
-                      placeholder="Select"
-                    />
-                  </Field>
-
+                  <Field label="RMA" value={panel.rma} />
+                  <Field label="Is Spare?" value={panel.is_spare} />
+                  <Field label="Verified" value={panel.verified} />
                   <Field
                     label="Last Seen"
                     value={panel.last_seen_date ? new Date(panel.last_seen_date).toLocaleDateString() : ''}
                   />
-
-                  <Field
-                    label="Last Seen By"
-                    value={panel.last_seen_by}
-                  />
-
-                  <Field
-                    label="Activity"
-                    value={panel.activity}
-                    editing={editing}
-                  >
-                    <Sel
-                      value={form.activity}
-                      onChange={(v) => setField('activity', v)}
-                      opts={['Y', 'N']}
-                      placeholder="Select"
-                    />
-                  </Field>
-
-                  {/* Return fields — editable for back-dating / corrections.
-                      Setting a Returned Date here auto-flips status to
-                      'At Facility' on save (see handleSave justReturned). */}
+                  <Field label="Last Seen By" value={panel.last_seen_by} />
+                  <Field label="Activity" value={panel.activity} />
                   <Field
                     label="Returned Date"
                     value={
@@ -1149,42 +786,11 @@ export default function PanelDetail() {
                         ? new Date(panel.returned_date).toLocaleDateString()
                         : '—'
                     }
-                    editing={editing}
-                  >
-                    <Input
-                      type="date"
-                      value={form.returned_date}
-                      onChange={(e) => setField('returned_date', e.target.value)}
-                    />
-                  </Field>
-
-                  <Field
-                    label="Return Confirmed By"
-                    value={panel.return_confirmed_by}
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.return_confirmed_by}
-                      onChange={(e) => setField('return_confirmed_by', e.target.value)}
-                    />
-                  </Field>
-
-                  <Field
-                    label="Return Notes"
-                    value={panel.return_notes}
-                    editing={editing}
-                  >
-                    <Textarea
-                      rows={2}
-                      value={form.return_notes}
-                      onChange={(e) => setField('return_notes', e.target.value)}
-                    />
-                  </Field>
-
-                  {/* Ship Date — shown when the panel is (being) marked Shipped.
-                      Destination is captured via the Customer / District /
-                      Operating Company fields above. */}
-                  {(editing ? form.panel_status === 'Shipped' : panel.panel_status === 'Shipped') && (
+                  />
+                  <Field label="Return Confirmed By" value={panel.return_confirmed_by} />
+                  <Field label="Return Notes" value={panel.return_notes} />
+                  {/* Ship Date — shown when the panel is Shipped. */}
+                  {panel.panel_status === 'Shipped' && (
                     <Field
                       label="Ship Date"
                       value={
@@ -1192,18 +798,10 @@ export default function PanelDetail() {
                           ? new Date(panel.shipped_date).toLocaleDateString()
                           : '—'
                       }
-                      editing={editing}
-                    >
-                      <Input
-                        type="date"
-                        value={form.shipped_date}
-                        onChange={(e) => setField('shipped_date', e.target.value)}
-                      />
-                    </Field>
+                    />
                   )}
-
-                  {/* Tracking — shown read-only as a clickable carrier link.
-                      Editable via the Return-to-Manufacturer flow / form below. */}
+                  {/* Tracking — read-only clickable carrier link. Editable via the
+                      Return-to-Manufacturer flow / form below. */}
                   <Field
                     label="Tracking"
                     value={
@@ -1211,13 +809,7 @@ export default function PanelDetail() {
                         ? <TrackingLink value={panel.tracking_info} />
                         : '—'
                     }
-                    editing={editing}
-                  >
-                    <Input
-                      value={form.tracking_info}
-                      onChange={(e) => setField('tracking_info', e.target.value)}
-                    />
-                  </Field>
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -1228,20 +820,11 @@ export default function PanelDetail() {
                 <CardTitle>Comments</CardTitle>
               </CardHeader>
               <CardContent>
-                {editing ? (
-                  <Textarea
-                    value={form.comments}
-                    onChange={(e) => setField('comments', e.target.value)}
-                    rows={4}
-                    className="w-full"
-                  />
-                ) : (
-                  <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg min-h-[60px]">
-                    <pre className="whitespace-pre-wrap text-sm text-gray-900 dark:text-gray-100 font-sans">
-                      {panel.comments || '—'}
-                    </pre>
-                  </div>
-                )}
+                <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg min-h-[60px]">
+                  <pre className="whitespace-pre-wrap text-sm text-gray-900 dark:text-gray-100 font-sans">
+                    {panel.comments || '—'}
+                  </pre>
+                </div>
               </CardContent>
             </Card>
 

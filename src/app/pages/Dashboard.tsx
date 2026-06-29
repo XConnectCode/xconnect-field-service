@@ -50,6 +50,22 @@ function parseHHMMSS(str: string | null | undefined): number {
   return 0;
 }
 
+// Hours for a single field visit. Prefer the stored visit_duration text
+// ("HH:MM:SS"); when it is null/empty/unparseable, fall back to the gap
+// between departure_date and arrival_date. Contribute 0 if neither works.
+function visitHours(r: { visit_duration?: string | null; arrival_date?: string | null; departure_date?: string | null }): number {
+  const parsed = parseHHMMSS(r.visit_duration);
+  if (parsed > 0) return parsed;
+  if (r.arrival_date && r.departure_date) {
+    const arrival = new Date(r.arrival_date).getTime();
+    const departure = new Date(r.departure_date).getTime();
+    if (!isNaN(arrival) && !isNaN(departure) && departure > arrival) {
+      return (departure - arrival) / 3_600_000;
+    }
+  }
+  return 0;
+}
+
 function fmt(n: number | null | undefined): string | number {
   if (n === null || n === undefined) return "—";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -98,6 +114,20 @@ function panelAttentionReasons(p: any): string[] {
   return reasons;
 }
 
+// Format a Date as a naive local wall-clock stamp (YYYY-MM-DDTHH:mm:ss.SSS, no
+// "Z"). The fieldvisits.arrival_date / sales_volume.date / incidents.date_incident
+// columns are stored as naive wall-clock (America/Denver) per the app-wide rule,
+// so the window boundaries must be compared in the same wall-clock terms.
+// Using toISOString() here converted local midnight to UTC (e.g. 00:00 MDT →
+// 06:00Z), shifting every boundary forward ~6–7h. On the narrow, fully-past
+// "Last Week" window that skew pushed the range off the data and Field Visit
+// Hours summed to 0; wider ranges hid the same skew.
+function toLocalStamp(d: Date): string {
+  const p = (n: number, len = 2) => String(n).padStart(len, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
 function getDateRange(filter: string): { start: string | null; end: string | null } {
   if (filter === "all_time") return { start: null, end: null };
   const now = new Date();
@@ -111,7 +141,7 @@ function getDateRange(filter: string): { start: string | null; end: string | nul
     case "this_quarter":start = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1); break;
     case "this_year":   start = new Date(now.getFullYear(), 0, 1); break;
   }
-  return { start: start.toISOString(), end: end.toISOString() };
+  return { start: toLocalStamp(start), end: toLocalStamp(end) };
 }
 
 // ── Time filter labels (human-readable, for banners/headings) ────────────────
@@ -1116,8 +1146,8 @@ export default function Dashboard() {
 
         // Metrics
         const { count: visits } = await applyDates(supabase.from("fieldvisits").select("*", { count: "exact", head: true }), "arrival_date");
-        const visitsRaw = await fetchAllPages(applyDates(supabase.from("fieldvisits").select("visit_duration").not("visit_duration", "is", null), "arrival_date"));
-        const hours = visitsRaw.reduce((s, r) => s + parseHHMMSS(r.visit_duration), 0);
+        const visitsRaw = await fetchAllPages(applyDates(supabase.from("fieldvisits").select("visit_duration,arrival_date,departure_date"), "arrival_date"));
+        const hours = visitsRaw.reduce((s, r) => s + visitHours(r), 0);
 
         // Unified sales_volume view replaces the two separate barrels_sold /
         // stages fetches. One round-trip, split by metric_type in the browser.
