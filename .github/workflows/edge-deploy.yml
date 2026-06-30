@@ -1,0 +1,89 @@
+name: Deploy Edge Function (manual)
+
+# Manually deploy the make-server-64775d98 Supabase Edge Function to either
+# the Production or Staging/Testing project. Triggered on demand via the
+# Actions tab (or API). Edge function deploys are NOT part of push CI, so this
+# is the supported way to ship server-side changes without a local Supabase CLI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        default: production
+        options:
+          - production
+          - staging
+
+jobs:
+  deploy-edge:
+    name: Deploy edge function (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Resolve target project ref
+        id: target
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            echo "ref=gbllxumuogsncoiaksum" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=qbexqpvzmssmifimlfos" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync server/ -> make-server-64775d98/
+        run: pnpm edge:sync
+
+      - name: Deploy make-server-64775d98
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          supabase functions deploy make-server-64775d98 \
+            --project-ref ${{ steps.target.outputs.ref }}
+
+      - name: Smoke check /health
+        env:
+          PROD_ANON: ${{ secrets.PROD_VITE_SUPABASE_ANON_KEY }}
+          STAGING_ANON: ${{ secrets.STAGING_VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          REF="${{ steps.target.outputs.ref }}"
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            ANON="$PROD_ANON"
+          else
+            ANON="$STAGING_ANON"
+          fi
+          URL="https://${REF}.functions.supabase.co/make-server-64775d98/health"
+          if [ -z "${ANON:-}" ]; then
+            echo "::warning::ANON key secret not set — skipping smoke check"
+            exit 0
+          fi
+          echo "GET $URL"
+          status=$(curl -sS -o /tmp/health.json -w '%{http_code}' \
+            -H "Authorization: Bearer $ANON" \
+            -H "apikey: $ANON" \
+            "$URL")
+          echo "HTTP $status"; cat /tmp/health.json || true; echo
+          if [ "$status" != "200" ]; then
+            echo "::error::/health returned $status"; exit 1
+          fi
