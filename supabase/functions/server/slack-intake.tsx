@@ -408,7 +408,32 @@ slackIntakeRoutes.post('/slack/interactions', async (c) => {
       });
     }
 
-    const reporter = payload.user?.name ?? payload.user?.username ?? null;
+    // Display-name fallback (used if email resolution fails at any step).
+    const displayName = payload.user?.name ?? payload.user?.username ?? null;
+    let reporter: string | null = displayName;
+
+    // Resolve the XC Rep by email. Requires the Slack `users:read.email` bot scope.
+    // Prefer the reactor (from private_metadata) over the submitting user.
+    try {
+      const reactorUserId = meta.reactor ?? payload.user?.id;
+      if (reactorUserId) {
+        const info = await slackApi('users.info', { user: reactorUserId });
+        const email = info?.user?.profile?.email;
+        if (email) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('full_name, email')
+            .ilike('email', email)
+            .maybeSingle();
+          if (prof && (prof as any).full_name) {
+            reporter = (prof as any).full_name;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('slack-intake: XC Rep email resolution failed, falling back to display name', err);
+      reporter = displayName;
+    }
 
     const baseRow: Record<string, unknown> = {
       incident_status: 'New',
