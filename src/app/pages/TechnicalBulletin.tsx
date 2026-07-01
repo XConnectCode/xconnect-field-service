@@ -275,10 +275,10 @@ export default function TechnicalBulletin() {
       setRoleTypes(data.role_types || []);
       setProblemImages(data.problem_images || []);
       setFixImages(data.fix_images || []);
-      // customer file link is stored in localStorage keyed by bulletin id
+      // customer file link now persists in DB; fall back to localStorage for pre-existing entries
       const fileEntry = getBulletinFileStore()[data.id] || {};
-      setCustomerFileUrl(fileEntry.url || '');
-      setCustomerFileLabel(fileEntry.label || '');
+      setCustomerFileUrl(data.customer_file_url || fileEntry.url || '');
+      setCustomerFileLabel(data.customer_file_label || fileEntry.label || '');
       // Pull any previously-generated PDFs so the user can grab them directly.
       loadStoredReports(data.id);
     }
@@ -650,6 +650,8 @@ export default function TechnicalBulletin() {
       role_types: roleTypes,
       problem_images: problemImages,
       fix_images: fixImages,
+      customer_file_url: customerFileUrl.trim() || null,
+      customer_file_label: customerFileLabel.trim() || null,
       updated_at: new Date().toISOString(),
     };
 
